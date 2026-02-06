@@ -829,11 +829,14 @@ name = "nzbg-feed"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "chrono",
  "nzbg-core",
+ "quick-xml",
  "regex",
  "serde",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]

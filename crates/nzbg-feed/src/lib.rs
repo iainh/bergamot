@@ -1,3 +1,7 @@
+pub mod coordinator;
+pub mod fetch;
+pub mod rss;
+
 use std::collections::HashMap;
 
 use chrono::{DateTime, Utc};
