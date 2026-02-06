@@ -122,10 +122,10 @@ impl<E: Par2Engine, U: Unpacker> PostProcessor<E, U> {
     }
 
     async fn par_verify(&self, ctx: &PostProcessContext) -> Result<Par2Result, PostProcessError> {
-        let par2_file = ctx
-            .request
-            .working_dir
-            .join(format!("{}.par2", ctx.request.nzb_name));
+        let par2_file = match find_par2_file(&ctx.request.working_dir, &ctx.request.nzb_name) {
+            Some(path) => path,
+            None => return Ok(Par2Result::AllFilesOk),
+        };
         let result = self
             .par2
             .verify(&par2_file, &ctx.request.working_dir)
@@ -134,10 +134,10 @@ impl<E: Par2Engine, U: Unpacker> PostProcessor<E, U> {
     }
 
     async fn par_repair(&self, ctx: &PostProcessContext) -> Result<Par2Result, PostProcessError> {
-        let par2_file = ctx
-            .request
-            .working_dir
-            .join(format!("{}.par2", ctx.request.nzb_name));
+        let par2_file = match find_par2_file(&ctx.request.working_dir, &ctx.request.nzb_name) {
+            Some(path) => path,
+            None => return Ok(Par2Result::AllFilesOk),
+        };
         let result = self
             .par2
             .repair(&par2_file, &ctx.request.working_dir)
@@ -166,6 +166,32 @@ impl<E: Par2Engine, U: Unpacker> PostProcessor<E, U> {
         }
         Ok(())
     }
+}
+
+pub fn find_par2_file(working_dir: &std::path::Path, nzb_name: &str) -> Option<std::path::PathBuf> {
+    let exact = working_dir.join(format!("{nzb_name}.par2"));
+    if exact.is_file() {
+        return Some(exact);
+    }
+
+    let mut candidates: Vec<std::path::PathBuf> = std::fs::read_dir(working_dir)
+        .ok()?
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| {
+            p.is_file()
+                && p.extension()
+                    .is_some_and(|ext| ext.eq_ignore_ascii_case("par2"))
+                && !p
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .contains(".vol")
+        })
+        .collect();
+
+    candidates.sort();
+    candidates.into_iter().next()
 }
 
 #[cfg(test)]
@@ -253,6 +279,53 @@ mod tests {
 
         let history = history.lock().expect("lock");
         assert_eq!(history.as_slice(), ["example"]);
+    }
+
+    #[test]
+    fn find_par2_prefers_exact_match() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("example.par2"), b"par2").unwrap();
+        std::fs::write(dir.path().join("example.vol00+01.par2"), b"vol").unwrap();
+
+        let result = find_par2_file(dir.path(), "example");
+        assert_eq!(result, Some(dir.path().join("example.par2")));
+    }
+
+    #[test]
+    fn find_par2_falls_back_to_discovered_file() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("other.par2"), b"par2").unwrap();
+
+        let result = find_par2_file(dir.path(), "example");
+        assert_eq!(result, Some(dir.path().join("other.par2")));
+    }
+
+    #[test]
+    fn find_par2_skips_vol_files_in_fallback() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("data.vol00+01.par2"), b"vol").unwrap();
+
+        let result = find_par2_file(dir.path(), "example");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn find_par2_returns_none_when_no_par2_files() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("data.rar"), b"rar").unwrap();
+
+        let result = find_par2_file(dir.path(), "example");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn find_par2_deterministic_with_multiple() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("b.par2"), b"par2").unwrap();
+        std::fs::write(dir.path().join("a.par2"), b"par2").unwrap();
+
+        let result = find_par2_file(dir.path(), "nonexistent");
+        assert_eq!(result, Some(dir.path().join("a.par2")));
     }
 
     #[tokio::test]
