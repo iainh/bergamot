@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use nzbg_core::models::Priority;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -66,4 +68,13 @@ pub struct HistoryListEntry {
     pub delete_status: nzbg_core::models::DeleteStatus,
     pub mark_status: nzbg_core::models::MarkStatus,
     pub health: u32,
+}
+
+#[derive(Debug, Clone)]
+pub struct NzbCompletionNotice {
+    pub nzb_id: u32,
+    pub nzb_name: String,
+    pub working_dir: PathBuf,
+    pub category: Option<String>,
+    pub parameters: Vec<(String, String)>,
 }

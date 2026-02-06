@@ -11,7 +11,8 @@ use nzbg_core::models::{
 use crate::command::{EditAction, MovePosition, QueueCommand};
 use crate::error::QueueError;
 use crate::status::{
-    HistoryListEntry, NzbListEntry, NzbSnapshotEntry, QueueSnapshot, QueueStatus, SegmentStatus,
+    HistoryListEntry, NzbCompletionNotice, NzbListEntry, NzbSnapshotEntry, QueueSnapshot,
+    QueueStatus, SegmentStatus,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -249,6 +250,7 @@ pub struct QueueCoordinator {
     command_rx: mpsc::Receiver<QueueCommand>,
     assignment_tx: mpsc::Sender<ArticleAssignment>,
     rate_watch_tx: watch::Sender<u64>,
+    completion_tx: Option<mpsc::Sender<NzbCompletionNotice>>,
 }
 
 impl QueueCoordinator {
@@ -266,6 +268,7 @@ impl QueueCoordinator {
         let (rate_watch_tx, rate_watch_rx) = watch::channel(0u64);
         let handle = QueueHandle { command_tx };
         let coordinator = Self {
+            completion_tx: None,
             queue: DownloadQueue {
                 queue: Vec::new(),
                 history: Vec::new(),
@@ -284,6 +287,11 @@ impl QueueCoordinator {
             rate_watch_tx,
         };
         (coordinator, handle, assignment_rx, rate_watch_rx)
+    }
+
+    pub fn with_completion_tx(mut self, tx: mpsc::Sender<NzbCompletionNotice>) -> Self {
+        self.completion_tx = Some(tx);
+        self
     }
 
     pub async fn run(&mut self) {
@@ -662,6 +670,32 @@ impl QueueCoordinator {
         if all_complete && let Some(idx) = self.queue.queue.iter().position(|n| n.id == nzb_id) {
             let nzb = self.queue.queue.remove(idx);
             tracing::info!("NZB {} completed, moving to history", nzb.name);
+
+            if let Some(tx) = &self.completion_tx {
+                let notice = NzbCompletionNotice {
+                    nzb_id: nzb.id,
+                    nzb_name: nzb.name.clone(),
+                    working_dir: if !nzb.dest_dir.as_os_str().is_empty() {
+                        nzb.dest_dir.clone()
+                    } else {
+                        nzb.temp_dir.clone()
+                    },
+                    category: if nzb.category.is_empty() {
+                        None
+                    } else {
+                        Some(nzb.category.clone())
+                    },
+                    parameters: nzb
+                        .parameters
+                        .iter()
+                        .map(|p| (p.name.clone(), p.value.clone()))
+                        .collect(),
+                };
+                if tx.try_send(notice).is_err() {
+                    tracing::warn!("postproc channel full or closed for NZB {}", nzb.name);
+                }
+            }
+
             self.add_to_history(nzb, HistoryKind::Nzb);
         }
     }
@@ -2519,6 +2553,93 @@ mod tests {
             .expect("update");
 
         handle.shutdown().await.expect("shutdown");
+    }
+
+    #[test]
+    fn nzb_completion_emits_notice() {
+        let (completion_tx, mut completion_rx) = mpsc::channel(4);
+        let (mut coordinator, _handle, _rx, _rate_rx) = QueueCoordinator::new(2, 1);
+        coordinator.completion_tx = Some(completion_tx);
+
+        let mut nzb = sample_nzb(1, "test-nzb");
+        nzb.dest_dir = std::path::PathBuf::from("/downloads/test");
+        nzb.category = "movies".to_string();
+        nzb.total_article_count = 1;
+        nzb.file_count = 1;
+        nzb.remaining_file_count = 1;
+        nzb.files = vec![FileInfo {
+            articles: vec![ArticleInfo {
+                part_number: 1,
+                message_id: "abc@example".to_string(),
+                size: 100,
+                status: ArticleStatus::Undefined,
+                segment_offset: 0,
+                segment_size: 100,
+                crc: 0,
+            }],
+            total_articles: 1,
+            ..sample_file()
+        }];
+        coordinator.queue.queue.push(nzb);
+
+        let assignments = coordinator.fill_download_slots();
+        assert_eq!(assignments.len(), 1);
+
+        coordinator.handle_download_complete(crate::command::DownloadResult {
+            article_id: assignments[0].article_id,
+            outcome: crate::command::DownloadOutcome::Success {
+                data: vec![1],
+                offset: 0,
+                crc: 0,
+            },
+        });
+
+        assert!(coordinator.queue.queue.is_empty());
+        let notice = completion_rx.try_recv().expect("should receive notice");
+        assert_eq!(notice.nzb_id, 1);
+        assert_eq!(notice.nzb_name, "test-nzb");
+        assert_eq!(
+            notice.working_dir,
+            std::path::PathBuf::from("/downloads/test")
+        );
+        assert_eq!(notice.category, Some("movies".to_string()));
+    }
+
+    #[test]
+    fn nzb_completion_without_completion_tx_still_works() {
+        let (mut coordinator, _handle, _rx, _rate_rx) = QueueCoordinator::new(2, 1);
+
+        let mut nzb = sample_nzb(1, "test-nzb");
+        nzb.total_article_count = 1;
+        nzb.file_count = 1;
+        nzb.remaining_file_count = 1;
+        nzb.files = vec![FileInfo {
+            articles: vec![ArticleInfo {
+                part_number: 1,
+                message_id: "abc@example".to_string(),
+                size: 100,
+                status: ArticleStatus::Undefined,
+                segment_offset: 0,
+                segment_size: 100,
+                crc: 0,
+            }],
+            total_articles: 1,
+            ..sample_file()
+        }];
+        coordinator.queue.queue.push(nzb);
+
+        let assignments = coordinator.fill_download_slots();
+        coordinator.handle_download_complete(crate::command::DownloadResult {
+            article_id: assignments[0].article_id,
+            outcome: crate::command::DownloadOutcome::Success {
+                data: vec![1],
+                offset: 0,
+                crc: 0,
+            },
+        });
+
+        assert!(coordinator.queue.queue.is_empty());
+        assert_eq!(coordinator.queue.history.len(), 1);
     }
 
     #[test]
