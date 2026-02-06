@@ -418,8 +418,25 @@ impl WebServer {
 async fn handle_jsonrpc(
     axum::extract::State(state): axum::extract::State<Arc<AppState>>,
     axum::Extension(access): axum::Extension<AccessLevel>,
-    Json(payload): Json<JsonRpcRequest>,
+    body: String,
 ) -> Json<JsonRpcResponse> {
+    let payload: JsonRpcRequest = match serde_json::from_str(&body) {
+        Ok(p) => p,
+        Err(err) => {
+            return Json(JsonRpcResponse {
+                jsonrpc: "2.0".to_string(),
+                result: None,
+                error: Some(
+                    serde_json::to_value(JsonRpcErrorBody::from(JsonRpcError {
+                        code: -32700,
+                        message: format!("Parse error: {err}"),
+                    }))
+                    .unwrap(),
+                ),
+                id: serde_json::json!(0),
+            });
+        }
+    };
     let response = match dispatch_rpc(&payload.method, &payload.params, &state).await {
         Ok(result) => JsonRpcResponse {
             jsonrpc: "2.0".to_string(),
