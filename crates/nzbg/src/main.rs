@@ -29,7 +29,7 @@ async fn main() -> Result<()> {
     };
 
     let config = app::load_config(&config_path)?;
-    app::init_tracing(&cli.log_level);
+    let _log_buffer = app::init_tracing(&cli.log_level);
 
     tracing::info!("nzbg starting");
     let fetcher: Arc<dyn download::ArticleFetcher> = Arc::new(StubFetcher);

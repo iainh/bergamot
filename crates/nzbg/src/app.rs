@@ -3,9 +3,12 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use tracing_subscriber::EnvFilter;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 
 use nzbg_config::{Config, parse_config};
 use nzbg_diskstate::{DiskState, JsonFormat, StateLock};
+use nzbg_logging::{BufferLayer, LogBuffer};
 use nzbg_server::{AppState, ServerConfig as WebServerConfig, ShutdownHandle, WebServer};
 
 pub fn load_config(path: &Path) -> Result<Config> {
@@ -15,9 +18,16 @@ pub fn load_config(path: &Path) -> Result<Config> {
     Ok(Config::from_raw(raw))
 }
 
-pub fn init_tracing(log_level: &str) {
+pub fn init_tracing(log_level: &str) -> Arc<LogBuffer> {
     let filter = EnvFilter::try_new(log_level).unwrap_or_else(|_| EnvFilter::new("info"));
-    tracing_subscriber::fmt().with_env_filter(filter).init();
+    let buffer = Arc::new(LogBuffer::new(1000));
+    let buffer_layer = BufferLayer::new(buffer.clone());
+    tracing_subscriber::registry()
+        .with(filter)
+        .with(tracing_subscriber::fmt::layer())
+        .with(buffer_layer)
+        .init();
+    buffer
 }
 
 pub fn web_server_config(config: &Config) -> WebServerConfig {

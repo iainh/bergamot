@@ -1,3 +1,5 @@
+mod tracing_layer;
+
 use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -7,6 +9,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use nzbg_core::models::{DeleteStatus, DupMode};
+
+pub use crate::tracing_layer::BufferLayer;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum LogLevel {

@@ -842,6 +842,8 @@ dependencies = [
  "nzbg-core",
  "serde",
  "serde_json",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
