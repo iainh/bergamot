@@ -350,6 +350,11 @@ pub async fn run(config: Config, fetcher: Arc<dyn crate::download::ArticleFetche
     let deps = nzbg_scheduler::ServiceDeps {
         queue: queue_handle.clone(),
         disk: disk.clone(),
+        command_deps: nzbg_scheduler::CommandDeps {
+            postproc_paused: Some(app_state.postproc_paused().clone()),
+            scan_paused: Some(app_state.scan_paused().clone()),
+            scan_trigger: app_state.scan_trigger().cloned(),
+        },
     };
     let (scheduler_tx, scheduler_handles) = nzbg_scheduler::start_services(&config, deps).await?;
 

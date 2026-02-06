@@ -40,6 +40,7 @@ pub async fn run_service(mut service: Box<dyn Service>, mut shutdown: broadcast:
 pub struct ServiceDeps {
     pub queue: nzbg_queue::QueueHandle,
     pub disk: std::sync::Arc<nzbg_diskstate::DiskState<nzbg_diskstate::JsonFormat>>,
+    pub command_deps: CommandDeps,
 }
 
 pub async fn start_services(
@@ -70,7 +71,8 @@ pub async fn shutdown_services(
 }
 
 fn build_services(config: &Config, deps: ServiceDeps) -> anyhow::Result<Vec<Box<dyn Service>>> {
-    let scheduler = Scheduler::from_config(config, deps.queue.clone())?;
+    let executor = CommandExecutor::new(deps.queue.clone()).with_deps(deps.command_deps);
+    let scheduler = Scheduler::from_config_with_executor(config, deps.queue.clone(), executor)?;
     let scanner = NzbDirScanner::from_config(config)
         .with_queue(deps.queue.clone())
         .with_disk(deps.disk.clone());
@@ -161,6 +163,19 @@ impl Scheduler {
         Ok(Self::new(tasks, queue))
     }
 
+    pub fn from_config_with_executor(
+        config: &Config,
+        _queue: nzbg_queue::QueueHandle,
+        executor: CommandExecutor,
+    ) -> anyhow::Result<Self> {
+        let tasks = parse_scheduler_tasks(config.raw())?;
+        Ok(Self {
+            tasks,
+            executor,
+            clock: Box::new(SystemClock),
+        })
+    }
+
     pub fn with_executor(mut self, executor: CommandExecutor) -> Self {
         self.executor = executor;
         self
@@ -203,14 +218,30 @@ impl Service for Scheduler {
     }
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct CommandDeps {
+    pub postproc_paused: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    pub scan_paused: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    pub scan_trigger: Option<tokio::sync::mpsc::Sender<()>>,
+}
+
 #[derive(Debug, Clone)]
 pub struct CommandExecutor {
     queue: nzbg_queue::QueueHandle,
+    deps: CommandDeps,
 }
 
 impl CommandExecutor {
     pub fn new(queue: nzbg_queue::QueueHandle) -> Self {
-        Self { queue }
+        Self {
+            queue,
+            deps: CommandDeps::default(),
+        }
+    }
+
+    pub fn with_deps(mut self, deps: CommandDeps) -> Self {
+        self.deps = deps;
+        self
     }
 
     pub async fn execute(&self, command: &SchedulerCommand, param: &str) -> anyhow::Result<()> {
@@ -233,12 +264,37 @@ impl CommandExecutor {
                 let _server_id: u32 = param.parse().context("deactivate server id")?;
                 tracing::warn!("deactivate server not yet implemented");
             }
+            SchedulerCommand::PausePostProcess => {
+                if let Some(flag) = &self.deps.postproc_paused {
+                    flag.store(true, std::sync::atomic::Ordering::Relaxed);
+                }
+            }
+            SchedulerCommand::UnpausePostProcess => {
+                if let Some(flag) = &self.deps.postproc_paused {
+                    flag.store(false, std::sync::atomic::Ordering::Relaxed);
+                }
+            }
+            SchedulerCommand::PauseScan => {
+                if let Some(flag) = &self.deps.scan_paused {
+                    flag.store(true, std::sync::atomic::Ordering::Relaxed);
+                }
+            }
+            SchedulerCommand::UnpauseScan => {
+                if let Some(flag) = &self.deps.scan_paused {
+                    flag.store(false, std::sync::atomic::Ordering::Relaxed);
+                }
+            }
+            SchedulerCommand::Process => {
+                if let Some(trigger) = &self.deps.scan_trigger {
+                    let _ = trigger.send(()).await;
+                }
+            }
             SchedulerCommand::FetchFeed => {
                 let _feed_id: u32 = param.parse().context("fetch feed id")?;
                 tracing::warn!("fetch feed not yet implemented");
             }
-            _ => {
-                tracing::warn!("unimplemented scheduler command: {command:?}");
+            SchedulerCommand::Extensions => {
+                tracing::info!("extensions command: {param}");
             }
         }
         Ok(())
@@ -1143,6 +1199,116 @@ mod tests {
         let list = handle.get_nzb_list().await.expect("list");
         assert_eq!(list.len(), 1);
 
+        handle.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn command_executor_pause_postprocess_sets_flag() {
+        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1);
+        tokio::spawn(async move { coordinator.run().await });
+
+        let flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let deps = CommandDeps {
+            postproc_paused: Some(flag.clone()),
+            ..Default::default()
+        };
+        let executor = CommandExecutor::new(handle.clone()).with_deps(deps);
+        executor
+            .execute(&SchedulerCommand::PausePostProcess, "")
+            .await
+            .expect("execute");
+        assert!(flag.load(std::sync::atomic::Ordering::Relaxed));
+        handle.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn command_executor_unpause_postprocess_clears_flag() {
+        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1);
+        tokio::spawn(async move { coordinator.run().await });
+
+        let flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let deps = CommandDeps {
+            postproc_paused: Some(flag.clone()),
+            ..Default::default()
+        };
+        let executor = CommandExecutor::new(handle.clone()).with_deps(deps);
+        executor
+            .execute(&SchedulerCommand::UnpausePostProcess, "")
+            .await
+            .expect("execute");
+        assert!(!flag.load(std::sync::atomic::Ordering::Relaxed));
+        handle.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn command_executor_pause_scan_sets_flag() {
+        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1);
+        tokio::spawn(async move { coordinator.run().await });
+
+        let flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let deps = CommandDeps {
+            scan_paused: Some(flag.clone()),
+            ..Default::default()
+        };
+        let executor = CommandExecutor::new(handle.clone()).with_deps(deps);
+        executor
+            .execute(&SchedulerCommand::PauseScan, "")
+            .await
+            .expect("execute");
+        assert!(flag.load(std::sync::atomic::Ordering::Relaxed));
+        handle.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn command_executor_unpause_scan_clears_flag() {
+        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1);
+        tokio::spawn(async move { coordinator.run().await });
+
+        let flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let deps = CommandDeps {
+            scan_paused: Some(flag.clone()),
+            ..Default::default()
+        };
+        let executor = CommandExecutor::new(handle.clone()).with_deps(deps);
+        executor
+            .execute(&SchedulerCommand::UnpauseScan, "")
+            .await
+            .expect("execute");
+        assert!(!flag.load(std::sync::atomic::Ordering::Relaxed));
+        handle.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn command_executor_process_triggers_scan() {
+        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1);
+        tokio::spawn(async move { coordinator.run().await });
+
+        let (trigger_tx, mut trigger_rx) = tokio::sync::mpsc::channel(4);
+        let deps = CommandDeps {
+            scan_trigger: Some(trigger_tx),
+            ..Default::default()
+        };
+        let executor = CommandExecutor::new(handle.clone()).with_deps(deps);
+        executor
+            .execute(&SchedulerCommand::Process, "")
+            .await
+            .expect("execute");
+
+        let received = trigger_rx.try_recv();
+        assert!(received.is_ok());
+        handle.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn command_executor_extensions_succeeds() {
+        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1);
+        tokio::spawn(async move { coordinator.run().await });
+
+        let executor = CommandExecutor::new(handle.clone());
+        let result = executor
+            .execute(&SchedulerCommand::Extensions, "some-script")
+            .await;
+        assert!(result.is_ok());
         handle.shutdown().await.expect("shutdown");
     }
 }
