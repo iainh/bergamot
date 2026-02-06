@@ -191,6 +191,58 @@ impl<F: ConnectionFactory> ServerPool<F> {
     }
 }
 
+pub struct ServerPoolManager {
+    all_servers: tokio::sync::RwLock<Vec<NewsServer>>,
+    pool: tokio::sync::RwLock<ServerPool>,
+}
+
+impl ServerPoolManager {
+    pub fn new(servers: Vec<NewsServer>) -> Self {
+        let pool = ServerPool::new(servers.clone());
+        Self {
+            all_servers: tokio::sync::RwLock::new(servers),
+            pool: tokio::sync::RwLock::new(pool),
+        }
+    }
+
+    pub async fn fetch_article(
+        &self,
+        message_id: &str,
+        groups: &[String],
+    ) -> Result<Vec<u8>, NntpError> {
+        let pool = self.pool.read().await;
+        pool.fetch_article(message_id, groups).await
+    }
+
+    pub async fn activate_server(&self, server_id: u32) -> bool {
+        self.set_server_active(server_id, true).await
+    }
+
+    pub async fn deactivate_server(&self, server_id: u32) -> bool {
+        self.set_server_active(server_id, false).await
+    }
+
+    async fn set_server_active(&self, server_id: u32, active: bool) -> bool {
+        let mut servers = self.all_servers.write().await;
+        let found = servers.iter_mut().find(|s| s.id == server_id);
+        match found {
+            Some(server) => {
+                server.active = active;
+                let new_pool = ServerPool::new(servers.clone());
+                let mut pool = self.pool.write().await;
+                *pool = new_pool;
+                true
+            }
+            None => false,
+        }
+    }
+
+    pub async fn server_count(&self) -> usize {
+        let pool = self.pool.read().await;
+        pool.server_count()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -447,5 +499,35 @@ mod tests {
             .fetch_article("test@example", &["alt.test".into()])
             .await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn manager_deactivate_reduces_server_count() {
+        let s1 = test_server(1, 0, 0, 2);
+        let s2 = test_server(2, 0, 0, 2);
+        let manager = ServerPoolManager::new(vec![s1, s2]);
+        assert_eq!(manager.server_count().await, 2);
+
+        assert!(manager.deactivate_server(1).await);
+        assert_eq!(manager.server_count().await, 1);
+    }
+
+    #[tokio::test]
+    async fn manager_activate_restores_server() {
+        let mut s1 = test_server(1, 0, 0, 2);
+        s1.active = false;
+        let s2 = test_server(2, 0, 0, 2);
+        let manager = ServerPoolManager::new(vec![s1, s2]);
+        assert_eq!(manager.server_count().await, 1);
+
+        assert!(manager.activate_server(1).await);
+        assert_eq!(manager.server_count().await, 2);
+    }
+
+    #[tokio::test]
+    async fn manager_unknown_server_returns_false() {
+        let s1 = test_server(1, 0, 0, 2);
+        let manager = ServerPoolManager::new(vec![s1]);
+        assert!(!manager.activate_server(999).await);
     }
 }

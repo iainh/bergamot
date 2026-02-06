@@ -12,6 +12,7 @@ nzbg-config = { path = "../nzbg-config" }
 nzbg-core = { path = "../nzbg-core" }
 nzbg-feed = { path = "../nzbg-feed" }
 nzbg-diskstate = { path = "../nzbg-diskstate" }
+nzbg-nntp = { path = "../nzbg-nntp" }
 nzbg-queue = { path = "../nzbg-queue" }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 tokio = { version = "1.35", features = ["fs", "macros", "rt", "sync", "time"] }

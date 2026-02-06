@@ -218,15 +218,16 @@ impl Service for Scheduler {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct CommandDeps {
     pub postproc_paused: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
     pub scan_paused: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
     pub scan_trigger: Option<tokio::sync::mpsc::Sender<()>>,
     pub feed_handle: Option<nzbg_feed::FeedHandle>,
+    pub server_pool: Option<std::sync::Arc<nzbg_nntp::ServerPoolManager>>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct CommandExecutor {
     queue: nzbg_queue::QueueHandle,
     deps: CommandDeps,
@@ -258,12 +259,24 @@ impl CommandExecutor {
                 self.queue.set_download_rate(rate_kb * 1024).await?;
             }
             SchedulerCommand::ActivateServer => {
-                let _server_id: u32 = param.parse().context("activate server id")?;
-                tracing::warn!("activate server not yet implemented");
+                let server_id: u32 = param.parse().context("activate server id")?;
+                if let Some(pool) = &self.deps.server_pool {
+                    if pool.activate_server(server_id).await {
+                        tracing::info!("activated server {server_id}");
+                    } else {
+                        tracing::warn!("server {server_id} not found");
+                    }
+                }
             }
             SchedulerCommand::DeactivateServer => {
-                let _server_id: u32 = param.parse().context("deactivate server id")?;
-                tracing::warn!("deactivate server not yet implemented");
+                let server_id: u32 = param.parse().context("deactivate server id")?;
+                if let Some(pool) = &self.deps.server_pool {
+                    if pool.deactivate_server(server_id).await {
+                        tracing::info!("deactivated server {server_id}");
+                    } else {
+                        tracing::warn!("server {server_id} not found");
+                    }
+                }
             }
             SchedulerCommand::PausePostProcess => {
                 if let Some(flag) = &self.deps.postproc_paused {
@@ -1308,6 +1321,86 @@ mod tests {
 
         let received = trigger_rx.try_recv();
         assert!(received.is_ok());
+        handle.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn command_executor_activate_server() {
+        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1);
+        tokio::spawn(async move { coordinator.run().await });
+
+        let mut server = nzbg_nntp::NewsServer {
+            id: 1,
+            name: "test".to_string(),
+            active: false,
+            host: "localhost".to_string(),
+            port: 119,
+            username: None,
+            password: None,
+            encryption: nzbg_nntp::Encryption::None,
+            cipher: None,
+            connections: 2,
+            retention: 0,
+            level: 0,
+            optional: false,
+            group: 0,
+            join_group: true,
+            ip_version: nzbg_nntp::IpVersion::Auto,
+            cert_verification: false,
+        };
+        let manager = std::sync::Arc::new(nzbg_nntp::ServerPoolManager::new(vec![server.clone()]));
+        assert_eq!(manager.server_count().await, 0);
+
+        let deps = CommandDeps {
+            server_pool: Some(manager.clone()),
+            ..Default::default()
+        };
+        let executor = CommandExecutor::new(handle.clone()).with_deps(deps);
+        executor
+            .execute(&SchedulerCommand::ActivateServer, "1")
+            .await
+            .expect("execute");
+        assert_eq!(manager.server_count().await, 1);
+        handle.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn command_executor_deactivate_server() {
+        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1);
+        tokio::spawn(async move { coordinator.run().await });
+
+        let server = nzbg_nntp::NewsServer {
+            id: 1,
+            name: "test".to_string(),
+            active: true,
+            host: "localhost".to_string(),
+            port: 119,
+            username: None,
+            password: None,
+            encryption: nzbg_nntp::Encryption::None,
+            cipher: None,
+            connections: 2,
+            retention: 0,
+            level: 0,
+            optional: false,
+            group: 0,
+            join_group: true,
+            ip_version: nzbg_nntp::IpVersion::Auto,
+            cert_verification: false,
+        };
+        let manager = std::sync::Arc::new(nzbg_nntp::ServerPoolManager::new(vec![server]));
+        assert_eq!(manager.server_count().await, 1);
+
+        let deps = CommandDeps {
+            server_pool: Some(manager.clone()),
+            ..Default::default()
+        };
+        let executor = CommandExecutor::new(handle.clone()).with_deps(deps);
+        executor
+            .execute(&SchedulerCommand::DeactivateServer, "1")
+            .await
+            .expect("execute");
+        assert_eq!(manager.server_count().await, 0);
         handle.shutdown().await.expect("shutdown");
     }
 
