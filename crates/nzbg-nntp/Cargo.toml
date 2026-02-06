@@ -1,0 +1,15 @@
+[package]
+name = "nzbg-nntp"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+rustls = { version = "0.23", features = ["ring"] }
+serde = { version = "1.0", features = ["derive"] }
+thiserror = "2.0"
+tokio = { version = "1", features = ["net", "io-util", "time", "rt-multi-thread", "macros"] }
+tokio-rustls = "0.26"
+webpki-roots = "0.26"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
