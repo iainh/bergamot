@@ -649,6 +649,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "nzbg-extension"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "nzbg-feed"
 version = "0.1.0"
 dependencies = [
