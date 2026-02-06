@@ -126,6 +126,13 @@ impl QueueHandle {
         reply_rx.await.map_err(|_| QueueError::Shutdown)?
     }
 
+    pub async fn par_unpause(&self, nzb_id: u32) -> Result<(), QueueError> {
+        self.command_tx
+            .send(QueueCommand::ParUnpause { nzb_id })
+            .await
+            .map_err(|_| QueueError::Shutdown)
+    }
+
     pub async fn shutdown(&self) -> Result<(), QueueError> {
         self.command_tx
             .send(QueueCommand::Shutdown)
@@ -306,6 +313,16 @@ impl QueueCoordinator {
                     .file_name()
                     .map(|value| value.to_string_lossy().to_string())
                     .unwrap_or_else(|| "nzb".to_string());
+                let dup_key = name.strip_suffix(".nzb").unwrap_or(&name).to_string();
+                if let Some(existing_id) =
+                    self.check_duplicate(&dup_key, nzbg_core::models::DupMode::Score)
+                {
+                    tracing::info!(
+                        "duplicate NZB detected: {} matches existing id {}",
+                        name,
+                        existing_id
+                    );
+                }
                 let nzb = NzbInfo {
                     id,
                     kind: nzbg_core::models::NzbKind::Nzb,
@@ -318,7 +335,7 @@ impl QueueCoordinator {
                     queue_dir: std::path::PathBuf::new(),
                     category: category.unwrap_or_default(),
                     priority,
-                    dup_key: String::new(),
+                    dup_key,
                     dup_mode: nzbg_core::models::DupMode::Score,
                     dup_score: 0,
                     size: 0,
@@ -445,6 +462,9 @@ impl QueueCoordinator {
             QueueCommand::DownloadComplete(result) => {
                 self.handle_download_complete(result);
             }
+            QueueCommand::ParUnpause { nzb_id } => {
+                self.unpause_par_files(nzb_id);
+            }
             QueueCommand::Shutdown => {
                 self.shutdown = true;
             }
@@ -453,15 +473,11 @@ impl QueueCoordinator {
 
     fn handle_download_complete(&mut self, result: crate::command::DownloadResult) {
         self.active_downloads.remove(&result.article_id);
+        let nzb_id = result.article_id.nzb_id;
         match result.outcome {
             crate::command::DownloadOutcome::Success { crc, .. } => {
                 self.mark_segment_status(result.article_id, SegmentStatus::Completed);
-                if let Some(nzb) = self
-                    .queue
-                    .queue
-                    .iter_mut()
-                    .find(|n| n.id == result.article_id.nzb_id)
-                {
+                if let Some(nzb) = self.queue.queue.iter_mut().find(|n| n.id == nzb_id) {
                     if let Some(seg) = nzb
                         .files
                         .get_mut(result.article_id.file_idx as usize)
@@ -474,13 +490,49 @@ impl QueueCoordinator {
             }
             crate::command::DownloadOutcome::Failure { .. } => {
                 self.mark_segment_status(result.article_id, SegmentStatus::Failed);
-                if let Some(nzb) = self
-                    .queue
-                    .queue
-                    .iter_mut()
-                    .find(|n| n.id == result.article_id.nzb_id)
-                {
+                if let Some(nzb) = self.queue.queue.iter_mut().find(|n| n.id == nzb_id) {
                     nzb.failed_article_count += 1;
+                }
+            }
+        }
+        self.update_health(nzb_id);
+    }
+
+    fn update_health(&mut self, nzb_id: u32) {
+        if let Some(nzb) = self.queue.queue.iter_mut().find(|n| n.id == nzb_id) {
+            nzb.health = calculate_health(nzb.total_article_count, nzb.failed_article_count);
+            nzb.critical_health =
+                calculate_critical_health(nzb.total_article_count, nzb.par_remaining_size > 0);
+        }
+    }
+
+    fn check_duplicate(&self, dup_key: &str, dup_mode: nzbg_core::models::DupMode) -> Option<u32> {
+        if dup_key.is_empty() {
+            return None;
+        }
+        for nzb in &self.queue.queue {
+            if nzb.dup_key == dup_key {
+                return Some(nzb.id);
+            }
+        }
+        for hist in &self.queue.history {
+            if hist.nzb_info.dup_key == dup_key {
+                match dup_mode {
+                    nzbg_core::models::DupMode::All => return Some(hist.id),
+                    nzbg_core::models::DupMode::Force => {}
+                    nzbg_core::models::DupMode::Score => return Some(hist.id),
+                }
+            }
+        }
+        None
+    }
+
+    fn unpause_par_files(&mut self, nzb_id: u32) {
+        if let Some(nzb) = self.queue.queue.iter_mut().find(|n| n.id == nzb_id) {
+            for file in &mut nzb.files {
+                if file.paused && is_par_file(&file.filename) {
+                    file.paused = false;
+                    tracing::info!("unpaused par file {} for NZB {}", file.filename, nzb.name);
                 }
             }
         }
@@ -615,18 +667,47 @@ impl QueueCoordinator {
     }
 }
 
+pub fn calculate_health(total_articles: u32, failed_articles: u32) -> u32 {
+    if total_articles == 0 {
+        return 1000;
+    }
+    let success = total_articles.saturating_sub(failed_articles);
+    (1000u64 * success as u64 / total_articles as u64) as u32
+}
+
+pub fn calculate_critical_health(total_articles: u32, has_par: bool) -> u32 {
+    if total_articles == 0 {
+        return 1000;
+    }
+    if !has_par {
+        return 1000;
+    }
+    let max_repairable = total_articles / 10;
+    let min_success = total_articles.saturating_sub(max_repairable);
+    (1000u64 * min_success as u64 / total_articles as u64) as u32
+}
+
+fn is_par_file(filename: &str) -> bool {
+    let lower = filename.to_lowercase();
+    lower.ends_with(".par2") || lower.contains(".vol")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use nzbg_core::models::{ArticleInfo, ArticleStatus};
 
     fn sample_file() -> FileInfo {
+        sample_file_named("file")
+    }
+
+    fn sample_file_named(name: &str) -> FileInfo {
         FileInfo {
             id: 1,
             nzb_id: 1,
-            filename: "file".to_string(),
+            filename: name.to_string(),
             subject: "subject".to_string(),
-            output_filename: "file".to_string(),
+            output_filename: name.to_string(),
             groups: vec![],
             articles: vec![ArticleInfo {
                 part_number: 1,
@@ -653,6 +734,72 @@ mod tests {
             active_downloads: 0,
             crc: 0,
             server_stats: vec![],
+        }
+    }
+
+    fn sample_nzb(id: u32, name: &str) -> NzbInfo {
+        NzbInfo {
+            id,
+            kind: nzbg_core::models::NzbKind::Nzb,
+            name: name.to_string(),
+            filename: name.to_string(),
+            url: String::new(),
+            dest_dir: std::path::PathBuf::new(),
+            final_dir: std::path::PathBuf::new(),
+            temp_dir: std::path::PathBuf::new(),
+            queue_dir: std::path::PathBuf::new(),
+            category: String::new(),
+            priority: Priority::Normal,
+            dup_key: String::new(),
+            dup_mode: nzbg_core::models::DupMode::Score,
+            dup_score: 0,
+            size: 0,
+            remaining_size: 0,
+            paused_size: 0,
+            failed_size: 0,
+            success_size: 0,
+            current_downloaded_size: 0,
+            par_size: 0,
+            par_remaining_size: 0,
+            par_current_success_size: 0,
+            par_failed_size: 0,
+            file_count: 0,
+            remaining_file_count: 0,
+            remaining_par_count: 0,
+            total_article_count: 0,
+            success_article_count: 0,
+            failed_article_count: 0,
+            added_time: std::time::SystemTime::UNIX_EPOCH,
+            min_time: None,
+            max_time: None,
+            download_start_time: None,
+            download_sec: 0,
+            post_total_sec: 0,
+            par_sec: 0,
+            repair_sec: 0,
+            unpack_sec: 0,
+            paused: false,
+            deleted: false,
+            direct_rename: false,
+            force_priority: false,
+            reprocess: false,
+            par_manual: false,
+            clean_up_disk: false,
+            par_status: nzbg_core::models::ParStatus::None,
+            unpack_status: nzbg_core::models::UnpackStatus::None,
+            move_status: nzbg_core::models::MoveStatus::None,
+            delete_status: nzbg_core::models::DeleteStatus::None,
+            mark_status: nzbg_core::models::MarkStatus::None,
+            url_status: nzbg_core::models::UrlStatus::None,
+            health: 1000,
+            critical_health: 1000,
+            files: vec![sample_file()],
+            completed_files: vec![],
+            server_stats: vec![],
+            parameters: vec![],
+            post_info: None,
+            message_count: 0,
+            cached_message_count: 0,
         }
     }
 
@@ -1112,5 +1259,178 @@ mod tests {
         assert_eq!(list.len(), 1);
 
         handle.shutdown().await.expect("shutdown");
+    }
+
+    #[test]
+    fn calculate_health_full_success() {
+        assert_eq!(calculate_health(100, 0), 1000);
+    }
+
+    #[test]
+    fn calculate_health_with_failures() {
+        assert_eq!(calculate_health(100, 10), 900);
+        assert_eq!(calculate_health(100, 50), 500);
+    }
+
+    #[test]
+    fn calculate_health_empty_returns_1000() {
+        assert_eq!(calculate_health(0, 0), 1000);
+    }
+
+    #[test]
+    fn calculate_critical_health_without_par() {
+        assert_eq!(calculate_critical_health(100, false), 1000);
+    }
+
+    #[test]
+    fn calculate_critical_health_with_par() {
+        let ch = calculate_critical_health(100, true);
+        assert!(ch < 1000);
+        assert_eq!(ch, 900);
+    }
+
+    #[test]
+    fn is_par_file_detects_par2_files() {
+        assert!(is_par_file("file.par2"));
+        assert!(is_par_file("file.PAR2"));
+        assert!(is_par_file("file.vol00+01.par2"));
+        assert!(!is_par_file("file.rar"));
+        assert!(!is_par_file("file.nzb"));
+    }
+
+    #[test]
+    fn check_duplicate_finds_queued_match() {
+        let (mut coordinator, _handle, _rx) = QueueCoordinator::new(2, 1);
+        let mut nzb = sample_nzb(1, "test");
+        nzb.dup_key = "my-dupe-key".to_string();
+        coordinator.queue.queue.push(nzb);
+
+        assert!(
+            coordinator
+                .check_duplicate("my-dupe-key", nzbg_core::models::DupMode::Score)
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn check_duplicate_returns_none_for_empty_key() {
+        let (coordinator, _handle, _rx) = QueueCoordinator::new(2, 1);
+        assert!(
+            coordinator
+                .check_duplicate("", nzbg_core::models::DupMode::Score)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn check_duplicate_returns_none_for_no_match() {
+        let (mut coordinator, _handle, _rx) = QueueCoordinator::new(2, 1);
+        let mut nzb = sample_nzb(1, "test");
+        nzb.dup_key = "other-key".to_string();
+        coordinator.queue.queue.push(nzb);
+
+        assert!(
+            coordinator
+                .check_duplicate("my-dupe-key", nzbg_core::models::DupMode::Score)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn check_duplicate_force_mode_skips_history() {
+        let (mut coordinator, _handle, _rx) = QueueCoordinator::new(2, 1);
+        let mut hist_nzb = sample_nzb(1, "test");
+        hist_nzb.dup_key = "my-dupe-key".to_string();
+        coordinator
+            .queue
+            .history
+            .push(nzbg_core::models::HistoryInfo {
+                id: 1,
+                kind: nzbg_core::models::HistoryKind::Nzb,
+                time: std::time::SystemTime::UNIX_EPOCH,
+                nzb_info: hist_nzb,
+            });
+
+        assert!(
+            coordinator
+                .check_duplicate("my-dupe-key", nzbg_core::models::DupMode::Force)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn unpause_par_files_unpauses_par2() {
+        let (mut coordinator, _handle, _rx) = QueueCoordinator::new(2, 1);
+        let mut nzb = sample_nzb(1, "test");
+        let mut main_file = sample_file_named("data.rar");
+        main_file.paused = false;
+        let mut par_file = sample_file_named("data.par2");
+        par_file.paused = true;
+        let mut vol_file = sample_file_named("data.vol00+01.par2");
+        vol_file.paused = true;
+        nzb.files = vec![main_file, par_file, vol_file];
+        coordinator.queue.queue.push(nzb);
+
+        coordinator.unpause_par_files(1);
+
+        assert!(!coordinator.queue.queue[0].files[0].paused);
+        assert!(!coordinator.queue.queue[0].files[1].paused);
+        assert!(!coordinator.queue.queue[0].files[2].paused);
+    }
+
+    #[tokio::test]
+    async fn par_unpause_via_handle() {
+        let (mut coordinator, handle, _rx) = QueueCoordinator::new(2, 1);
+        tokio::spawn(async move { coordinator.run().await });
+
+        handle
+            .add_nzb(
+                std::path::PathBuf::from("/tmp/test.nzb"),
+                None,
+                Priority::Normal,
+            )
+            .await
+            .expect("add");
+
+        handle.par_unpause(1).await.expect("par_unpause");
+        handle.shutdown().await.expect("shutdown");
+    }
+
+    #[test]
+    fn health_updates_on_download_complete() {
+        let (mut coordinator, _handle, _rx) = QueueCoordinator::new(2, 1);
+        let mut nzb = sample_nzb(1, "test");
+        nzb.total_article_count = 10;
+        let mut articles = Vec::new();
+        for i in 0..10 {
+            articles.push(ArticleInfo {
+                part_number: i,
+                message_id: format!("<{i}@b>"),
+                size: 1,
+                status: ArticleStatus::Undefined,
+                segment_offset: 0,
+                segment_size: 1,
+                crc: 0,
+            });
+        }
+        nzb.files = vec![FileInfo {
+            articles,
+            total_articles: 10,
+            ..sample_file()
+        }];
+        coordinator.queue.queue.push(nzb);
+
+        coordinator.handle_download_complete(crate::command::DownloadResult {
+            article_id: ArticleId {
+                nzb_id: 1,
+                file_idx: 0,
+                seg_idx: 0,
+            },
+            outcome: crate::command::DownloadOutcome::Failure {
+                message: "test".to_string(),
+            },
+        });
+
+        assert_eq!(coordinator.queue.queue[0].health, 900);
     }
 }

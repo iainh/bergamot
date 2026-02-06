@@ -75,6 +75,9 @@ pub enum QueueCommand {
         reply: oneshot::Sender<QueueSnapshot>,
     },
     DownloadComplete(DownloadResult),
+    ParUnpause {
+        nzb_id: u32,
+    },
     Shutdown,
 }
 
