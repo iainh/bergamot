@@ -14,6 +14,7 @@ use crate::error::{JsonRpcError, JsonRpcErrorBody};
 use crate::rpc::{JsonRpcRequest, JsonRpcResponse, dispatch_rpc};
 use crate::shutdown::ShutdownHandle;
 use crate::status::StatusResponse;
+use crate::xmlrpc;
 
 #[derive(Debug, Clone)]
 pub struct AppState {
@@ -319,19 +320,39 @@ async fn handle_jsonprpc(
     )
 }
 
-async fn handle_xmlrpc() -> Json<JsonRpcResponse> {
-    Json(JsonRpcResponse {
-        jsonrpc: "2.0".to_string(),
-        result: None,
-        error: Some(
-            serde_json::to_value(JsonRpcErrorBody {
-                code: -32000,
-                message: "XML-RPC not implemented".to_string(),
-            })
-            .unwrap(),
-        ),
-        id: serde_json::json!(0),
-    })
+async fn handle_xmlrpc(
+    axum::extract::State(state): axum::extract::State<Arc<AppState>>,
+    axum::Extension(access): axum::Extension<AccessLevel>,
+    body: String,
+) -> axum::response::Response<String> {
+    let _ = access;
+    let (method, params) = match xmlrpc::parse_method_call(&body) {
+        Ok(parsed) => parsed,
+        Err(err) => {
+            let xml = xmlrpc::json_to_xmlrpc_fault(-32700, &format!("Parse error: {err}"));
+            return axum::response::Response::builder()
+                .header("Content-Type", "text/xml")
+                .body(xml)
+                .unwrap();
+        }
+    };
+
+    match dispatch_rpc(&method, &params, &state).await {
+        Ok(result) => {
+            let xml = xmlrpc::json_to_xmlrpc_response(&result);
+            axum::response::Response::builder()
+                .header("Content-Type", "text/xml")
+                .body(xml)
+                .unwrap()
+        }
+        Err(err) => {
+            let xml = xmlrpc::json_to_xmlrpc_fault(err.code, &err.message);
+            axum::response::Response::builder()
+                .header("Content-Type", "text/xml")
+                .body(xml)
+                .unwrap()
+        }
+    }
 }
 
 async fn handle_api_shortcut(

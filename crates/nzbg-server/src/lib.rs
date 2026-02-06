@@ -5,6 +5,7 @@ mod rpc;
 mod server;
 mod shutdown;
 mod status;
+mod xmlrpc;
 
 pub use crate::auth::{AccessLevel, AuthState};
 pub use crate::config::ServerConfig;

@@ -1221,6 +1221,7 @@ dependencies = [
  "nzbg-feed",
  "nzbg-logging",
  "nzbg-queue",
+ "quick-xml",
  "reqwest",
  "rustls",
  "serde",
