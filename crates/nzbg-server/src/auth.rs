@@ -38,8 +38,12 @@ pub async fn auth_middleware(
         }
     }
 
-    let access = extract_url_credentials(&request)
-        .and_then(|(user, pass)| authenticate(&user, &pass, config))
+    let access = extract_session_cookie(&request)
+        .and_then(|cookie| verify_session_cookie(&cookie, &config.control_password))
+        .or_else(|| {
+            extract_url_credentials(&request)
+                .and_then(|(user, pass)| authenticate(&user, &pass, config))
+        })
         .or_else(|| {
             extract_basic_auth(&request).and_then(|(user, pass)| authenticate(&user, &pass, config))
         })
@@ -150,6 +154,50 @@ fn parse_ipv4(ip: &str) -> Option<u32> {
     Some((a << 24) | (b << 16) | (c << 8) | d)
 }
 
+pub fn create_session_cookie(level: AccessLevel, secret: &str) -> String {
+    let level_str = match level {
+        AccessLevel::Control => "control",
+        AccessLevel::Restricted => "restricted",
+        AccessLevel::Add => "add",
+        AccessLevel::Denied => "denied",
+    };
+    let payload = base64::engine::general_purpose::STANDARD.encode(level_str);
+    let key = ring::hmac::Key::new(ring::hmac::HMAC_SHA256, secret.as_bytes());
+    let sig = ring::hmac::sign(&key, payload.as_bytes());
+    let sig_b64 = base64::engine::general_purpose::STANDARD.encode(sig.as_ref());
+    format!("{payload}.{sig_b64}")
+}
+
+pub fn verify_session_cookie(cookie: &str, secret: &str) -> Option<AccessLevel> {
+    let (payload, sig_b64) = cookie.split_once('.')?;
+    let sig_bytes = base64::engine::general_purpose::STANDARD
+        .decode(sig_b64)
+        .ok()?;
+    let key = ring::hmac::Key::new(ring::hmac::HMAC_SHA256, secret.as_bytes());
+    ring::hmac::verify(&key, payload.as_bytes(), &sig_bytes).ok()?;
+    let decoded = base64::engine::general_purpose::STANDARD
+        .decode(payload)
+        .ok()?;
+    let level_str = String::from_utf8(decoded).ok()?;
+    match level_str.as_str() {
+        "control" => Some(AccessLevel::Control),
+        "restricted" => Some(AccessLevel::Restricted),
+        "add" => Some(AccessLevel::Add),
+        _ => None,
+    }
+}
+
+fn extract_session_cookie(request: &Request) -> Option<String> {
+    let cookie_header = request.headers().get("Cookie")?.to_str().ok()?;
+    for part in cookie_header.split(';') {
+        let part = part.trim();
+        if let Some(value) = part.strip_prefix("nzbg_session=") {
+            return Some(value.to_string());
+        }
+    }
+    None
+}
+
 fn extract_basic_auth(request: &Request) -> Option<(String, String)> {
     let header = request.headers().get("Authorization")?.to_str().ok()?;
     let encoded = header.strip_prefix("Basic ")?;
@@ -215,6 +263,41 @@ mod tests {
         assert_eq!(required_access("shutdown"), AccessLevel::Control);
         assert_eq!(required_access("append"), AccessLevel::Add);
         assert_eq!(required_access("status"), AccessLevel::Restricted);
+    }
+
+    #[test]
+    fn create_and_verify_session_cookie() {
+        let secret = "my-secret-key";
+        let cookie = create_session_cookie(AccessLevel::Control, secret);
+        let level = verify_session_cookie(&cookie, secret);
+        assert_eq!(level, Some(AccessLevel::Control));
+    }
+
+    #[test]
+    fn session_cookie_rejects_tampered_value() {
+        let secret = "my-secret-key";
+        let cookie = create_session_cookie(AccessLevel::Control, secret);
+        let tampered = format!("tampered.{}", cookie.split('.').last().unwrap_or(""));
+        assert_eq!(verify_session_cookie(&tampered, secret), None);
+    }
+
+    #[test]
+    fn session_cookie_rejects_wrong_secret() {
+        let cookie = create_session_cookie(AccessLevel::Control, "secret1");
+        assert_eq!(verify_session_cookie(&cookie, "secret2"), None);
+    }
+
+    #[test]
+    fn session_cookie_roundtrips_all_levels() {
+        let secret = "test";
+        for level in [
+            AccessLevel::Control,
+            AccessLevel::Restricted,
+            AccessLevel::Add,
+        ] {
+            let cookie = create_session_cookie(level, secret);
+            assert_eq!(verify_session_cookie(&cookie, secret), Some(level));
+        }
     }
 
     #[test]

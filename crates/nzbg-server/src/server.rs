@@ -8,7 +8,9 @@ use tower_http::compression::CompressionLayer;
 use tower_http::cors::CorsLayer;
 use tower_http::services::ServeDir;
 
-use crate::auth::{AccessLevel, AuthState, auth_middleware, required_access};
+use axum::http::StatusCode;
+
+use crate::auth::{AccessLevel, AuthState, auth_middleware, authenticate, required_access};
 use crate::config::ServerConfig;
 use crate::error::{JsonRpcError, JsonRpcErrorBody};
 use crate::rpc::{JsonRpcRequest, JsonRpcResponse, dispatch_rpc};
@@ -218,19 +220,31 @@ impl WebServer {
         let auth_state = AuthState {
             config: (*self.config).clone(),
         };
-        Router::new()
+        let mut app = Router::new()
             .route("/jsonrpc", post(handle_jsonrpc))
             .route("/jsonprpc", get(handle_jsonprpc))
             .route("/xmlrpc", post(handle_xmlrpc))
             .route("/{credentials}/jsonrpc/{method}", get(handle_api_shortcut))
-            .fallback_service(ServeDir::new(&self.config.web_dir))
-            .layer(CompressionLayer::new().gzip(true))
-            .layer(CorsLayer::permissive())
             .layer(middleware::from_fn_with_state(
                 auth_state.clone(),
                 auth_middleware,
             ))
-            .with_state(self.state.clone())
+            .with_state(self.state.clone());
+
+        if self.config.form_auth {
+            let login_auth = auth_state.clone();
+            app = app
+                .route("/login", get(handle_login_page))
+                .route(
+                    "/login",
+                    post(handle_login_submit).with_state(Arc::new(login_auth)),
+                )
+                .route("/logout", post(handle_logout));
+        }
+
+        app.fallback_service(ServeDir::new(&self.config.web_dir))
+            .layer(CompressionLayer::new().gzip(true))
+            .layer(CorsLayer::permissive())
     }
 
     pub async fn run(&self) -> Result<(), Box<dyn std::error::Error>> {
@@ -355,6 +369,59 @@ async fn handle_xmlrpc(
     }
 }
 
+async fn handle_login_page() -> axum::response::Html<&'static str> {
+    axum::response::Html(
+        r#"<!DOCTYPE html>
+<html><head><title>nzbg Login</title></head>
+<body>
+<h2>Login</h2>
+<form method="post" action="/login">
+<label>Username: <input name="username" type="text"></label><br>
+<label>Password: <input name="password" type="password"></label><br>
+<button type="submit">Login</button>
+</form>
+</body></html>"#,
+    )
+}
+
+async fn handle_login_submit(
+    axum::extract::State(auth): axum::extract::State<Arc<AuthState>>,
+    axum::extract::Form(form): axum::extract::Form<std::collections::HashMap<String, String>>,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    let username = form.get("username").map(|s| s.as_str()).unwrap_or("");
+    let password = form.get("password").map(|s| s.as_str()).unwrap_or("");
+
+    if let Some(level) = authenticate(username, password, &auth.config) {
+        let cookie_val = crate::auth::create_session_cookie(level, &auth.config.control_password);
+        let cookie = format!("nzbg_session={cookie_val}; Path=/; HttpOnly; SameSite=Strict");
+        axum::response::Response::builder()
+            .status(StatusCode::SEE_OTHER)
+            .header("Location", "/")
+            .header("Set-Cookie", cookie)
+            .body(axum::body::Body::empty())
+            .unwrap()
+            .into_response()
+    } else {
+        axum::response::Response::builder()
+            .status(StatusCode::UNAUTHORIZED)
+            .body(axum::body::Body::from("Invalid credentials"))
+            .unwrap()
+            .into_response()
+    }
+}
+
+async fn handle_logout() -> axum::response::Response {
+    use axum::response::IntoResponse;
+    axum::response::Response::builder()
+        .status(StatusCode::SEE_OTHER)
+        .header("Location", "/login")
+        .header("Set-Cookie", "nzbg_session=; Path=/; HttpOnly; Max-Age=0")
+        .body(axum::body::Body::empty())
+        .unwrap()
+        .into_response()
+}
+
 async fn handle_api_shortcut(
     axum::extract::State(state): axum::extract::State<Arc<AppState>>,
     axum::extract::Path(method): axum::extract::Path<String>,
@@ -395,7 +462,7 @@ async fn handle_api_shortcut(
 mod tests {
     use super::*;
     use axum::body::Body;
-    use axum::http::{Request, StatusCode};
+    use axum::http::Request;
     use tower::ServiceExt;
 
     fn server_config() -> ServerConfig {

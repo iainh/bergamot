@@ -1223,6 +1223,7 @@ dependencies = [
  "nzbg-queue",
  "quick-xml",
  "reqwest",
+ "ring",
  "rustls",
  "serde",
  "serde_json",
