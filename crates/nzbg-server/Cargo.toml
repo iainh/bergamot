@@ -9,6 +9,7 @@ base64 = "0.22"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 nzbg-config = { path = "../nzbg-config" }
 nzbg-core = { path = "../nzbg-core" }
+nzbg-feed = { path = "../nzbg-feed" }
 nzbg-diskstate = { path = "../nzbg-diskstate" }
 nzbg-logging = { path = "../nzbg-logging" }
 nzbg-queue = { path = "../nzbg-queue" }

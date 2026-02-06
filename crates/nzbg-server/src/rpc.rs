@@ -58,7 +58,7 @@ pub async fn dispatch_rpc(
         "pausescan" => rpc_pausescan(state),
         "resumescan" => rpc_resumescan(state),
         "scan" => rpc_scan(state).await,
-        "feeds" => Ok(serde_json::json!([])),
+        "feeds" => rpc_feeds(state).await,
         "sysinfo" => rpc_sysinfo(state),
         "systemhealth" => rpc_systemhealth(state),
         _ => Err(JsonRpcError {
@@ -374,6 +374,29 @@ async fn rpc_scan(state: &AppState) -> Result<serde_json::Value, JsonRpcError> {
         let _ = tx.send(()).await;
     }
     Ok(serde_json::json!(true))
+}
+
+async fn rpc_feeds(state: &AppState) -> Result<serde_json::Value, JsonRpcError> {
+    let Some(feed_handle) = state.feed_handle() else {
+        return Ok(serde_json::json!([]));
+    };
+    let infos = feed_handle.get_infos().await.map_err(rpc_error)?;
+    let entries: Vec<serde_json::Value> = infos
+        .into_iter()
+        .map(|info| {
+            serde_json::json!({
+                "ID": info.id,
+                "Name": info.name,
+                "URL": info.url,
+                "Status": format!("{:?}", info.status),
+                "LastUpdate": info.last_update.map(|t| t.to_rfc3339()),
+                "NextUpdate": info.next_update.map(|t| t.to_rfc3339()),
+                "ItemCount": info.item_count,
+                "Error": info.error,
+            })
+        })
+        .collect();
+    Ok(serde_json::json!(entries))
 }
 
 fn rpc_sysinfo(state: &AppState) -> Result<serde_json::Value, JsonRpcError> {

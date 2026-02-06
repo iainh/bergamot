@@ -29,6 +29,7 @@ pub struct AppState {
     postproc_paused: std::sync::Arc<std::sync::atomic::AtomicBool>,
     scan_paused: std::sync::Arc<std::sync::atomic::AtomicBool>,
     scan_trigger: Option<tokio::sync::mpsc::Sender<()>>,
+    feed_handle: Option<nzbg_feed::FeedHandle>,
 }
 
 impl Default for AppState {
@@ -47,6 +48,7 @@ impl Default for AppState {
             postproc_paused: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             scan_paused: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             scan_trigger: None,
+            feed_handle: None,
         }
     }
 }
@@ -112,6 +114,15 @@ impl AppState {
 
     pub fn scan_trigger(&self) -> Option<&tokio::sync::mpsc::Sender<()>> {
         self.scan_trigger.as_ref()
+    }
+
+    pub fn with_feed_handle(mut self, feed_handle: nzbg_feed::FeedHandle) -> Self {
+        self.feed_handle = Some(feed_handle);
+        self
+    }
+
+    pub fn feed_handle(&self) -> Option<&nzbg_feed::FeedHandle> {
+        self.feed_handle.as_ref()
     }
 
     pub fn version(&self) -> &str {

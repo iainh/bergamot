@@ -324,14 +324,6 @@ pub async fn run(config: Config, fetcher: Arc<dyn crate::download::ArticleFetche
         }
     }
 
-    let (shutdown_handle, mut shutdown_rx) = ShutdownHandle::new();
-    let app_state = Arc::new(
-        AppState::default()
-            .with_queue(queue_handle.clone())
-            .with_shutdown(shutdown_handle)
-            .with_disk(disk.clone()),
-    );
-
     let coordinator_handle = tokio::spawn(async move {
         coordinator.run().await;
     });
@@ -347,6 +339,46 @@ pub async fn run(config: Config, fetcher: Arc<dyn crate::download::ArticleFetche
         worker_writer_pool,
     ));
 
+    let feed_configs: Vec<nzbg_feed::FeedConfig> = nzbg_config::extract_feeds(config.raw())
+        .into_iter()
+        .map(|f| nzbg_feed::FeedConfig {
+            id: f.id,
+            name: f.name,
+            url: f.url,
+            filter: f.filter,
+            interval_min: f.interval_min,
+            backlog: f.backlog,
+            pause_nzb: f.pause_nzb,
+            category: f.category,
+            priority: f.priority,
+            extensions: f.extensions,
+        })
+        .collect();
+
+    let feed_handle = if !feed_configs.is_empty() {
+        let feed_history = nzbg_feed::FeedHistoryDb::new(30);
+        let feed_fetcher = Box::new(nzbg_feed::fetch::HttpFeedFetcher);
+        let feed_coordinator =
+            nzbg_feed::FeedCoordinator::new(feed_configs, feed_history, feed_fetcher);
+        let (feed_tx, feed_rx) = tokio::sync::mpsc::channel(16);
+        let handle = nzbg_feed::FeedHandle::new(feed_tx);
+        tokio::spawn(feed_coordinator.run_actor(feed_rx));
+        tracing::info!("feed coordinator started");
+        Some(handle)
+    } else {
+        None
+    };
+
+    let (shutdown_handle, mut shutdown_rx) = ShutdownHandle::new();
+    let mut app_state_builder = AppState::default()
+        .with_queue(queue_handle.clone())
+        .with_shutdown(shutdown_handle)
+        .with_disk(disk.clone());
+    if let Some(ref fh) = feed_handle {
+        app_state_builder = app_state_builder.with_feed_handle(fh.clone());
+    }
+    let app_state = Arc::new(app_state_builder);
+
     let deps = nzbg_scheduler::ServiceDeps {
         queue: queue_handle.clone(),
         disk: disk.clone(),
@@ -354,7 +386,7 @@ pub async fn run(config: Config, fetcher: Arc<dyn crate::download::ArticleFetche
             postproc_paused: Some(app_state.postproc_paused().clone()),
             scan_paused: Some(app_state.scan_paused().clone()),
             scan_trigger: app_state.scan_trigger().cloned(),
-            feed_handle: None,
+            feed_handle,
         },
     };
     let (scheduler_tx, scheduler_handles) = nzbg_scheduler::start_services(&config, deps).await?;

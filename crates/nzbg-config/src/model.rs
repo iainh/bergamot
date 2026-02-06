@@ -265,6 +265,20 @@ pub enum IpVersion {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FeedConfigEntry {
+    pub id: u32,
+    pub name: String,
+    pub url: String,
+    pub filter: String,
+    pub interval_min: u32,
+    pub backlog: bool,
+    pub pause_nzb: bool,
+    pub category: String,
+    pub priority: i32,
+    pub extensions: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CategoryConfig {
     pub name: String,
     pub dest_dir: PathBuf,

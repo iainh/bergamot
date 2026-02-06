@@ -12,6 +12,7 @@ nzbg-config = { path = "../nzbg-config" }
 nzbg-core = { path = "../nzbg-core" }
 nzbg-diskstate = { path = "../nzbg-diskstate" }
 nzbg-extension = { path = "../nzbg-extension" }
+nzbg-feed = { path = "../nzbg-feed" }
 nzbg-logging = { path = "../nzbg-logging" }
 nzbg-nntp = { path = "../nzbg-nntp" }
 nzbg-nzb = { path = "../nzbg-nzb" }

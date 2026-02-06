@@ -167,6 +167,68 @@ pub fn extract_categories(raw: &HashMap<String, String>) -> Vec<CategoryConfig> 
     categories
 }
 
+pub fn extract_feeds(raw: &HashMap<String, String>) -> Vec<super::model::FeedConfigEntry> {
+    let mut feeds = Vec::new();
+
+    for id in 1u32.. {
+        let prefix = format!("Feed{id}.");
+        let name_key = format!("{prefix}Name");
+
+        match raw.get(&name_key) {
+            Some(name) if !name.is_empty() => {
+                let url = raw
+                    .get(&format!("{prefix}URL"))
+                    .cloned()
+                    .unwrap_or_default();
+                let filter = raw
+                    .get(&format!("{prefix}Filter"))
+                    .cloned()
+                    .unwrap_or_default();
+                let interval_min = raw
+                    .get(&format!("{prefix}Interval"))
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(15);
+                let backlog = parse_bool(raw.get(&format!("{prefix}Backlog")), false);
+                let pause_nzb = parse_bool(raw.get(&format!("{prefix}PauseNzb")), false);
+                let category = raw
+                    .get(&format!("{prefix}Category"))
+                    .cloned()
+                    .unwrap_or_default();
+                let priority = raw
+                    .get(&format!("{prefix}Priority"))
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(0);
+                let extensions = raw
+                    .get(&format!("{prefix}Extensions"))
+                    .map(|value| {
+                        value
+                            .split(',')
+                            .map(|e| e.trim().to_string())
+                            .filter(|e| !e.is_empty())
+                            .collect()
+                    })
+                    .unwrap_or_default();
+
+                feeds.push(super::model::FeedConfigEntry {
+                    id,
+                    name: name.clone(),
+                    url,
+                    filter,
+                    interval_min,
+                    backlog,
+                    pause_nzb,
+                    category,
+                    priority,
+                    extensions,
+                });
+            }
+            _ => break,
+        }
+    }
+
+    feeds
+}
+
 pub fn parse_bool(value: Option<&String>, default: bool) -> bool {
     match value.map(|s| s.to_lowercase()).as_deref() {
         Some("yes" | "true" | "1") => true,
@@ -209,5 +271,26 @@ mod tests {
         let parsed = parse_config(content).expect("parse");
         let categories = extract_categories(&parsed);
         assert_eq!(categories[0].aliases, vec!["Films", "Cinema"]);
+    }
+
+    #[test]
+    fn extract_feeds_parses_config() {
+        let content = "Feed1.Name=My Feed\nFeed1.URL=https://example.com/rss\nFeed1.Filter=A: title(.*)\nFeed1.Interval=30\nFeed1.Category=TV\n";
+        let parsed = parse_config(content).expect("parse");
+        let feeds = extract_feeds(&parsed);
+        assert_eq!(feeds.len(), 1);
+        assert_eq!(feeds[0].id, 1);
+        assert_eq!(feeds[0].name, "My Feed");
+        assert_eq!(feeds[0].url, "https://example.com/rss");
+        assert_eq!(feeds[0].interval_min, 30);
+        assert_eq!(feeds[0].category, "TV");
+    }
+
+    #[test]
+    fn extract_feeds_stops_on_gap() {
+        let content = "Feed1.Name=A\nFeed1.URL=http://a\nFeed3.Name=C\nFeed3.URL=http://c\n";
+        let parsed = parse_config(content).expect("parse");
+        let feeds = extract_feeds(&parsed);
+        assert_eq!(feeds.len(), 1);
     }
 }
