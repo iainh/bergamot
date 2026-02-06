@@ -59,17 +59,15 @@ downloader at all.
 
 ---
 
-## Phase 2 — Post-Processing Integration
+## Phase 2 — Post-Processing Integration ✅
 
-These items connect the post-processing pipeline to the download lifecycle.
-
-| # | Gap | Detail | Crates |
-|---|-----|--------|--------|
-| 6 | **Start PostProcessor in app.rs** | Create a channel, spawn `PostProcessor::run()`, wire it into the app lifecycle with shutdown. | `nzbg`, `nzbg-postproc` |
-| 7 | **Emit PostProcessRequest on NZB completion** | When the queue detects an NZB has finished downloading, send a `PostProcessRequest` to the postproc channel. | `nzbg-queue`, `nzbg` |
-| 8 | **PAR2 file discovery** | Find actual `.par2` files in the working directory instead of assuming `{nzb_name}.par2`. | `nzbg-postproc` |
-| 9 | **Update queue/history statuses from postproc** | Feed `par_status`, `unpack_status`, `move_status` back to the queue/history after each postproc stage completes. | `nzbg-postproc`, `nzbg-queue` |
-| 10 | **Extension execution during postproc** | Call `ExtensionRunner` at appropriate postproc stages (post-process scripts). Wire `ExtensionManager` with script discovery from `script_dir`. | `nzbg-postproc`, `nzbg-extension` |
+| # | Gap | Status |
+|---|-----|--------|
+| 6 | **Start PostProcessor in app.rs** | ✅ PostProcessor spawned with Par2CommandLine/CommandLineUnpacker, wired into shutdown |
+| 7 | **Emit PostProcessRequest on NZB completion** | ✅ NzbCompletionNotice emitted via completion_tx, forwarded to PostProcessRequest |
+| 8 | **PAR2 file discovery** | ✅ find_par2_file() discovers .par2 files in working directory |
+| 9 | **Update queue/history statuses from postproc** | ✅ QueueCommand::UpdatePostStatus updates par/unpack/move status on queue or history |
+| 10 | **Extension execution during postproc** | ✅ ExtensionExecutor trait called after move stage with par/unpack context |
 
 ---
 
