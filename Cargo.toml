@@ -5,4 +5,5 @@ members = [
   "crates/nzbg-core",
   "crates/nzbg-nzb",
   "crates/nzbg-nntp",
+  "crates/nzbg-yenc",
 ]
