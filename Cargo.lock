@@ -878,6 +878,7 @@ name = "nzbg-postproc"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
 ]

@@ -7,6 +7,9 @@ pub enum PostProcessError {
 
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
+
+    #[error("unpack error: {message}")]
+    Unpack { message: String },
 }
 
 #[derive(Debug, Error)]

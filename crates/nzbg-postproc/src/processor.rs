@@ -3,9 +3,12 @@ use std::sync::{Arc, Mutex};
 
 use tokio::sync::mpsc;
 
+use crate::cleanup::cleanup_archives;
 use crate::config::Config;
 use crate::error::PostProcessError;
+use crate::mover::{move_to_destination, resolve_dest_dir};
 use crate::par2::{Par2Engine, Par2Result};
+use crate::unpack::{UnpackResult, Unpacker, detect_archives};
 
 #[derive(Debug, Clone)]
 pub struct PostProcessRequest {
@@ -52,25 +55,28 @@ impl PostProcessContext {
     }
 }
 
-pub struct PostProcessor<E: Par2Engine> {
+pub struct PostProcessor<E: Par2Engine, U: Unpacker> {
     rx: mpsc::Receiver<PostProcessRequest>,
-    _config: Arc<Config>,
+    config: Arc<Config>,
     history: Arc<Mutex<Vec<String>>>,
     par2: Arc<E>,
+    unpacker: Arc<U>,
 }
 
-impl<E: Par2Engine> PostProcessor<E> {
+impl<E: Par2Engine, U: Unpacker> PostProcessor<E, U> {
     pub fn new(
         rx: mpsc::Receiver<PostProcessRequest>,
         config: Arc<Config>,
         history: Arc<Mutex<Vec<String>>>,
         par2: Arc<E>,
+        unpacker: Arc<U>,
     ) -> Self {
         Self {
             rx,
-            _config: config,
+            config,
             history,
             par2,
+            unpacker,
         }
     }
 
@@ -93,6 +99,22 @@ impl<E: Par2Engine> PostProcessor<E> {
             ctx.set_stage(PostStage::ParRepairing);
             let _ = self.par_repair(&ctx).await;
         }
+
+        ctx.set_stage(PostStage::Unpacking);
+        let _ = self.unpack(&ctx).await;
+
+        if self.config.unpack_cleanup_disk {
+            ctx.set_stage(PostStage::Cleanup);
+            let _ = cleanup_archives(&ctx.request.working_dir).await;
+        }
+
+        ctx.set_stage(PostStage::Moving);
+        let dest = resolve_dest_dir(
+            &self.config.dest_dir,
+            ctx.request.category.as_deref(),
+            self.config.append_category_dir,
+        );
+        let _ = move_to_destination(&ctx.request.working_dir, &dest).await;
 
         ctx.set_stage(PostStage::Finished);
         let mut history = self.history.lock().expect("history lock");
@@ -122,6 +144,28 @@ impl<E: Par2Engine> PostProcessor<E> {
             .await?;
         Ok(result)
     }
+
+    async fn unpack(&self, ctx: &PostProcessContext) -> Result<(), PostProcessError> {
+        let archives = detect_archives(&ctx.request.working_dir);
+        for (_, archive_path) in &archives {
+            let result = self
+                .unpacker
+                .unpack(archive_path, &ctx.request.working_dir)
+                .await;
+            match result {
+                UnpackResult::Success => {}
+                UnpackResult::Failure(msg) => {
+                    return Err(PostProcessError::Unpack { message: msg });
+                }
+                UnpackResult::Password => {
+                    return Err(PostProcessError::Unpack {
+                        message: "archive is password-protected".to_string(),
+                    });
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -129,6 +173,7 @@ mod tests {
     use super::*;
     use crate::par2::Par2Result;
     use async_trait::async_trait;
+    use std::path::Path;
 
     #[derive(Debug)]
     struct FakePar2;
@@ -137,40 +182,63 @@ mod tests {
     impl Par2Engine for FakePar2 {
         async fn verify(
             &self,
-            _par2_file: &std::path::Path,
-            _working_dir: &std::path::Path,
+            _par2_file: &Path,
+            _working_dir: &Path,
         ) -> Result<Par2Result, crate::error::Par2Error> {
             Ok(Par2Result::AllFilesOk)
         }
 
         async fn repair(
             &self,
-            _par2_file: &std::path::Path,
-            _working_dir: &std::path::Path,
+            _par2_file: &Path,
+            _working_dir: &Path,
         ) -> Result<Par2Result, crate::error::Par2Error> {
             Ok(Par2Result::RepairComplete)
         }
     }
 
-    #[tokio::test]
-    async fn post_processor_records_history() {
-        let (tx, rx) = mpsc::channel(1);
-        let config = Arc::new(Config {
+    #[derive(Debug)]
+    struct FakeUnpacker;
+
+    #[async_trait]
+    impl Unpacker for FakeUnpacker {
+        async fn unpack(&self, archive: &Path, working_dir: &Path) -> UnpackResult {
+            let stem = archive
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("out");
+            let output_file = working_dir.join(format!("{stem}.unpacked"));
+            let _ = std::fs::write(&output_file, b"extracted content");
+            UnpackResult::Success
+        }
+    }
+
+    fn test_config(dest_dir: PathBuf) -> Arc<Config> {
+        Arc::new(Config {
             par2_path: PathBuf::from("par2"),
-            dest_dir: PathBuf::from("/tmp"),
+            dest_dir,
             append_category_dir: false,
             password_file: None,
             unpack_cleanup_disk: false,
             ext_cleanup_disk: String::new(),
-        });
+        })
+    }
+
+    #[tokio::test]
+    async fn post_processor_records_history() {
+        let working = tempfile::tempdir().unwrap();
+        let dest = tempfile::tempdir().unwrap();
+        let (tx, rx) = mpsc::channel(1);
+        let config = test_config(dest.path().to_path_buf());
         let history = Arc::new(Mutex::new(Vec::new()));
         let par2 = Arc::new(FakePar2);
-        let mut processor = PostProcessor::new(rx, config, history.clone(), par2);
+        let unpacker = Arc::new(FakeUnpacker);
+        let mut processor = PostProcessor::new(rx, config, history.clone(), par2, unpacker);
 
         let request = PostProcessRequest {
             nzb_id: 1,
             nzb_name: "example".to_string(),
-            working_dir: PathBuf::from("/tmp/example"),
+            working_dir: working.path().to_path_buf(),
             category: None,
             parameters: vec![],
         };
@@ -185,5 +253,50 @@ mod tests {
 
         let history = history.lock().expect("lock");
         assert_eq!(history.as_slice(), ["example"]);
+    }
+
+    #[tokio::test]
+    async fn full_pipeline_unpack_cleanup_move() {
+        let working = tempfile::tempdir().unwrap();
+        let dest = tempfile::tempdir().unwrap();
+
+        std::fs::write(working.path().join("archive.rar"), b"rar data").unwrap();
+        std::fs::write(working.path().join("archive.r00"), b"r00 data").unwrap();
+        std::fs::write(working.path().join("archive.par2"), b"par2 data").unwrap();
+
+        let (tx, rx) = mpsc::channel(1);
+        let config = Arc::new(Config {
+            par2_path: PathBuf::from("par2"),
+            dest_dir: dest.path().to_path_buf(),
+            append_category_dir: true,
+            password_file: None,
+            unpack_cleanup_disk: true,
+            ext_cleanup_disk: String::new(),
+        });
+        let history = Arc::new(Mutex::new(Vec::new()));
+        let par2 = Arc::new(FakePar2);
+        let unpacker = Arc::new(FakeUnpacker);
+        let mut processor = PostProcessor::new(rx, config, history.clone(), par2, unpacker);
+
+        let request = PostProcessRequest {
+            nzb_id: 1,
+            nzb_name: "test_nzb".to_string(),
+            working_dir: working.path().to_path_buf(),
+            category: Some("movies".to_string()),
+            parameters: vec![],
+        };
+
+        let handle = tokio::spawn(async move {
+            processor.run().await;
+        });
+
+        tx.send(request).await.expect("send");
+        drop(tx);
+        handle.await.expect("join");
+
+        let history = history.lock().expect("lock");
+        assert_eq!(history.as_slice(), ["test_nzb"]);
+
+        assert!(dest.path().join("movies").join("archive.unpacked").exists());
     }
 }
