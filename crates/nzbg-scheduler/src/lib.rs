@@ -71,7 +71,7 @@ pub async fn shutdown_services(
 
 fn build_services(config: &Config, deps: ServiceDeps) -> anyhow::Result<Vec<Box<dyn Service>>> {
     let scheduler = Scheduler::from_config(config, deps.queue.clone())?;
-    let scanner = NzbDirScanner::from_config(config);
+    let scanner = NzbDirScanner::from_config(config).with_queue(deps.queue.clone());
     let disk_space = DiskSpaceMonitor::from_config(config);
     let history = HistoryCleanup::from_config(config);
     let stats = StatsTracker::from_config(config);
@@ -260,6 +260,7 @@ pub struct NzbDirScanner {
     nzb_dir: PathBuf,
     file_age: Duration,
     interval: Duration,
+    queue: Option<nzbg_queue::QueueHandle>,
 }
 
 impl NzbDirScanner {
@@ -270,10 +271,38 @@ impl NzbDirScanner {
             nzb_dir: config.nzb_dir.clone(),
             file_age: Duration::from_secs(file_age),
             interval: Duration::from_secs(interval),
+            queue: None,
         }
     }
 
-    async fn process_nzb(&self, _path: &Path) -> anyhow::Result<()> {
+    pub fn with_queue(mut self, queue: nzbg_queue::QueueHandle) -> Self {
+        self.queue = Some(queue);
+        self
+    }
+
+    async fn process_nzb(&self, path: &Path) -> anyhow::Result<()> {
+        if let Some(queue) = &self.queue {
+            let category = path.parent().and_then(|p| {
+                if p == self.nzb_dir {
+                    None
+                } else {
+                    p.file_name().map(|n| n.to_string_lossy().to_string())
+                }
+            });
+            let id = queue
+                .add_nzb(
+                    path.to_path_buf(),
+                    category,
+                    nzbg_core::models::Priority::Normal,
+                )
+                .await?;
+            tracing::info!("added NZB {} as id {}", path.display(), id);
+
+            let processed_path = path.with_extension("nzb.queued");
+            if let Err(err) = tokio::fs::rename(path, &processed_path).await {
+                tracing::warn!("failed to rename processed NZB {}: {}", path.display(), err);
+            }
+        }
         Ok(())
     }
 }
@@ -307,6 +336,51 @@ impl Service for NzbDirScanner {
 
         Ok(())
     }
+}
+
+pub async fn fetch_nzb_url(
+    url: &str,
+    dest_dir: &Path,
+    max_retries: u32,
+) -> anyhow::Result<PathBuf> {
+    let filename = url.rsplit('/').next().unwrap_or("download.nzb").to_string();
+    let dest_path = dest_dir.join(&filename);
+    let temp_path = dest_dir.join(format!("{filename}.tmp"));
+
+    let mut attempt = 0;
+    let mut last_error = None;
+    while attempt <= max_retries {
+        if attempt > 0 {
+            let delay = Duration::from_millis(250 * (1 << attempt.min(4)));
+            tokio::time::sleep(delay).await;
+        }
+        attempt += 1;
+
+        match fetch_url_once(url).await {
+            Ok(data) => {
+                tokio::fs::write(&temp_path, &data).await?;
+                tokio::fs::rename(&temp_path, &dest_path).await?;
+                tracing::info!("fetched NZB from {} -> {}", url, dest_path.display());
+                return Ok(dest_path);
+            }
+            Err(err) => {
+                tracing::warn!("fetch attempt {attempt} for {url} failed: {err}");
+                last_error = Some(err);
+            }
+        }
+    }
+
+    Err(last_error.unwrap_or_else(|| anyhow::anyhow!("fetch failed with no error")))
+}
+
+async fn fetch_url_once(url: &str) -> anyhow::Result<Vec<u8>> {
+    let resp = reqwest::get(url).await?;
+    let status = resp.status();
+    if !status.is_success() {
+        anyhow::bail!("HTTP {status} for {url}");
+    }
+    let bytes = resp.bytes().await?;
+    Ok(bytes.to_vec())
 }
 
 pub struct DiskSpaceMonitor {
@@ -960,6 +1034,81 @@ mod tests {
         let loaded = disk.load_queue().expect("load");
         assert_eq!(loaded.nzbs.len(), 1);
         assert_eq!(loaded.nzbs[0].name, "test.nzb");
+
+        handle.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn nzb_dir_scanner_processes_nzb_files() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let nzb_path = tmp.path().join("test.nzb");
+        std::fs::write(&nzb_path, "nzb content").expect("write");
+
+        let (mut coordinator, handle, _rx) = nzbg_queue::QueueCoordinator::new(2, 1);
+        tokio::spawn(async move { coordinator.run().await });
+
+        let mut scanner = NzbDirScanner {
+            nzb_dir: tmp.path().to_path_buf(),
+            file_age: Duration::from_secs(0),
+            interval: Duration::from_secs(5),
+            queue: Some(handle.clone()),
+        };
+
+        scanner.tick().await.expect("tick");
+
+        let list = handle.get_nzb_list().await.expect("list");
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].name, "test.nzb");
+
+        assert!(tmp.path().join("test.nzb.queued").exists());
+        assert!(!nzb_path.exists());
+
+        handle.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn nzb_dir_scanner_skips_non_nzb_files() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        std::fs::write(tmp.path().join("readme.txt"), "text").expect("write");
+
+        let (mut coordinator, handle, _rx) = nzbg_queue::QueueCoordinator::new(2, 1);
+        tokio::spawn(async move { coordinator.run().await });
+
+        let mut scanner = NzbDirScanner {
+            nzb_dir: tmp.path().to_path_buf(),
+            file_age: Duration::from_secs(0),
+            interval: Duration::from_secs(5),
+            queue: Some(handle.clone()),
+        };
+
+        scanner.tick().await.expect("tick");
+
+        let list = handle.get_nzb_list().await.expect("list");
+        assert!(list.is_empty());
+
+        handle.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn nzb_dir_scanner_idempotent_on_second_run() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        std::fs::write(tmp.path().join("test.nzb"), "nzb").expect("write");
+
+        let (mut coordinator, handle, _rx) = nzbg_queue::QueueCoordinator::new(2, 1);
+        tokio::spawn(async move { coordinator.run().await });
+
+        let mut scanner = NzbDirScanner {
+            nzb_dir: tmp.path().to_path_buf(),
+            file_age: Duration::from_secs(0),
+            interval: Duration::from_secs(5),
+            queue: Some(handle.clone()),
+        };
+
+        scanner.tick().await.expect("tick1");
+        scanner.tick().await.expect("tick2");
+
+        let list = handle.get_nzb_list().await.expect("list");
+        assert_eq!(list.len(), 1);
 
         handle.shutdown().await.expect("shutdown");
     }
