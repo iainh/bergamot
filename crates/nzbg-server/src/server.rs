@@ -1,16 +1,22 @@
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use axum::extract::State as AxumState;
+use axum::http::{StatusCode, header};
+use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router, middleware};
 use tokio::net::TcpListener;
+use tower::Service;
 use tower_http::compression::CompressionLayer;
 use tower_http::cors::CorsLayer;
 use tower_http::services::ServeDir;
 
-use axum::http::StatusCode;
-
-use crate::auth::{AccessLevel, AuthState, auth_middleware, authenticate, required_access};
+use crate::auth::{
+    AccessLevel, AuthState, auth_middleware, authenticate, extract_access, required_access,
+    unauthorized_response,
+};
 use crate::config::ServerConfig;
 use crate::error::{JsonRpcError, JsonRpcErrorBody};
 use crate::rpc::{JsonRpcRequest, JsonRpcResponse, dispatch_rpc};
@@ -161,14 +167,93 @@ impl AppState {
 
     pub fn status(&self) -> StatusResponse {
         let remaining = self.remaining_bytes.load(Ordering::Relaxed);
-        let fields = crate::status::SizeFields::from(remaining);
+        let remaining_fields = crate::status::SizeFields::from(remaining);
+        let download_rate = self.download_rate.load(Ordering::Relaxed);
+        let rate_fields = crate::status::SizeFields::from(download_rate);
+        let post_paused = self.postproc_paused.load(Ordering::Relaxed);
+        let scan_paused = self.scan_paused.load(Ordering::Relaxed);
+
+        let (dest_dir, inter_dir) = self
+            .config
+            .as_ref()
+            .map(|c| {
+                let cfg = c.read().unwrap();
+                (cfg.dest_dir.clone(), cfg.inter_dir.clone())
+            })
+            .unwrap_or_default();
+
+        let (dest_free, dest_total) = disk_space(&dest_dir);
+        let (inter_free, inter_total) = disk_space(&inter_dir);
+
+        let dest_free_fields = crate::status::SizeFields::from(dest_free);
+        let dest_total_fields = crate::status::SizeFields::from(dest_total);
+        let inter_free_fields = crate::status::SizeFields::from(inter_free);
+        let inter_total_fields = crate::status::SizeFields::from(inter_total);
+
         StatusResponse {
-            remaining_size_lo: fields.lo,
-            remaining_size_hi: fields.hi,
-            remaining_size_mb: fields.mb,
-            download_rate: self.download_rate.load(Ordering::Relaxed),
+            remaining_size_lo: remaining_fields.lo,
+            remaining_size_hi: remaining_fields.hi,
+            remaining_size_mb: remaining_fields.mb,
+            forced_size_lo: 0,
+            forced_size_hi: 0,
+            forced_size_mb: 0,
+            downloaded_size_lo: 0,
+            downloaded_size_hi: 0,
+            downloaded_size_mb: 0,
+            month_size_lo: 0,
+            month_size_hi: 0,
+            month_size_mb: 0,
+            day_size_lo: 0,
+            day_size_hi: 0,
+            day_size_mb: 0,
+            article_cache_lo: 0,
+            article_cache_hi: 0,
+            article_cache_mb: 0,
+            download_rate,
+            download_rate_lo: rate_fields.lo,
+            download_rate_hi: rate_fields.hi,
+            average_download_rate: 0,
+            average_download_rate_lo: 0,
+            average_download_rate_hi: 0,
+            download_limit: 0,
+            thread_count: 0,
+            post_job_count: 0,
+            par_job_count: 0,
+            url_count: 0,
+            queue_script_count: 0,
+            up_time_sec: self.start_time.elapsed().as_secs(),
+            download_time_sec: 0,
+            server_time: chrono::Utc::now().timestamp(),
+            resume_time: 0,
+            download_paused: false,
+            server_paused: false,
+            download2_paused: false,
+            post_paused,
+            scan_paused,
+            server_stand_by: true,
+            quota_reached: false,
+            feed_active: false,
+            free_disk_space_lo: dest_free_fields.lo,
+            free_disk_space_hi: dest_free_fields.hi,
+            free_disk_space_mb: dest_free_fields.mb,
+            total_disk_space_lo: dest_total_fields.lo,
+            total_disk_space_hi: dest_total_fields.hi,
+            total_disk_space_mb: dest_total_fields.mb,
+            free_inter_disk_space_lo: inter_free_fields.lo,
+            free_inter_disk_space_hi: inter_free_fields.hi,
+            free_inter_disk_space_mb: inter_free_fields.mb,
+            total_inter_disk_space_lo: inter_total_fields.lo,
+            total_inter_disk_space_hi: inter_total_fields.hi,
+            total_inter_disk_space_mb: inter_total_fields.mb,
+            news_servers: vec![],
         }
     }
+}
+
+fn disk_space(path: &std::path::Path) -> (u64, u64) {
+    let free = fs2::available_space(path).unwrap_or(0);
+    let total = fs2::total_space(path).unwrap_or(0);
+    (free, total)
 }
 
 pub fn spawn_stats_updater(
@@ -242,7 +327,62 @@ impl WebServer {
                 .route("/logout", post(handle_logout));
         }
 
-        app.fallback_service(ServeDir::new(&self.config.web_dir))
+        let web_dir = self.config.web_dir.clone();
+        let combined_routes = Router::new()
+            .route("/combined.css", get(handle_combined_file))
+            .route("/combined.js", get(handle_combined_file))
+            .with_state(web_dir);
+
+        let fallback_state = self.state.clone();
+        let fallback_auth = auth_state;
+        let serve_dir = ServeDir::new(&self.config.web_dir);
+        let fallback = axum::routing::any(
+            move |req: axum::http::Request<axum::body::Body>| {
+                let state = fallback_state.clone();
+                let auth = fallback_auth.clone();
+                let serve_dir = serve_dir.clone();
+                async move {
+                    let path = req.uri().path().to_string();
+                    if let Some(method) = path.strip_prefix("/jsonrpc/") {
+                        if !method.is_empty() && req.method() == axum::http::Method::GET {
+                            let access = extract_access(&req, &auth.config);
+                            let required = required_access(method);
+                            if access > required || access == AccessLevel::Denied {
+                                return unauthorized_response().into_response();
+                            }
+                            let params = parse_query_params(req.uri().query());
+                            let result =
+                                dispatch_rpc(method, &params, &state).await;
+                            let response = match result {
+                                Ok(value) => JsonRpcResponse {
+                                    jsonrpc: "2.0".to_string(),
+                                    result: Some(value),
+                                    error: None,
+                                    id: serde_json::json!(0),
+                                },
+                                Err(err) => JsonRpcResponse {
+                                    jsonrpc: "2.0".to_string(),
+                                    result: None,
+                                    error: Some(
+                                        serde_json::to_value(JsonRpcErrorBody::from(err)).unwrap(),
+                                    ),
+                                    id: serde_json::json!(0),
+                                },
+                            };
+                            return Json(response).into_response();
+                        }
+                    }
+                    let mut serve_dir = serve_dir;
+                    match serve_dir.call(req).await {
+                        Ok(r) => r.map(axum::body::Body::new).into_response(),
+                        Err(_) => StatusCode::NOT_FOUND.into_response(),
+                    }
+                }
+            },
+        );
+
+        app.merge(combined_routes)
+            .fallback_service(fallback)
             .layer(CompressionLayer::new().gzip(true))
             .layer(CorsLayer::permissive())
     }
@@ -369,6 +509,41 @@ async fn handle_xmlrpc(
     }
 }
 
+async fn handle_combined_file(
+    AxumState(web_dir): AxumState<PathBuf>,
+    uri: axum::http::Uri,
+) -> impl IntoResponse {
+    let path = uri.path();
+    let content_type = if path.ends_with(".css") {
+        "text/css"
+    } else {
+        "application/javascript"
+    };
+
+    let query = uri.query().unwrap_or("");
+    let files: Vec<&str> = query.split('+').collect();
+
+    let mut combined = String::new();
+    for file in &files {
+        let file_path = web_dir.join(file);
+        match std::fs::read_to_string(&file_path) {
+            Ok(contents) => {
+                combined.push_str(&contents);
+                combined.push('\n');
+            }
+            Err(_) => {
+                return (
+                    StatusCode::NOT_FOUND,
+                    format!("File not found: {file}"),
+                )
+                    .into_response();
+            }
+        }
+    }
+
+    ([(header::CONTENT_TYPE, content_type)], combined).into_response()
+}
+
 async fn handle_login_page() -> axum::response::Html<&'static str> {
     axum::response::Html(
         r#"<!DOCTYPE html>
@@ -422,10 +597,34 @@ async fn handle_logout() -> axum::response::Response {
         .into_response()
 }
 
+fn parse_query_params(query: Option<&str>) -> serde_json::Value {
+    match query {
+        Some(q) if !q.is_empty() => {
+            let values: Vec<serde_json::Value> = q
+                .split('&')
+                .filter_map(|pair| {
+                    let val = pair
+                        .strip_prefix('=')
+                        .unwrap_or(pair.split_once('=').map(|(_, v)| v).unwrap_or(pair));
+                    if val.is_empty() {
+                        return None;
+                    }
+                    let decoded =
+                        percent_encoding::percent_decode_str(val).decode_utf8_lossy();
+                    Some(serde_json::Value::String(decoded.into_owned()))
+                })
+                .collect();
+            serde_json::Value::Array(values)
+        }
+        _ => serde_json::json!([]),
+    }
+}
+
 async fn handle_api_shortcut(
     axum::extract::State(state): axum::extract::State<Arc<AppState>>,
     axum::extract::Path(method): axum::extract::Path<String>,
     axum::Extension(access): axum::Extension<AccessLevel>,
+    uri: axum::http::Uri,
 ) -> Result<Json<JsonRpcResponse>, Json<JsonRpcResponse>> {
     let required = required_access(&method);
     if access < required {
@@ -441,7 +640,8 @@ async fn handle_api_shortcut(
         }));
     }
 
-    let result = dispatch_rpc(&method, &serde_json::json!([]), &state).await;
+    let params = parse_query_params(uri.query());
+    let result = dispatch_rpc(&method, &params, &state).await;
     match result {
         Ok(value) => Ok(Json(JsonRpcResponse {
             jsonrpc: "2.0".to_string(),
@@ -553,6 +753,24 @@ mod tests {
             .header("Authorization", "Basic YWRtaW46c2VjcmV0")
             .header("Content-Type", "application/json")
             .body(Body::from(body))
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn jsonrpc_get_shortcut_returns_status() {
+        let state = Arc::new(AppState::default());
+        let config = Arc::new(server_config());
+        let server = WebServer::new(config, state);
+        let app = server.build_router();
+
+        let request = Request::builder()
+            .uri("/jsonrpc/status")
+            .method("GET")
+            .header("Authorization", "Basic YWRtaW46c2VjcmV0")
+            .body(Body::empty())
             .unwrap();
 
         let response = app.oneshot(request).await.unwrap();

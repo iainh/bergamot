@@ -86,10 +86,10 @@ fn main() -> Result<()> {
         };
 
         let config = app::load_config(&config_path)?;
-        let _log_buffer = app::init_tracing(&cli.log_level);
+        let log_buffer = app::init_tracing(&cli.log_level);
 
         tracing::info!("nzbg starting");
         let fetcher = build_fetcher(&config);
-        app::run(config, fetcher).await
+        app::run_with_config_path(config, fetcher, Some(config_path), Some(log_buffer)).await
     })
 }

@@ -45,7 +45,7 @@ pub async fn dispatch_rpc(
         "writelog" => rpc_writelog(params, state),
         "loadlog" => rpc_loadlog(params, state),
         "log" => rpc_loadlog(params, state),
-        "servervolumes" => Ok(serde_json::json!([])),
+        "servervolumes" => rpc_servervolumes(state),
         "config" | "loadconfig" => rpc_loadconfig(state),
         "saveconfig" => rpc_saveconfig(params, state),
         "configtemplates" => rpc_configtemplates(),
@@ -61,6 +61,24 @@ pub async fn dispatch_rpc(
         "feeds" => rpc_feeds(state).await,
         "sysinfo" => rpc_sysinfo(state),
         "systemhealth" => rpc_systemhealth(state),
+        "loadextensions" => Ok(serde_json::json!([])),
+        "testserver" => Ok(serde_json::json!("")),
+        "editserver" => Ok(serde_json::json!(true)),
+        "scheduleresume" => Ok(serde_json::json!(true)),
+        "reload" => Ok(serde_json::json!(true)),
+        "clearlog" => Ok(serde_json::json!(true)),
+        "readurl" => {
+            let arr = params.as_array();
+            let url = arr.and_then(|a| a.first()).and_then(|v| v.as_str()).unwrap_or("");
+            match reqwest::get(url).await {
+                Ok(resp) => {
+                    let body = resp.text().await.unwrap_or_default();
+                    Ok(serde_json::json!(body))
+                }
+                Err(e) => Err(JsonRpcError { code: -32000, message: e.to_string() }),
+            }
+        }
+        "testextension" => Ok(serde_json::json!("")),
         _ => Err(JsonRpcError {
             code: -32601,
             message: format!("Method not found: {method}"),
@@ -163,15 +181,63 @@ async fn rpc_append(
 
 async fn rpc_listgroups(state: &AppState) -> Result<serde_json::Value, JsonRpcError> {
     let queue = require_queue(state)?;
-    let list = queue.get_nzb_list().await.map_err(rpc_error)?;
+    let snapshot = queue.get_queue_snapshot().await.map_err(rpc_error)?;
 
-    let entries: Vec<serde_json::Value> = list
+    let entries: Vec<serde_json::Value> = snapshot
+        .nzbs
         .into_iter()
         .map(|entry| {
+            let remaining_size = entry.total_size.saturating_sub(entry.downloaded_size);
+            let file_size_mb = (entry.total_size / (1024 * 1024)) as u64;
+            let file_size_lo = (entry.total_size & 0xFFFF_FFFF) as u32;
+            let remaining_size_mb = (remaining_size / (1024 * 1024)) as u64;
+            let remaining_size_lo = (remaining_size & 0xFFFF_FFFF) as u32;
+
+            let status = if entry.paused {
+                "PAUSED"
+            } else if remaining_size > 0 {
+                "QUEUED"
+            } else {
+                "QUEUED"
+            };
+
+            let server_stats: Vec<serde_json::Value> = Vec::new();
+            let parameters: Vec<serde_json::Value> = entry
+                .parameters
+                .iter()
+                .map(|(name, value)| {
+                    serde_json::json!({
+                        "Name": name,
+                        "Value": value,
+                    })
+                })
+                .collect();
+
             serde_json::json!({
                 "NZBID": entry.id,
                 "NZBName": entry.name,
-                "Priority": entry.priority as i32,
+                "Status": status,
+                "Category": entry.category,
+                "FileSizeMB": file_size_mb,
+                "FileSizeLo": file_size_lo,
+                "RemainingSizeMB": remaining_size_mb,
+                "RemainingSizeLo": remaining_size_lo,
+                "PausedSizeMB": 0,
+                "PausedSizeLo": 0,
+                "MaxPriority": entry.priority as i32,
+                "DupeKey": entry.dupe_key,
+                "DupeScore": entry.dupe_score,
+                "DupeMode": entry.dupe_mode as u32,
+                "MinPostTime": 0,
+                "ActiveDownloads": 0,
+                "Health": entry.health,
+                "CriticalHealth": entry.critical_health,
+                "Kind": "NZB",
+                "PostTotalTimeSec": 0,
+                "SuccessArticles": entry.success_article_count,
+                "FailedArticles": entry.failed_article_count,
+                "ServerStats": server_stats,
+                "Parameters": parameters,
             })
         })
         .collect();
@@ -325,6 +391,7 @@ async fn rpc_listfiles(
                 "SuccessArticles": f.success_articles,
                 "FailedArticles": f.failed_articles,
                 "ActiveDownloads": f.active_downloads,
+                "PostTime": 0,
             })
         })
         .collect();
@@ -403,9 +470,21 @@ fn rpc_sysinfo(state: &AppState) -> Result<serde_json::Value, JsonRpcError> {
     let uptime_sec = state.start_time().elapsed().as_secs();
     Ok(serde_json::json!({
         "Version": state.version(),
-        "OS": std::env::consts::OS,
-        "Arch": std::env::consts::ARCH,
         "UptimeSec": uptime_sec,
+        "OS": {
+            "Name": std::env::consts::OS,
+            "Version": "",
+        },
+        "CPU": {
+            "Model": "",
+            "Arch": std::env::consts::ARCH,
+        },
+        "Network": {
+            "PrivateIP": "",
+            "PublicIP": "",
+        },
+        "Tools": [],
+        "Libraries": [],
     }))
 }
 
@@ -414,6 +493,8 @@ fn rpc_systemhealth(state: &AppState) -> Result<serde_json::Value, JsonRpcError>
     Ok(serde_json::json!({
         "Healthy": queue_available,
         "QueueAvailable": queue_available,
+        "Alerts": [],
+        "Sections": [],
     }))
 }
 
@@ -473,17 +554,17 @@ fn rpc_saveconfig(
 }
 
 fn rpc_configtemplates() -> Result<serde_json::Value, JsonRpcError> {
-    let templates = vec![
-        serde_json::json!({"Name": "MainDir", "DisplayName": "Main Directory", "Section": "Paths", "Type": "string"}),
-        serde_json::json!({"Name": "DestDir", "DisplayName": "Destination Directory", "Section": "Paths", "Type": "string"}),
-        serde_json::json!({"Name": "InterDir", "DisplayName": "Intermediate Directory", "Section": "Paths", "Type": "string"}),
-        serde_json::json!({"Name": "NzbDir", "DisplayName": "NZB Directory", "Section": "Paths", "Type": "string"}),
-        serde_json::json!({"Name": "ControlIP", "DisplayName": "Control IP", "Section": "Server", "Type": "string"}),
-        serde_json::json!({"Name": "ControlPort", "DisplayName": "Control Port", "Section": "Server", "Type": "number"}),
-        serde_json::json!({"Name": "DownloadRate", "DisplayName": "Download Rate", "Section": "Download", "Type": "number"}),
-        serde_json::json!({"Name": "ArticleCache", "DisplayName": "Article Cache", "Section": "Download", "Type": "number"}),
-        serde_json::json!({"Name": "DiskSpace", "DisplayName": "Disk Space", "Section": "Download", "Type": "number"}),
-    ];
+    let template = include_str!("nzbget.conf.template");
+    let templates = vec![serde_json::json!({
+        "Name": "nzbg",
+        "DisplayName": "nzbg",
+        "PostScript": false,
+        "ScanScript": false,
+        "QueueScript": false,
+        "SchedulerScript": false,
+        "FeedScript": false,
+        "Template": template,
+    })];
     Ok(serde_json::json!(templates))
 }
 
@@ -523,6 +604,53 @@ fn rpc_writelog(
     });
 
     Ok(serde_json::json!(true))
+}
+
+fn empty_server_volume(server_id: u32) -> serde_json::Value {
+    let zero_size = serde_json::json!({"SizeLo": 0, "SizeHi": 0, "SizeMB": 0});
+    let zero_article = serde_json::json!({"Failed": 0, "Success": 0});
+    let now = chrono::Utc::now().timestamp();
+    let first_day = (now / 86400) as i64;
+    let day_slot = 0i64;
+    let seconds: Vec<_> = (0..60).map(|_| zero_size.clone()).collect();
+    let minutes: Vec<_> = (0..60).map(|_| zero_size.clone()).collect();
+    let hours: Vec<_> = (0..24).map(|_| zero_size.clone()).collect();
+    let days = vec![zero_size.clone()];
+    let article_days = vec![zero_article.clone()];
+    serde_json::json!({
+        "ServerID": server_id,
+        "DataTime": now,
+        "FirstDay": first_day,
+        "TotalSizeLo": 0,
+        "TotalSizeHi": 0,
+        "TotalSizeMB": 0,
+        "CustomSizeLo": 0,
+        "CustomSizeHi": 0,
+        "CustomSizeMB": 0,
+        "CustomTime": now,
+        "CountersResetTime": now,
+        "SecSlot": 0,
+        "MinSlot": 0,
+        "HourSlot": 0,
+        "DaySlot": day_slot,
+        "BytesPerSeconds": seconds,
+        "BytesPerMinutes": minutes,
+        "BytesPerHours": hours,
+        "BytesPerDays": days,
+        "ArticlesPerDays": article_days,
+    })
+}
+
+fn rpc_servervolumes(state: &AppState) -> Result<serde_json::Value, JsonRpcError> {
+    let mut volumes = vec![empty_server_volume(0)];
+    if let Some(config) = state.config() {
+        if let Ok(config) = config.read() {
+            for server in &config.servers {
+                volumes.push(empty_server_volume(server.id));
+            }
+        }
+    }
+    Ok(serde_json::json!(volumes))
 }
 
 fn rpc_loadlog(
@@ -590,26 +718,64 @@ async fn rpc_history(
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_secs())
                 .unwrap_or(0);
-            serde_json::json!({
-                "NZBID": e.id,
-                "Name": e.name,
-                "Category": e.category,
-                "FileSizeLo": (e.size & 0xFFFF_FFFF) as u32,
-                "FileSizeHi": (e.size >> 32) as u32,
-                "HistoryTime": time_secs,
-                "ParStatus": e.par_status as u32,
-                "UnpackStatus": e.unpack_status as u32,
-                "MoveStatus": e.move_status as u32,
-                "DeleteStatus": e.delete_status as u32,
-                "MarkStatus": e.mark_status as u32,
-                "Health": e.health,
-                "Kind": match e.kind {
-                    nzbg_core::models::HistoryKind::Nzb => "NZB",
-                    nzbg_core::models::HistoryKind::Url => "URL",
-                    nzbg_core::models::HistoryKind::DupHidden => "DUP",
-                },
-                "Status": format_history_status(&e),
-            })
+            let file_size_lo = (e.size & 0xFFFF_FFFF) as u32;
+            let file_size_hi = (e.size >> 32) as u32;
+            let file_size_mb = (e.size / (1024 * 1024)) as u32;
+            let kind = match e.kind {
+                nzbg_core::models::HistoryKind::Nzb => "NZB",
+                nzbg_core::models::HistoryKind::Url => "URL",
+                nzbg_core::models::HistoryKind::DupHidden => "DUP",
+            };
+            let status = format_history_status(&e);
+            let mut m = serde_json::Map::new();
+            m.insert("ID".into(), serde_json::json!(e.id));
+            m.insert("NZBID".into(), serde_json::json!(e.id));
+            m.insert("Kind".into(), serde_json::json!(kind));
+            m.insert("Name".into(), serde_json::json!(e.name));
+            m.insert("Status".into(), serde_json::json!(status));
+            m.insert("FileSizeMB".into(), serde_json::json!(file_size_mb));
+            m.insert("FileSizeLo".into(), serde_json::json!(file_size_lo));
+            m.insert("FileSizeHi".into(), serde_json::json!(file_size_hi));
+            m.insert("Category".into(), serde_json::json!(e.category));
+            m.insert("HistoryTime".into(), serde_json::json!(time_secs));
+            m.insert("MinPostTime".into(), serde_json::json!(0));
+            m.insert("DupeKey".into(), serde_json::json!(""));
+            m.insert("DupeScore".into(), serde_json::json!(0));
+            m.insert("DupeMode".into(), serde_json::json!("SCORE"));
+            m.insert("ParStatus".into(), serde_json::json!(e.par_status as u32));
+            m.insert("UnpackStatus".into(), serde_json::json!(e.unpack_status as u32));
+            m.insert("MoveStatus".into(), serde_json::json!(e.move_status as u32));
+            m.insert("ScriptStatus".into(), serde_json::json!(0));
+            m.insert("DeleteStatus".into(), serde_json::json!(e.delete_status as u32));
+            m.insert("MarkStatus".into(), serde_json::json!(e.mark_status as u32));
+            m.insert("UrlStatus".into(), serde_json::json!(0));
+            m.insert("DupStatus".into(), serde_json::json!(0));
+            m.insert("ExParStatus".into(), serde_json::json!(0));
+            m.insert("ExtraParBlocks".into(), serde_json::json!(0));
+            m.insert("Health".into(), serde_json::json!(e.health));
+            m.insert("CriticalHealth".into(), serde_json::json!(0));
+            m.insert("Parameters".into(), serde_json::json!([]));
+            m.insert("ServerStats".into(), serde_json::json!([]));
+            m.insert("SuccessArticles".into(), serde_json::json!(0));
+            m.insert("FailedArticles".into(), serde_json::json!(0));
+            m.insert("TotalArticles".into(), serde_json::json!(0));
+            m.insert("RemainingFileCount".into(), serde_json::json!(0));
+            m.insert("FileCount".into(), serde_json::json!(0));
+            m.insert("RetryData".into(), serde_json::json!(false));
+            m.insert("FinalDir".into(), serde_json::json!(""));
+            m.insert("DestDir".into(), serde_json::json!(""));
+            m.insert("URL".into(), serde_json::json!(""));
+            m.insert("DownloadedSizeMB".into(), serde_json::json!(file_size_mb));
+            m.insert("DownloadedSizeLo".into(), serde_json::json!(file_size_lo));
+            m.insert("DownloadTimeSec".into(), serde_json::json!(0));
+            m.insert("PostTotalTimeSec".into(), serde_json::json!(0));
+            m.insert("ParTimeSec".into(), serde_json::json!(0));
+            m.insert("RepairTimeSec".into(), serde_json::json!(0));
+            m.insert("UnpackTimeSec".into(), serde_json::json!(0));
+            m.insert("MessageCount".into(), serde_json::json!(0));
+            m.insert("ScriptStatuses".into(), serde_json::json!([]));
+            m.insert("NZBFilename".into(), serde_json::json!(""));
+            serde_json::Value::Object(m)
         })
         .collect();
     Ok(serde_json::json!(result))
@@ -918,12 +1084,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn dispatch_servervolumes_returns_empty_array() {
+    async fn dispatch_servervolumes_returns_total_volume() {
         let state = AppState::default();
         let result = dispatch_rpc("servervolumes", &serde_json::json!([]), &state)
             .await
             .expect("servervolumes");
-        assert_eq!(result, serde_json::json!([]));
+        let volumes = result.as_array().expect("array");
+        assert_eq!(volumes.len(), 1);
+        assert_eq!(volumes[0]["ServerID"], 0);
     }
 
     fn state_with_config() -> (AppState, tempfile::TempDir) {
@@ -978,8 +1146,10 @@ mod tests {
             .await
             .expect("configtemplates");
         let entries = result.as_array().expect("array");
-        assert!(entries.iter().any(|e| e["Name"] == "MainDir"));
-        assert!(entries.iter().any(|e| e["Name"] == "ControlPort"));
+        assert!(entries.iter().any(|e| e["Name"] == "nzbg"));
+        let template = entries[0]["Template"].as_str().expect("template string");
+        assert!(template.contains("MainDir"));
+        assert!(template.contains("ControlPort"));
     }
 
     #[tokio::test]
@@ -1107,8 +1277,8 @@ mod tests {
             .await
             .expect("sysinfo");
         assert_eq!(result["Version"], "0.1.0");
-        assert!(result["OS"].as_str().is_some());
-        assert!(result["Arch"].as_str().is_some());
+        assert!(result["OS"]["Name"].as_str().is_some());
+        assert!(result["CPU"]["Arch"].as_str().is_some());
         assert!(result["UptimeSec"].as_u64().is_some());
     }
 

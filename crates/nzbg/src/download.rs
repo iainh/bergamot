@@ -67,16 +67,15 @@ pub async fn download_worker(
         let cache = cache.clone();
         let writer_pool = writer_pool.clone();
         tokio::spawn(async move {
+            limiter.lock().await.acquire(assignment.expected_size).await;
+
             let result =
                 fetch_and_decode(&fetcher, &assignment, &dir, cache.as_ref(), &writer_pool).await;
             let download_result = match result {
-                Ok((data, offset, crc)) => {
-                    limiter.lock().await.acquire(data.len() as u64).await;
-                    DownloadResult {
-                        article_id: assignment.article_id,
-                        outcome: DownloadOutcome::Success { data, offset, crc },
-                    }
-                }
+                Ok((data, offset, crc)) => DownloadResult {
+                    article_id: assignment.article_id,
+                    outcome: DownloadOutcome::Success { data, offset, crc },
+                },
                 Err(err) => DownloadResult {
                     article_id: assignment.article_id,
                     outcome: DownloadOutcome::Failure {
@@ -170,6 +169,7 @@ mod tests {
             message_id: "test@example".to_string(),
             groups: vec!["alt.test".to_string()],
             output_filename: "data.rar".to_string(),
+            expected_size: 100,
         };
 
         let cache = NoopCache;
@@ -198,6 +198,7 @@ mod tests {
             message_id: "test@example".to_string(),
             groups: vec![],
             output_filename: "data.rar".to_string(),
+            expected_size: 100,
         };
 
         let cache = NoopCache;
@@ -230,6 +231,7 @@ mod tests {
             message_id: "test@example".to_string(),
             groups: vec![],
             output_filename: "data.rar".to_string(),
+            expected_size: 100,
         };
 
         let (tx, rx) = tokio::sync::mpsc::channel(1);

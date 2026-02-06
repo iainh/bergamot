@@ -7,6 +7,10 @@ use crate::error::NntpError;
 use crate::model::NewsServer;
 use crate::protocol::NntpConnection;
 
+pub trait StatsRecorder: Send + Sync {
+    fn record_bytes(&self, server_id: u32, bytes: u64);
+}
+
 #[async_trait::async_trait]
 pub trait ConnectionFactory: Send + Sync {
     async fn connect(&self, server: &NewsServer) -> Result<NntpConnection, NntpError>;
@@ -24,7 +28,7 @@ impl ConnectionFactory for RealConnectionFactory {
 struct ServerState {
     server: NewsServer,
     semaphore: Arc<Semaphore>,
-    idle_connections: Mutex<Vec<NntpConnection>>,
+    idle_connections: Mutex<Vec<(NntpConnection, Instant)>>,
     backoff_until: Mutex<Option<Instant>>,
     fail_count: Mutex<u32>,
 }
@@ -32,6 +36,7 @@ struct ServerState {
 pub struct ServerPool<F: ConnectionFactory = RealConnectionFactory> {
     servers: Vec<Arc<ServerState>>,
     factory: Arc<F>,
+    stats: Option<Arc<dyn StatsRecorder>>,
 }
 
 impl ServerPool<RealConnectionFactory> {
@@ -63,7 +68,13 @@ impl<F: ConnectionFactory> ServerPool<F> {
         Self {
             servers: server_states,
             factory,
+            stats: None,
         }
+    }
+
+    pub fn with_stats(mut self, stats: Arc<dyn StatsRecorder>) -> Self {
+        self.stats = Some(stats);
+        self
     }
 
     pub async fn fetch_article(
@@ -141,14 +152,20 @@ impl<F: ConnectionFactory> ServerPool<F> {
 
         self.return_connection(state, conn).await;
         let data = body_lines.join(&b'\n');
+        if let Some(stats) = &self.stats {
+            stats.record_bytes(state.server.id, data.len() as u64);
+        }
         Ok(data)
     }
 
     async fn acquire_connection(&self, state: &ServerState) -> Result<NntpConnection, NntpError> {
         {
             let mut idle = state.idle_connections.lock().await;
-            if let Some(conn) = idle.pop() {
-                return Ok(conn);
+            let max_idle = Duration::from_secs(60);
+            while let Some((conn, last_used)) = idle.pop() {
+                if last_used.elapsed() < max_idle {
+                    return Ok(conn);
+                }
             }
         }
 
@@ -163,7 +180,34 @@ impl<F: ConnectionFactory> ServerPool<F> {
 
     async fn return_connection(&self, state: &ServerState, conn: NntpConnection) {
         let mut idle = state.idle_connections.lock().await;
-        idle.push(conn);
+        let max_pool = state.server.connections.max(1) as usize;
+        if idle.len() < max_pool {
+            idle.push((conn, Instant::now()));
+        }
+    }
+
+    pub async fn cleanup_idle_connections(&self, max_idle: Duration) -> usize {
+        let mut total_closed = 0;
+        for state in &self.servers {
+            total_closed += Self::cleanup_idle(state, max_idle).await;
+        }
+        total_closed
+    }
+
+    async fn cleanup_idle(state: &ServerState, max_idle: Duration) -> usize {
+        let mut idle = state.idle_connections.lock().await;
+        let mut kept = Vec::new();
+        let mut closed = 0;
+        for (mut conn, last_used) in idle.drain(..) {
+            if last_used.elapsed() >= max_idle {
+                let _ = conn.quit().await;
+                closed += 1;
+            } else {
+                kept.push((conn, last_used));
+            }
+        }
+        *idle = kept;
+        closed
     }
 
     async fn is_in_backoff(&self, state: &ServerState) -> bool {
@@ -194,6 +238,7 @@ impl<F: ConnectionFactory> ServerPool<F> {
 pub struct ServerPoolManager {
     all_servers: tokio::sync::RwLock<Vec<NewsServer>>,
     pool: tokio::sync::RwLock<ServerPool>,
+    stats: Option<Arc<dyn StatsRecorder>>,
 }
 
 impl ServerPoolManager {
@@ -202,7 +247,21 @@ impl ServerPoolManager {
         Self {
             all_servers: tokio::sync::RwLock::new(servers),
             pool: tokio::sync::RwLock::new(pool),
+            stats: None,
         }
+    }
+
+    pub fn with_stats(mut self, stats: Arc<dyn StatsRecorder>) -> Self {
+        self.stats = Some(stats);
+        let all_servers = self.all_servers.get_mut();
+        let new_pool = ServerPool::new(all_servers.clone());
+        let new_pool = if let Some(s) = &self.stats {
+            new_pool.with_stats(Arc::clone(s))
+        } else {
+            new_pool
+        };
+        *self.pool.get_mut() = new_pool;
+        self
     }
 
     pub async fn fetch_article(
@@ -228,13 +287,21 @@ impl ServerPoolManager {
         match found {
             Some(server) => {
                 server.active = active;
-                let new_pool = ServerPool::new(servers.clone());
+                let mut new_pool = ServerPool::new(servers.clone());
+                if let Some(s) = &self.stats {
+                    new_pool = new_pool.with_stats(Arc::clone(s));
+                }
                 let mut pool = self.pool.write().await;
                 *pool = new_pool;
                 true
             }
             None => false,
         }
+    }
+
+    pub async fn cleanup_idle_connections(&self, max_idle: Duration) -> usize {
+        let pool = self.pool.read().await;
+        pool.cleanup_idle_connections(max_idle).await
     }
 
     pub async fn server_count(&self) -> usize {
@@ -529,5 +596,140 @@ mod tests {
         let s1 = test_server(1, 0, 0, 2);
         let manager = ServerPoolManager::new(vec![s1]);
         assert!(!manager.activate_server(999).await);
+    }
+
+    #[tokio::test]
+    async fn idle_connection_reused_within_timeout() {
+        let server = test_server(1, 0, 0, 2);
+        let factory = Arc::new(FakeFactory::new(b"data"));
+        let pool = ServerPool::with_factory(vec![server], factory.clone());
+
+        let _ = pool
+            .fetch_article("test@example", &["alt.test".into()])
+            .await
+            .unwrap();
+        assert_eq!(factory.connect_count.load(Ordering::SeqCst), 1);
+
+        let _ = pool
+            .fetch_article("test@example", &["alt.test".into()])
+            .await
+            .unwrap();
+        assert_eq!(factory.connect_count.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn stale_idle_connection_is_dropped() {
+        let server = test_server(1, 0, 0, 2);
+        let factory = Arc::new(FakeFactory::new(b"data"));
+        let pool = ServerPool::with_factory(vec![server], factory.clone());
+
+        {
+            let conn = factory.connect(&pool.servers[0].server).await.unwrap();
+            let mut idle = pool.servers[0].idle_connections.lock().await;
+            idle.push((conn, Instant::now() - Duration::from_secs(120)));
+        }
+
+        let _ = pool
+            .fetch_article("test@example", &["alt.test".into()])
+            .await
+            .unwrap();
+        assert_eq!(factory.connect_count.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn cleanup_idle_closes_old_connections() {
+        let server = test_server(1, 0, 0, 4);
+        let factory = Arc::new(FakeFactory::new(b"data"));
+        let pool = ServerPool::with_factory(vec![server], factory.clone());
+
+        for _ in 0..3 {
+            let conn = factory.connect(&pool.servers[0].server).await.unwrap();
+            let mut idle = pool.servers[0].idle_connections.lock().await;
+            idle.push((conn, Instant::now() - Duration::from_secs(120)));
+        }
+
+        let closed = pool.cleanup_idle_connections(Duration::from_secs(60)).await;
+        assert_eq!(closed, 3);
+
+        let idle = pool.servers[0].idle_connections.lock().await;
+        assert!(idle.is_empty());
+    }
+
+    #[tokio::test]
+    async fn stats_recorder_called_on_successful_fetch() {
+        use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
+
+        struct MockStats {
+            recorded_server_id: std::sync::atomic::AtomicU32,
+            recorded_bytes: AtomicU64,
+        }
+
+        impl StatsRecorder for MockStats {
+            fn record_bytes(&self, server_id: u32, bytes: u64) {
+                self.recorded_server_id
+                    .store(server_id, AtomicOrdering::SeqCst);
+                self.recorded_bytes.store(bytes, AtomicOrdering::SeqCst);
+            }
+        }
+
+        let server = test_server(1, 0, 0, 2);
+        let factory = Arc::new(FakeFactory::new(b"hello"));
+        let stats = Arc::new(MockStats {
+            recorded_server_id: std::sync::atomic::AtomicU32::new(0),
+            recorded_bytes: AtomicU64::new(0),
+        });
+        let pool = ServerPool::with_factory(vec![server], factory)
+            .with_stats(stats.clone() as Arc<dyn StatsRecorder>);
+
+        let result = pool
+            .fetch_article("test@example", &["alt.test".into()])
+            .await;
+        assert!(result.is_ok());
+        assert_eq!(stats.recorded_server_id.load(AtomicOrdering::SeqCst), 1);
+        assert!(stats.recorded_bytes.load(AtomicOrdering::SeqCst) > 0);
+    }
+
+    #[tokio::test]
+    async fn stats_recorder_not_called_on_failed_fetch() {
+        use std::sync::atomic::Ordering as AtomicOrdering;
+
+        struct MockStats {
+            call_count: std::sync::atomic::AtomicU32,
+        }
+
+        impl StatsRecorder for MockStats {
+            fn record_bytes(&self, _server_id: u32, _bytes: u64) {
+                self.call_count.fetch_add(1, AtomicOrdering::SeqCst);
+            }
+        }
+
+        let server = test_server(1, 0, 0, 2);
+        let factory = Arc::new(FakeFactory::failing());
+        let stats = Arc::new(MockStats {
+            call_count: std::sync::atomic::AtomicU32::new(0),
+        });
+        let pool = ServerPool::with_factory(vec![server], factory)
+            .with_stats(stats.clone() as Arc<dyn StatsRecorder>);
+
+        let result = pool
+            .fetch_article("test@example", &["alt.test".into()])
+            .await;
+        assert!(result.is_err());
+        assert_eq!(stats.call_count.load(AtomicOrdering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn return_connection_caps_pool_size() {
+        let server = test_server(1, 0, 0, 2);
+        let factory = Arc::new(FakeFactory::new(b"data"));
+        let pool = ServerPool::with_factory(vec![server], factory.clone());
+
+        for _ in 0..5 {
+            let conn = factory.connect(&pool.servers[0].server).await.unwrap();
+            pool.return_connection(&pool.servers[0], conn).await;
+        }
+
+        let idle = pool.servers[0].idle_connections.lock().await;
+        assert_eq!(idle.len(), 2);
     }
 }

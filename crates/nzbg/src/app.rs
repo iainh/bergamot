@@ -120,7 +120,7 @@ pub fn restore_queue(disk: &DiskState<JsonFormat>) -> Result<Option<(DownloadQue
                 .clone()
                 .unwrap_or_else(|| format!("file-{file_idx}"));
 
-            let articles: Vec<ArticleInfo> = nzb_file
+            let mut articles: Vec<ArticleInfo> = nzb_file
                 .segments
                 .iter()
                 .map(|seg| ArticleInfo {
@@ -139,6 +139,29 @@ pub fn restore_queue(disk: &DiskState<JsonFormat>) -> Result<Option<(DownloadQue
             total_size += file_size;
             total_article_count += article_count;
 
+            let mut success_articles: u32 = 0;
+            let mut success_size: u64 = 0;
+            let mut file_completed = false;
+
+            if let Ok(file_state) = disk.load_file_state(file_id) {
+                for (idx, article) in articles.iter_mut().enumerate() {
+                    let idx = idx as u32;
+                    if file_state.is_article_done(idx) {
+                        article.status = ArticleStatus::Finished;
+                        if let Some(&crc) = file_state.article_crcs.get(&idx) {
+                            article.crc = crc;
+                        }
+                        success_articles += 1;
+                        success_size += article.size;
+                    }
+                }
+                if success_articles == article_count {
+                    file_completed = true;
+                }
+            }
+
+            let remaining_size = file_size.saturating_sub(success_size);
+
             files.push(FileInfo {
                 id: file_id,
                 nzb_id: nzb_state.id,
@@ -148,16 +171,16 @@ pub fn restore_queue(disk: &DiskState<JsonFormat>) -> Result<Option<(DownloadQue
                 groups: nzb_file.groups.clone(),
                 articles,
                 size: file_size,
-                remaining_size: file_size,
-                success_size: 0,
+                remaining_size,
+                success_size,
                 failed_size: 0,
                 missed_size: 0,
                 total_articles: article_count,
                 missing_articles: 0,
                 failed_articles: 0,
-                success_articles: 0,
+                success_articles,
                 paused: false,
-                completed: false,
+                completed: file_completed,
                 priority,
                 time: std::time::SystemTime::now(),
                 active_downloads: 0,
@@ -165,6 +188,12 @@ pub fn restore_queue(disk: &DiskState<JsonFormat>) -> Result<Option<(DownloadQue
                 server_stats: vec![],
             });
         }
+
+        let nzb_success_size: u64 = files.iter().map(|f| f.success_size).sum();
+        let nzb_success_articles: u32 = files.iter().map(|f| f.success_articles).sum();
+        let nzb_remaining_size = total_size.saturating_sub(nzb_success_size);
+        let completed_file_count = files.iter().filter(|f| f.completed).count() as u32;
+        let remaining_file_count = files.len() as u32 - completed_file_count;
 
         let nzb = NzbInfo {
             id: nzb_state.id,
@@ -182,20 +211,20 @@ pub fn restore_queue(disk: &DiskState<JsonFormat>) -> Result<Option<(DownloadQue
             dup_mode: nzb_state.dupe_mode,
             dup_score: nzb_state.dupe_score,
             size: total_size,
-            remaining_size: total_size,
+            remaining_size: nzb_remaining_size,
             paused_size: 0,
             failed_size: 0,
-            success_size: 0,
+            success_size: nzb_success_size,
             current_downloaded_size: 0,
             par_size: 0,
             par_remaining_size: 0,
             par_current_success_size: 0,
             par_failed_size: 0,
             file_count: files.len() as u32,
-            remaining_file_count: files.len() as u32,
+            remaining_file_count,
             remaining_par_count: 0,
             total_article_count,
-            success_article_count: 0,
+            success_article_count: nzb_success_articles,
             failed_article_count: 0,
             added_time: std::time::SystemTime::now(),
             min_time: None,
@@ -275,6 +304,15 @@ pub fn forward_completions(
 }
 
 pub async fn run(config: Config, fetcher: Arc<dyn crate::download::ArticleFetcher>) -> Result<()> {
+    run_with_config_path(config, fetcher, None, None).await
+}
+
+pub async fn run_with_config_path(
+    config: Config,
+    fetcher: Arc<dyn crate::download::ArticleFetcher>,
+    config_path: Option<std::path::PathBuf>,
+    log_buffer: Option<Arc<LogBuffer>>,
+) -> Result<()> {
     let web_config = Arc::new(web_server_config(&config));
     let inter_dir = config.inter_dir.clone();
 
@@ -372,10 +410,17 @@ pub async fn run(config: Config, fetcher: Arc<dyn crate::download::ArticleFetche
     };
 
     let (shutdown_handle, mut shutdown_rx) = ShutdownHandle::new();
+    let config_arc = std::sync::Arc::new(std::sync::RwLock::new(config));
     let mut app_state_builder = AppState::default()
         .with_queue(queue_handle.clone())
         .with_shutdown(shutdown_handle)
         .with_disk(disk.clone());
+    if let Some(cp) = config_path {
+        app_state_builder = app_state_builder.with_config(config_arc.clone(), cp);
+    }
+    if let Some(lb) = log_buffer {
+        app_state_builder = app_state_builder.with_log_buffer(lb);
+    }
     if let Some(ref fh) = feed_handle {
         app_state_builder = app_state_builder.with_feed_handle(fh.clone());
     }
@@ -391,8 +436,12 @@ pub async fn run(config: Config, fetcher: Arc<dyn crate::download::ArticleFetche
             feed_handle,
             server_pool: None,
         },
+        stats_recorder: None,
     };
-    let (scheduler_tx, scheduler_handles) = nzbg_scheduler::start_services(&config, deps).await?;
+    let config_guard = config_arc.read().unwrap();
+    let (scheduler_tx, scheduler_handles) =
+        nzbg_scheduler::start_services(&config_guard, deps).await?;
+    drop(config_guard);
 
     let stats_handle = spawn_stats_updater(app_state.clone(), queue_handle.clone());
 
@@ -430,8 +479,23 @@ pub async fn run(config: Config, fetcher: Arc<dyn crate::download::ArticleFetche
 
     if let Ok(snapshot) = queue_handle.get_queue_snapshot().await {
         let state = nzbg_scheduler::DiskStateFlush::snapshot_to_queue_state(&snapshot);
+        let article_states = queue_handle.get_all_file_article_states().await.ok();
         let disk_clone = disk.clone();
-        let _ = tokio::task::spawn_blocking(move || disk_clone.save_queue(&state)).await;
+        let _ = tokio::task::spawn_blocking(move || {
+            disk_clone.save_queue(&state)?;
+            if let Some(states) = article_states {
+                for snap in &states {
+                    let mut file_state =
+                        nzbg_diskstate::FileArticleState::new(snap.file_id, snap.total_articles);
+                    for &(idx, crc) in &snap.completed_articles {
+                        file_state.mark_article_done(idx, crc);
+                    }
+                    disk_clone.save_file_state(snap.file_id, &file_state)?;
+                }
+            }
+            Ok::<(), anyhow::Error>(())
+        })
+        .await;
         tracing::info!("final disk state flush complete");
     }
 
@@ -566,6 +630,143 @@ mod tests {
         assert_eq!(queue.next_nzb_id, 10);
         assert!(paused);
         assert_eq!(rate, 5000);
+    }
+
+    const TEST_NZB_MULTI_SEG: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<nzb xmlns="http://www.newzbin.com/DTD/2003/nzb">
+  <file poster="user@example.com" date="1706140800"
+        subject='Test [01/01] - "data.rar" yEnc (1/3)'>
+    <groups><group>alt.binaries.test</group></groups>
+    <segments>
+      <segment bytes="100" number="1">seg1@example.com</segment>
+      <segment bytes="200" number="2">seg2@example.com</segment>
+      <segment bytes="300" number="3">seg3@example.com</segment>
+    </segments>
+  </file>
+</nzb>
+"#;
+
+    #[test]
+    fn restore_queue_loads_file_article_states() {
+        use nzbg_diskstate::{DiskState, FileArticleState, JsonFormat, NzbState, QueueState};
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let disk = DiskState::new(tmp.path().to_path_buf(), JsonFormat).expect("disk");
+
+        let queue_state = QueueState {
+            version: 3,
+            nzbs: vec![NzbState {
+                id: 5,
+                name: "test-nzb".to_string(),
+                filename: "test.nzb".to_string(),
+                category: "tv".to_string(),
+                dest_dir: std::path::PathBuf::from("/dest"),
+                final_dir: None,
+                priority: 0,
+                paused: false,
+                url: None,
+                dupe_key: "test-nzb".to_string(),
+                dupe_score: 0,
+                dupe_mode: nzbg_core::models::DupMode::Score,
+                added_time: chrono::Utc::now(),
+                total_size: 600,
+                downloaded_size: 0,
+                failed_size: 0,
+                file_ids: vec![10],
+                post_process_parameters: std::collections::HashMap::new(),
+                health: 1000,
+                critical_health: 1000,
+                total_article_count: 3,
+                success_article_count: 0,
+                failed_article_count: 0,
+            }],
+            next_nzb_id: 10,
+            next_file_id: 20,
+            download_paused: false,
+            speed_limit: 0,
+        };
+        disk.save_queue(&queue_state).expect("save queue");
+        disk.save_nzb_file(5, TEST_NZB_MULTI_SEG.as_bytes())
+            .expect("save nzb");
+
+        let mut file_state = FileArticleState::new(10, 3);
+        file_state.mark_article_done(0, 0xAAAA);
+        file_state.mark_article_done(2, 0xCCCC);
+        disk.save_file_state(10, &file_state)
+            .expect("save file state");
+
+        let (queue, _paused, _rate) = restore_queue(&disk).expect("restore").expect("some queue");
+
+        let file = &queue.queue[0].files[0];
+        assert_eq!(file.success_articles, 2);
+        assert_eq!(file.success_size, 400);
+        assert_eq!(file.remaining_size, 200);
+        assert!(!file.completed);
+        assert_eq!(file.articles[0].status, ArticleStatus::Finished);
+        assert_eq!(file.articles[0].crc, 0xAAAA);
+        assert_eq!(file.articles[1].status, ArticleStatus::Undefined);
+        assert_eq!(file.articles[2].status, ArticleStatus::Finished);
+        assert_eq!(file.articles[2].crc, 0xCCCC);
+
+        assert_eq!(queue.queue[0].success_size, 400);
+        assert_eq!(queue.queue[0].remaining_size, 200);
+        assert_eq!(queue.queue[0].success_article_count, 2);
+    }
+
+    #[test]
+    fn restore_queue_marks_file_completed_when_all_articles_done() {
+        use nzbg_diskstate::{DiskState, FileArticleState, JsonFormat, NzbState, QueueState};
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let disk = DiskState::new(tmp.path().to_path_buf(), JsonFormat).expect("disk");
+
+        let queue_state = QueueState {
+            version: 3,
+            nzbs: vec![NzbState {
+                id: 5,
+                name: "test-nzb".to_string(),
+                filename: "test.nzb".to_string(),
+                category: "tv".to_string(),
+                dest_dir: std::path::PathBuf::from("/dest"),
+                final_dir: None,
+                priority: 0,
+                paused: false,
+                url: None,
+                dupe_key: "test-nzb".to_string(),
+                dupe_score: 0,
+                dupe_mode: nzbg_core::models::DupMode::Score,
+                added_time: chrono::Utc::now(),
+                total_size: 100,
+                downloaded_size: 0,
+                failed_size: 0,
+                file_ids: vec![10],
+                post_process_parameters: std::collections::HashMap::new(),
+                health: 1000,
+                critical_health: 1000,
+                total_article_count: 1,
+                success_article_count: 0,
+                failed_article_count: 0,
+            }],
+            next_nzb_id: 10,
+            next_file_id: 20,
+            download_paused: false,
+            speed_limit: 0,
+        };
+        disk.save_queue(&queue_state).expect("save queue");
+        disk.save_nzb_file(5, TEST_NZB.as_bytes())
+            .expect("save nzb");
+
+        let mut file_state = FileArticleState::new(10, 1);
+        file_state.mark_article_done(0, 0xBBBB);
+        disk.save_file_state(10, &file_state)
+            .expect("save file state");
+
+        let (queue, _paused, _rate) = restore_queue(&disk).expect("restore").expect("some queue");
+
+        let file = &queue.queue[0].files[0];
+        assert!(file.completed);
+        assert_eq!(file.success_articles, 1);
+        assert_eq!(queue.queue[0].remaining_file_count, 0);
     }
 
     #[test]

@@ -1,0 +1,305 @@
+### PATHS ###
+
+# Root directory for all other default paths.
+#
+# MainDir <path>
+MainDir=${AppDir}/downloads
+
+# Destination directory for completed downloads.
+#
+# DestDir <path>
+DestDir=${MainDir}/completed
+
+# Intermediate directory for downloads being post-processed.
+# Empty string disables (files stay in DestDir).
+#
+# InterDir <path>
+InterDir=${MainDir}/intermediate
+
+# Directory scanned for incoming .nzb files.
+#
+# NzbDir <path>
+NzbDir=${MainDir}/nzb
+
+# Internal queue state directory.
+#
+# QueueDir <path>
+QueueDir=${MainDir}/queue
+
+# Temporary directory for article assembly.
+#
+# TempDir <path>
+TempDir=${MainDir}/tmp
+
+# Post-processing / extension scripts directory.
+#
+# ScriptDir <path>
+ScriptDir=${MainDir}/scripts
+
+# List of active extensions separated by commas or semicolons.
+#
+# Extensions <string>
+Extensions=
+
+# Execution order of extensions separated by commas or semicolons.
+#
+# ScriptOrder <string>
+ScriptOrder=
+
+# Path to the log file. Empty string disables file logging.
+#
+# LogFile <path>
+LogFile=${DestDir}/nzbg.log
+
+### SECURITY ###
+
+# IP address the server listens on. Use 127.0.0.1 for local-only access.
+#
+# ControlIP <string>
+ControlIP=0.0.0.0
+
+# Port for HTTP/API access.
+#
+# ControlPort <number>
+ControlPort=6789
+
+# Username for full access via web UI and API.
+#
+# ControlUsername <string>
+ControlUsername=nzbget
+
+# Password for full access.
+#
+# ControlPassword <string>
+ControlPassword=tegbzn6789
+
+# Username for restricted access (no settings changes).
+#
+# RestrictedUsername <string>
+RestrictedUsername=
+
+# Password for restricted access.
+#
+# RestrictedPassword <string>
+RestrictedPassword=
+
+# Username for add-only access (can only add downloads).
+#
+# AddUsername <string>
+AddUsername=
+
+# Password for add-only access.
+#
+# AddPassword <string>
+AddPassword=
+
+# Use form-based login instead of HTTP basic auth (yes, no).
+#
+# FormAuth <yes|no>
+FormAuth=no
+
+# Enable HTTPS for the control interface (yes, no).
+#
+# SecureControl <yes|no>
+SecureControl=no
+
+# Port for HTTPS access when SecureControl is enabled.
+#
+# SecurePort <number>
+SecurePort=6791
+
+# Path to TLS certificate file (PEM format).
+#
+# SecureCert <path>
+SecureCert=
+
+# Path to TLS private key file (PEM format).
+#
+# SecureKey <path>
+SecureKey=
+
+# Verify TLS certificates when connecting to news servers (yes, no).
+#
+# CertCheck <yes|no>
+CertCheck=no
+
+### NEWS-SERVERS ###
+
+# This section defines news servers.
+# For each news server add entries Server1.Host, Server2.Host, etc.
+
+### CATEGORIES ###
+
+# This section defines categories.
+# For each category add entries Category1.Name, Category2.Name, etc.
+
+### DOWNLOAD ###
+
+# Append category name as subdirectory to DestDir (yes, no).
+#
+# AppendCategoryDir <yes|no>
+AppendCategoryDir=yes
+
+# Seconds between scans of NzbDir for new files.
+#
+# NzbDirInterval <number>
+NzbDirInterval=5
+
+# Check for duplicate NZBs by name and content hash (yes, no).
+#
+# DupeCheck <yes|no>
+DupeCheck=yes
+
+# Resume partially downloaded files after restart (yes, no).
+#
+# ContinuePartial <yes|no>
+ContinuePartial=yes
+
+# Article cache size in MB. 0 disables caching.
+#
+# ArticleCache <number>
+ArticleCache=0
+
+# Write decoded articles directly to the output file (yes, no).
+#
+# DirectWrite <yes|no>
+DirectWrite=yes
+
+# Write buffer size in bytes. 0 uses system default.
+#
+# WriteBuffer <number>
+WriteBuffer=0
+
+# Minimum free disk space in MB. Downloads pause when space is below this.
+# 0 disables the check.
+#
+# DiskSpace <number>
+DiskSpace=250
+
+# Days to keep completed downloads in history. 0 disables history.
+#
+# KeepHistory <number>
+KeepHistory=30
+
+# Download speed limit in KB/s. 0 means unlimited.
+#
+# DownloadRate <number>
+DownloadRate=0
+
+### CONNECTION ###
+
+# Number of retry attempts for failed article downloads.
+#
+# ArticleRetries <number>
+ArticleRetries=3
+
+# Seconds between article retry attempts.
+#
+# ArticleInterval <number>
+ArticleInterval=10
+
+# Seconds before an article download times out.
+#
+# ArticleTimeout <number>
+ArticleTimeout=60
+
+### PAR CHECK / REPAIR ###
+
+# Verify article CRC checksums during download (yes, no).
+#
+# CrcCheck <yes|no>
+CrcCheck=yes
+
+# When to perform PAR2 verification (auto, always, force, manual).
+#
+# ParCheck <auto|always|force|manual>
+ParCheck=auto
+
+# Attempt PAR2 repair when verification fails (yes, no).
+#
+# ParRepair <yes|no>
+ParRepair=yes
+
+# Detect and rename obfuscated filenames using PAR2 data (yes, no).
+#
+# ParRename <yes|no>
+ParRename=yes
+
+### UNPACK ###
+
+# Enable automatic archive unpacking (yes, no).
+#
+# Unpack <yes|no>
+Unpack=yes
+
+# Begin unpacking while the download is still in progress (yes, no).
+#
+# DirectUnpack <yes|no>
+DirectUnpack=no
+
+# Delete archive files after successful unpacking (yes, no).
+#
+# UnpackCleanupDisk <yes|no>
+UnpackCleanupDisk=yes
+
+# Path to the unrar executable.
+#
+# UnrarCmd <path>
+UnrarCmd=unrar
+
+# Path to the 7z executable.
+#
+# SevenZipCmd <path>
+SevenZipCmd=7z
+
+### LOGGING ###
+
+# Log file write mode (append, reset, none).
+#
+# WriteLog <append|reset|none>
+WriteLog=append
+
+# Number of rotated log files to keep. 0 disables rotation.
+#
+# RotateLog <number>
+RotateLog=3
+
+# Where to send info messages (screen, log, both, none).
+#
+# InfoTarget <screen|log|both|none>
+InfoTarget=both
+
+# Where to send warning messages (screen, log, both, none).
+#
+# WarningTarget <screen|log|both|none>
+WarningTarget=both
+
+# Where to send error messages (screen, log, both, none).
+#
+# ErrorTarget <screen|log|both|none>
+ErrorTarget=both
+
+# Where to send detail messages (screen, log, both, none).
+#
+# DetailTarget <screen|log|both|none>
+DetailTarget=log
+
+# Where to send debug messages (screen, log, both, none).
+#
+# DebugTarget <screen|log|both|none>
+DebugTarget=none
+
+# Enable system health checks (yes, no).
+#
+# SystemHealthCheck <yes|no>
+SystemHealthCheck=yes
+
+### SCHEDULER ###
+
+# This section defines scheduled tasks.
+# For each task add entries Task1.Time, Task2.Time, etc.
+
+### RSS FEEDS ###
+
+# This section defines RSS feeds.
+# For each feed add entries Feed1.Name, Feed2.Name, etc.

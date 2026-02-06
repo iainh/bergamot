@@ -6,6 +6,8 @@ mod speed;
 
 pub use crate::error::NntpError;
 pub use crate::model::{Encryption, IpVersion, NewsServer, NntpResponse};
-pub use crate::pool::{ConnectionFactory, RealConnectionFactory, ServerPool, ServerPoolManager};
+pub use crate::pool::{
+    ConnectionFactory, RealConnectionFactory, ServerPool, ServerPoolManager, StatsRecorder,
+};
 pub use crate::protocol::{BodyReader, NntpConnection, NntpIo, NntpStream};
 pub use crate::speed::SpeedLimiter;

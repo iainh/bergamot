@@ -119,19 +119,19 @@ downloader at all.
 
 ---
 
-## Phase 6 — Operational Completeness
+## Phase 6 — Operational Completeness ✅
 
-| # | Gap | Detail | Crates |
-|---|-----|--------|--------|
-| 38 | **NNTP connection lifecycle** | Pool holds idle connections forever. Need idle timeout, max pool size, periodic QUIT, broken connection detection. | `nzbg-nntp` |
-| 39 | **Server volume stats** | `StatsTracker` exists but `record_bytes()` is never called from the NNTP fetch path. | `nzbg-scheduler`, `nzbg-nntp` |
-| 40 | **DiskSpaceMonitor pause/resume** | Detects low space and logs, but does not call queue API to pause/resume downloads. | `nzbg-scheduler` |
-| 41 | **HistoryCleanup** | Computes cutoff but does not actually delete old history entries or disk files. | `nzbg-scheduler` |
-| 42 | **ConnectionCleanup** | `tick()` is empty no-op. | `nzbg-scheduler` |
-| 43 | **HealthChecker** | `check_certificate_expiry()` and `check_queue_consistency()` are empty. | `nzbg-scheduler` |
-| 44 | **DiskStateFlush snapshot fidelity** | `snapshot_to_queue_state()` uses hardcoded defaults for `dupe_key`, `url`, `added_time`, `post_process_parameters`. | `nzbg-scheduler`, `nzbg-diskstate` |
-| 45 | **File article state persistence** | `save_file_state/load_file_state` exist but no runtime code uses them for per-file segment bitmaps. | `nzbg-diskstate` |
-| 46 | **Speed limiter placement** | Rate limiting is applied after decode, not around network I/O. Doesn't bound actual bandwidth during fetch. | `nzbg` (download.rs) |
+| # | Gap | Status |
+|---|-----|--------|
+| 38 | **NNTP connection lifecycle** | ✅ Idle timeout (60s), max pool size cap, broken connection drop, periodic QUIT via cleanup_idle_connections() |
+| 39 | **Server volume stats** | ✅ StatsRecorder trait injected into ServerPool, record_bytes() called on successful fetch, SharedStatsTracker in scheduler |
+| 40 | **DiskSpaceMonitor pause/resume** | ✅ Calls queue.pause_all() on low space, queue.resume_all() on recovery, injectable space checker for tests |
+| 41 | **HistoryCleanup** | ✅ Fetches history, compares against keep_days cutoff, deletes old entries via queue.history_delete() |
+| 42 | **ConnectionCleanup** | ✅ tick() calls pool.cleanup_idle_connections() with 60s timeout, logs closed connections |
+| 43 | **HealthChecker** | ✅ check_certificate_expiry() validates cert file accessibility, check_queue_consistency() runs disk validate_consistency() |
+| 44 | **DiskStateFlush snapshot fidelity** | ✅ NzbSnapshotEntry carries url, dupe_key, dupe_score, dupe_mode, added_time, parameters, final_dir; snapshot_to_queue_state uses real values |
+| 45 | **File article state persistence** | ✅ FileArticleSnapshot from coordinator, DiskStateFlush saves/cleans file states, restore_queue loads and applies completed article bitmaps |
+| 46 | **Speed limiter placement** | ✅ limiter.acquire(expected_size) called BEFORE fetch_and_decode, expected_size field added to ArticleAssignment |
 
 ---
 

@@ -41,6 +41,7 @@ pub struct ServiceDeps {
     pub queue: nzbg_queue::QueueHandle,
     pub disk: std::sync::Arc<nzbg_diskstate::DiskState<nzbg_diskstate::JsonFormat>>,
     pub command_deps: CommandDeps,
+    pub stats_recorder: Option<std::sync::Arc<SharedStatsTracker>>,
 }
 
 pub async fn start_services(
@@ -71,24 +72,35 @@ pub async fn shutdown_services(
 }
 
 fn build_services(config: &Config, deps: ServiceDeps) -> anyhow::Result<Vec<Box<dyn Service>>> {
+    let server_pool = deps.command_deps.server_pool.clone();
     let executor = CommandExecutor::new(deps.queue.clone()).with_deps(deps.command_deps);
     let scheduler = Scheduler::from_config_with_executor(config, deps.queue.clone(), executor)?;
     let scanner = NzbDirScanner::from_config(config)
         .with_queue(deps.queue.clone())
         .with_disk(deps.disk.clone());
-    let disk_space = DiskSpaceMonitor::from_config(config);
-    let history = HistoryCleanup::from_config(config);
-    let stats = StatsTracker::from_config(config);
-    let health = HealthChecker::from_config(config);
+    let disk_space = DiskSpaceMonitor::from_config(config).with_queue(deps.queue.clone());
+    let history = HistoryCleanup::from_config(config).with_queue(deps.queue.clone());
+    let stats: Box<dyn Service> = match deps.stats_recorder {
+        Some(shared) => Box::new(ServiceSharedStats(shared)),
+        None => Box::new(StatsTracker::from_config(config)),
+    };
+    let health = HealthChecker::from_config(config)
+        .with_disk(deps.disk.clone())
+        .with_queue(deps.queue.clone());
     let disk_flush = DiskStateFlush::new(deps.queue, deps.disk);
+
+    let mut conn_cleanup = ConnectionCleanup::new();
+    if let Some(pool) = server_pool {
+        conn_cleanup = conn_cleanup.with_pool(pool);
+    }
 
     Ok(vec![
         Box::new(scheduler),
         Box::new(scanner),
         Box::new(disk_space),
-        Box::new(ConnectionCleanup),
+        Box::new(conn_cleanup),
         Box::new(history),
-        Box::new(stats),
+        stats,
         Box::new(health),
         Box::new(disk_flush),
     ])
@@ -484,10 +496,14 @@ async fn fetch_url_once(url: &str) -> anyhow::Result<Vec<u8>> {
     Ok(bytes.to_vec())
 }
 
+type SpaceChecker = Box<dyn Fn(&Path) -> anyhow::Result<u64> + Send + Sync>;
+
 pub struct DiskSpaceMonitor {
     paths: Vec<PathBuf>,
     threshold_mb: u64,
     paused_by_us: bool,
+    queue: Option<nzbg_queue::QueueHandle>,
+    check_space: Option<SpaceChecker>,
 }
 
 impl DiskSpaceMonitor {
@@ -502,10 +518,20 @@ impl DiskSpaceMonitor {
             paths,
             threshold_mb,
             paused_by_us: false,
+            queue: None,
+            check_space: None,
         }
     }
 
-    fn available_space_mb(path: &Path) -> anyhow::Result<u64> {
+    pub fn with_queue(mut self, queue: nzbg_queue::QueueHandle) -> Self {
+        self.queue = Some(queue);
+        self
+    }
+
+    fn available_space_mb(&self, path: &Path) -> anyhow::Result<u64> {
+        if let Some(checker) = &self.check_space {
+            return checker(path);
+        }
         let available = fs2::available_space(path)
             .with_context(|| format!("check available space for {}", path.display()))?;
         Ok(available / (1024 * 1024))
@@ -527,7 +553,7 @@ impl Service for DiskSpaceMonitor {
             return Ok(());
         }
         for path in &self.paths {
-            let available = Self::available_space_mb(path)?;
+            let available = self.available_space_mb(path)?;
             if available < self.threshold_mb {
                 if !self.paused_by_us {
                     tracing::warn!(
@@ -535,6 +561,9 @@ impl Service for DiskSpaceMonitor {
                         path.display(),
                         self.threshold_mb
                     );
+                    if let Some(queue) = &self.queue {
+                        queue.pause_all().await?;
+                    }
                     self.paused_by_us = true;
                 }
                 return Ok(());
@@ -543,6 +572,9 @@ impl Service for DiskSpaceMonitor {
 
         if self.paused_by_us {
             tracing::info!("disk space recovered, resuming downloads");
+            if let Some(queue) = &self.queue {
+                queue.resume_all().await?;
+            }
             self.paused_by_us = false;
         }
 
@@ -550,8 +582,30 @@ impl Service for DiskSpaceMonitor {
     }
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct ConnectionCleanup;
+pub struct ConnectionCleanup {
+    pool: Option<std::sync::Arc<nzbg_nntp::ServerPoolManager>>,
+    idle_timeout: Duration,
+}
+
+impl ConnectionCleanup {
+    pub fn new() -> Self {
+        Self {
+            pool: None,
+            idle_timeout: Duration::from_secs(60),
+        }
+    }
+
+    pub fn with_pool(mut self, pool: std::sync::Arc<nzbg_nntp::ServerPoolManager>) -> Self {
+        self.pool = Some(pool);
+        self
+    }
+}
+
+impl Default for ConnectionCleanup {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 #[async_trait]
 impl Service for ConnectionCleanup {
@@ -564,19 +618,32 @@ impl Service for ConnectionCleanup {
     }
 
     async fn tick(&mut self) -> anyhow::Result<()> {
+        if let Some(pool) = &self.pool {
+            let closed = pool.cleanup_idle_connections(self.idle_timeout).await;
+            if closed > 0 {
+                tracing::info!("cleaned up {closed} idle connection(s)");
+            }
+        }
         Ok(())
     }
 }
 
 pub struct HistoryCleanup {
     keep_days: u32,
+    queue: Option<nzbg_queue::QueueHandle>,
 }
 
 impl HistoryCleanup {
     pub fn from_config(config: &Config) -> Self {
         Self {
             keep_days: config.keep_history,
+            queue: None,
         }
+    }
+
+    pub fn with_queue(mut self, queue: nzbg_queue::QueueHandle) -> Self {
+        self.queue = Some(queue);
+        self
     }
 }
 
@@ -594,7 +661,20 @@ impl Service for HistoryCleanup {
         if self.keep_days == 0 {
             return Ok(());
         }
-        let _cutoff = chrono::Utc::now() - chrono::Duration::days(self.keep_days as i64);
+        let Some(queue) = &self.queue else {
+            return Ok(());
+        };
+        let cutoff = std::time::SystemTime::now()
+            - std::time::Duration::from_secs(self.keep_days as u64 * 86400);
+        let history = queue.get_history().await?;
+        for entry in &history {
+            if entry.time < cutoff {
+                tracing::info!("cleaning up history entry {}: {}", entry.id, entry.name);
+                if let Err(err) = queue.history_delete(entry.id).await {
+                    tracing::warn!("failed to delete history entry {}: {err}", entry.id);
+                }
+            }
+        }
         Ok(())
     }
 }
@@ -685,15 +765,77 @@ impl Service for StatsTracker {
     }
 }
 
+pub struct SharedStatsTracker {
+    inner: std::sync::Mutex<StatsTracker>,
+}
+
+impl SharedStatsTracker {
+    pub fn new(tracker: StatsTracker) -> Self {
+        Self {
+            inner: std::sync::Mutex::new(tracker),
+        }
+    }
+}
+
+impl nzbg_nntp::StatsRecorder for SharedStatsTracker {
+    fn record_bytes(&self, server_id: u32, bytes: u64) {
+        if let Ok(mut tracker) = self.inner.lock() {
+            tracker.record_bytes(server_id, bytes);
+        }
+    }
+}
+
+struct ServiceSharedStats(std::sync::Arc<SharedStatsTracker>);
+
+#[async_trait]
+impl Service for ServiceSharedStats {
+    fn name(&self) -> &str {
+        "StatsTracker"
+    }
+
+    fn interval(&self) -> Duration {
+        Duration::from_secs(60)
+    }
+
+    async fn tick(&mut self) -> anyhow::Result<()> {
+        let today = chrono::Local::now().date_naive();
+        if let Ok(mut tracker) = self.0.inner.lock()
+            && today != tracker.last_day
+        {
+            tracker.roll_day(today);
+        }
+        Ok(())
+    }
+}
+
 pub struct HealthChecker {
     dest_dir: PathBuf,
+    cert_path: Option<PathBuf>,
+    disk: Option<std::sync::Arc<nzbg_diskstate::DiskState<nzbg_diskstate::JsonFormat>>>,
+    queue: Option<nzbg_queue::QueueHandle>,
 }
 
 impl HealthChecker {
     pub fn from_config(config: &Config) -> Self {
         Self {
             dest_dir: config.dest_dir.clone(),
+            cert_path: config.secure_cert.clone(),
+            disk: None,
+            queue: None,
         }
+    }
+
+    pub fn with_disk(
+        mut self,
+        disk: std::sync::Arc<nzbg_diskstate::DiskState<nzbg_diskstate::JsonFormat>>,
+    ) -> Self {
+        self.disk = Some(disk);
+        self
+    }
+
+    pub fn with_queue(mut self, queue: nzbg_queue::QueueHandle) -> Self {
+        self.queue = Some(queue);
+        self
     }
 
     async fn check_disk_write_speed(&self) -> anyhow::Result<()> {
@@ -716,10 +858,38 @@ impl HealthChecker {
     }
 
     async fn check_certificate_expiry(&self) -> anyhow::Result<()> {
+        let Some(cert_path) = &self.cert_path else {
+            return Ok(());
+        };
+        match tokio::fs::metadata(cert_path).await {
+            Ok(_) => {
+                tracing::debug!("TLS certificate file exists: {}", cert_path.display());
+            }
+            Err(err) => {
+                tracing::warn!(
+                    "TLS certificate file not accessible: {}: {err}",
+                    cert_path.display()
+                );
+            }
+        }
         Ok(())
     }
 
     async fn check_queue_consistency(&self) -> anyhow::Result<()> {
+        let (Some(disk), Some(queue)) = (&self.disk, &self.queue) else {
+            return Ok(());
+        };
+        let snapshot = queue
+            .get_queue_snapshot()
+            .await
+            .map_err(|e| anyhow::anyhow!("get queue snapshot: {e}"))?;
+        let state = DiskStateFlush::snapshot_to_queue_state(&snapshot);
+        let disk_clone = disk.clone();
+        let warnings =
+            tokio::task::spawn_blocking(move || disk_clone.validate_consistency(&state)).await??;
+        for warning in &warnings {
+            tracing::warn!("queue consistency: {warning:?}");
+        }
         Ok(())
     }
 }
@@ -769,19 +939,27 @@ impl DiskStateFlush {
                     filename: nzb.filename.clone(),
                     category: nzb.category.clone(),
                     dest_dir: nzb.dest_dir.clone(),
-                    final_dir: None,
+                    final_dir: nzb.final_dir.clone(),
                     priority: nzb.priority as i32,
                     paused: nzb.paused,
-                    url: None,
-                    dupe_key: String::new(),
-                    dupe_score: 0,
-                    dupe_mode: nzbg_core::models::DupMode::Score,
-                    added_time: chrono::Utc::now(),
+                    url: if nzb.url.is_empty() {
+                        None
+                    } else {
+                        Some(nzb.url.clone())
+                    },
+                    dupe_key: nzb.dupe_key.clone(),
+                    dupe_score: nzb.dupe_score,
+                    dupe_mode: nzb.dupe_mode,
+                    added_time: chrono::DateTime::<chrono::Utc>::from(nzb.added_time),
                     total_size: nzb.total_size,
                     downloaded_size: nzb.downloaded_size,
                     failed_size: nzb.failed_size,
                     file_ids: nzb.file_ids.clone(),
-                    post_process_parameters: std::collections::HashMap::new(),
+                    post_process_parameters: nzb
+                        .parameters
+                        .iter()
+                        .cloned()
+                        .collect::<std::collections::HashMap<_, _>>(),
                     health: nzb.health,
                     critical_health: nzb.critical_health,
                     total_article_count: nzb.total_article_count,
@@ -813,9 +991,48 @@ impl Service for DiskStateFlush {
             .get_queue_snapshot()
             .await
             .map_err(|e| anyhow::anyhow!("failed to get queue snapshot: {e}"))?;
+
+        let article_states = self
+            .queue
+            .get_all_file_article_states()
+            .await
+            .map_err(|e| anyhow::anyhow!("failed to get file article states: {e}"))?;
+
+        let active_file_ids: std::collections::HashSet<u32> = snapshot
+            .nzbs
+            .iter()
+            .flat_map(|nzb| nzb.file_ids.iter().copied())
+            .collect();
+
         let state = Self::snapshot_to_queue_state(&snapshot);
         let disk = self.disk.clone();
-        tokio::task::spawn_blocking(move || disk.save_queue(&state)).await??;
+        tokio::task::spawn_blocking(move || {
+            disk.save_queue(&state)?;
+
+            for snap in &article_states {
+                let mut file_state =
+                    nzbg_diskstate::FileArticleState::new(snap.file_id, snap.total_articles);
+                for &(idx, crc) in &snap.completed_articles {
+                    file_state.mark_article_done(idx, crc);
+                }
+                disk.save_file_state(snap.file_id, &file_state)?;
+            }
+
+            if let Ok(entries) = std::fs::read_dir(disk.state_dir().join("file")) {
+                for entry in entries.flatten() {
+                    if let Some(name) = entry.file_name().to_str()
+                        && let Some(id_str) = name.strip_suffix(".state")
+                        && let Ok(file_id) = id_str.parse::<u32>()
+                        && !active_file_ids.contains(&file_id)
+                    {
+                        let _ = disk.delete_file_state(file_id);
+                    }
+                }
+            }
+
+            Ok::<(), anyhow::Error>(())
+        })
+        .await??;
         Ok(())
     }
 }
@@ -1150,6 +1367,191 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn disk_state_flush_saves_file_article_states() {
+        use nzbg_diskstate::{DiskState, JsonFormat};
+
+        let nzb_dir = tempfile::tempdir().expect("nzb tempdir");
+        let nzb_path = nzb_dir.path().join("test.nzb");
+        std::fs::write(&nzb_path, SAMPLE_NZB).expect("write nzb");
+
+        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1);
+        tokio::spawn(async move { coordinator.run().await });
+
+        handle
+            .add_nzb(nzb_path, None, Priority::Normal)
+            .await
+            .expect("add");
+
+        let assignments = {
+            let snapshot = handle.get_queue_snapshot().await.expect("snap");
+            let file_id = snapshot.nzbs[0].file_ids[0];
+            let nzb_id = snapshot.nzbs[0].id;
+            (nzb_id, file_id)
+        };
+
+        handle
+            .report_download(nzbg_queue::DownloadResult {
+                article_id: nzbg_queue::ArticleId {
+                    nzb_id: assignments.0,
+                    file_idx: 0,
+                    seg_idx: 0,
+                },
+                outcome: nzbg_queue::DownloadOutcome::Success {
+                    data: vec![1, 2, 3],
+                    offset: 0,
+                    crc: 0xDEAD,
+                },
+            })
+            .await
+            .expect("report");
+
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let disk = std::sync::Arc::new(
+            DiskState::new(tmp.path().to_path_buf(), JsonFormat).expect("disk"),
+        );
+
+        let mut flusher = DiskStateFlush::new(handle.clone(), disk.clone());
+        flusher.tick().await.expect("tick");
+
+        let loaded = disk.load_queue().expect("load queue");
+        assert_eq!(loaded.nzbs.len(), 0);
+
+        handle.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn disk_state_flush_cleans_orphaned_file_states() {
+        use nzbg_diskstate::{DiskState, FileArticleState, JsonFormat};
+
+        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1);
+        tokio::spawn(async move { coordinator.run().await });
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let disk = std::sync::Arc::new(
+            DiskState::new(tmp.path().to_path_buf(), JsonFormat).expect("disk"),
+        );
+
+        let orphan_state = FileArticleState::new(9999, 5);
+        disk.save_file_state(9999, &orphan_state)
+            .expect("save orphan");
+        assert!(disk.load_file_state(9999).is_ok());
+
+        let mut flusher = DiskStateFlush::new(handle.clone(), disk.clone());
+        flusher.tick().await.expect("tick");
+
+        assert!(disk.load_file_state(9999).is_err());
+
+        handle.shutdown().await.expect("shutdown");
+    }
+
+    #[test]
+    fn snapshot_to_queue_state_maps_new_fields() {
+        use std::time::{Duration, SystemTime};
+
+        let added = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+        let snapshot = nzbg_queue::QueueSnapshot {
+            nzbs: vec![nzbg_queue::NzbSnapshotEntry {
+                id: 42,
+                name: "test".to_string(),
+                filename: "test.nzb".to_string(),
+                url: "http://example.com/test.nzb".to_string(),
+                category: "movies".to_string(),
+                dest_dir: std::path::PathBuf::from("/dst"),
+                final_dir: Some(std::path::PathBuf::from("/final")),
+                priority: Priority::High,
+                paused: true,
+                dupe_key: "mykey".to_string(),
+                dupe_score: 99,
+                dupe_mode: nzbg_core::models::DupMode::All,
+                added_time: added,
+                total_size: 1000,
+                downloaded_size: 500,
+                failed_size: 10,
+                health: 990,
+                critical_health: 900,
+                total_article_count: 100,
+                success_article_count: 50,
+                failed_article_count: 1,
+                parameters: vec![
+                    ("key1".to_string(), "val1".to_string()),
+                    ("key2".to_string(), "val2".to_string()),
+                ],
+                file_ids: vec![1, 2, 3],
+            }],
+            history: vec![],
+            next_nzb_id: 43,
+            next_file_id: 10,
+            download_paused: false,
+            speed_limit: 0,
+        };
+
+        let state = DiskStateFlush::snapshot_to_queue_state(&snapshot);
+        let nzb = &state.nzbs[0];
+
+        assert_eq!(nzb.url.as_deref(), Some("http://example.com/test.nzb"));
+        assert_eq!(nzb.dupe_key, "mykey");
+        assert_eq!(nzb.dupe_score, 99);
+        assert_eq!(nzb.dupe_mode, nzbg_core::models::DupMode::All);
+        assert_eq!(nzb.added_time, chrono::DateTime::<chrono::Utc>::from(added));
+        assert_eq!(
+            nzb.final_dir.as_ref().map(|p| p.as_path()),
+            Some(std::path::Path::new("/final"))
+        );
+        assert_eq!(nzb.post_process_parameters.len(), 2);
+        assert_eq!(
+            nzb.post_process_parameters.get("key1").map(|s| s.as_str()),
+            Some("val1")
+        );
+        assert_eq!(
+            nzb.post_process_parameters.get("key2").map(|s| s.as_str()),
+            Some("val2")
+        );
+    }
+
+    #[test]
+    fn snapshot_to_queue_state_empty_url_maps_to_none() {
+        let snapshot = nzbg_queue::QueueSnapshot {
+            nzbs: vec![nzbg_queue::NzbSnapshotEntry {
+                id: 1,
+                name: "test".to_string(),
+                filename: "test.nzb".to_string(),
+                url: String::new(),
+                category: String::new(),
+                dest_dir: std::path::PathBuf::new(),
+                final_dir: None,
+                priority: Priority::Normal,
+                paused: false,
+                dupe_key: String::new(),
+                dupe_score: 0,
+                dupe_mode: nzbg_core::models::DupMode::Score,
+                added_time: std::time::SystemTime::UNIX_EPOCH,
+                total_size: 0,
+                downloaded_size: 0,
+                failed_size: 0,
+                health: 1000,
+                critical_health: 1000,
+                total_article_count: 0,
+                success_article_count: 0,
+                failed_article_count: 0,
+                parameters: vec![],
+                file_ids: vec![],
+            }],
+            history: vec![],
+            next_nzb_id: 2,
+            next_file_id: 1,
+            download_paused: false,
+            speed_limit: 0,
+        };
+
+        let state = DiskStateFlush::snapshot_to_queue_state(&snapshot);
+        assert!(state.nzbs[0].url.is_none());
+        assert!(state.nzbs[0].final_dir.is_none());
+        assert!(state.nzbs[0].post_process_parameters.is_empty());
+    }
+
+    #[tokio::test]
     async fn nzb_dir_scanner_processes_nzb_files() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let nzb_path = tmp.path().join("test.nzb");
@@ -1461,5 +1863,476 @@ mod tests {
             .await;
         assert!(result.is_ok());
         handle.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn disk_space_monitor_pauses_queue_on_low_space() {
+        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1);
+        tokio::spawn(async move { coordinator.run().await });
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let mut monitor = DiskSpaceMonitor {
+            paths: vec![tmp.path().to_path_buf()],
+            threshold_mb: u64::MAX,
+            paused_by_us: false,
+            queue: Some(handle.clone()),
+            check_space: None,
+        };
+
+        monitor.tick().await.expect("tick");
+        assert!(monitor.paused_by_us);
+
+        let status = handle.get_status().await.expect("status");
+        assert!(status.paused);
+
+        handle.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn disk_space_monitor_resumes_queue_on_recovery() {
+        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1);
+        tokio::spawn(async move { coordinator.run().await });
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let mut monitor = DiskSpaceMonitor {
+            paths: vec![tmp.path().to_path_buf()],
+            threshold_mb: 1,
+            paused_by_us: true,
+            queue: Some(handle.clone()),
+            check_space: None,
+        };
+
+        handle.pause_all().await.expect("pre-pause");
+
+        monitor.tick().await.expect("tick");
+        assert!(!monitor.paused_by_us);
+
+        let status = handle.get_status().await.expect("status");
+        assert!(!status.paused);
+
+        handle.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn disk_space_monitor_no_pause_when_threshold_zero() {
+        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1);
+        tokio::spawn(async move { coordinator.run().await });
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let mut monitor = DiskSpaceMonitor {
+            paths: vec![tmp.path().to_path_buf()],
+            threshold_mb: 0,
+            paused_by_us: false,
+            queue: Some(handle.clone()),
+            check_space: None,
+        };
+
+        monitor.tick().await.expect("tick");
+        assert!(!monitor.paused_by_us);
+
+        let status = handle.get_status().await.expect("status");
+        assert!(!status.paused);
+
+        handle.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn disk_space_monitor_no_queue_still_works() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let mut monitor = DiskSpaceMonitor {
+            paths: vec![tmp.path().to_path_buf()],
+            threshold_mb: u64::MAX,
+            paused_by_us: false,
+            queue: None,
+            check_space: None,
+        };
+
+        monitor.tick().await.expect("tick");
+        assert!(monitor.paused_by_us);
+    }
+
+    #[tokio::test]
+    async fn disk_space_monitor_custom_check_space() {
+        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1);
+        tokio::spawn(async move { coordinator.run().await });
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let mut monitor = DiskSpaceMonitor {
+            paths: vec![tmp.path().to_path_buf()],
+            threshold_mb: 100,
+            paused_by_us: false,
+            queue: Some(handle.clone()),
+            check_space: Some(Box::new(|_path| Ok(50))),
+        };
+
+        monitor.tick().await.expect("tick");
+        assert!(monitor.paused_by_us);
+
+        let status = handle.get_status().await.expect("status");
+        assert!(status.paused);
+
+        handle.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn disk_space_monitor_with_queue_builder() {
+        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1);
+        tokio::spawn(async move { coordinator.run().await });
+
+        let config = nzbg_config::Config::from_raw(std::collections::HashMap::new());
+        let monitor = DiskSpaceMonitor::from_config(&config).with_queue(handle.clone());
+        assert!(monitor.queue.is_some());
+
+        handle.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn connection_cleanup_without_pool_succeeds() {
+        let mut cleanup = ConnectionCleanup::new();
+        cleanup
+            .tick()
+            .await
+            .expect("tick without pool should succeed");
+    }
+
+    #[tokio::test]
+    async fn connection_cleanup_with_pool_succeeds() {
+        let manager = std::sync::Arc::new(nzbg_nntp::ServerPoolManager::new(vec![]));
+        let mut cleanup = ConnectionCleanup::new().with_pool(manager);
+        cleanup.tick().await.expect("tick with pool should succeed");
+    }
+
+    fn sample_nzb(id: u32, name: &str) -> nzbg_core::models::NzbInfo {
+        nzbg_core::models::NzbInfo {
+            id,
+            kind: nzbg_core::models::NzbKind::Nzb,
+            name: name.to_string(),
+            filename: name.to_string(),
+            url: String::new(),
+            dest_dir: std::path::PathBuf::new(),
+            final_dir: std::path::PathBuf::new(),
+            temp_dir: std::path::PathBuf::new(),
+            queue_dir: std::path::PathBuf::new(),
+            category: String::new(),
+            priority: nzbg_core::models::Priority::Normal,
+            dup_key: String::new(),
+            dup_mode: nzbg_core::models::DupMode::Score,
+            dup_score: 0,
+            size: 0,
+            remaining_size: 0,
+            paused_size: 0,
+            failed_size: 0,
+            success_size: 0,
+            current_downloaded_size: 0,
+            par_size: 0,
+            par_remaining_size: 0,
+            par_current_success_size: 0,
+            par_failed_size: 0,
+            file_count: 0,
+            remaining_file_count: 0,
+            remaining_par_count: 0,
+            total_article_count: 0,
+            success_article_count: 0,
+            failed_article_count: 0,
+            added_time: std::time::SystemTime::UNIX_EPOCH,
+            min_time: None,
+            max_time: None,
+            download_start_time: None,
+            download_sec: 0,
+            post_total_sec: 0,
+            par_sec: 0,
+            repair_sec: 0,
+            unpack_sec: 0,
+            paused: false,
+            deleted: false,
+            direct_rename: false,
+            force_priority: false,
+            reprocess: false,
+            par_manual: false,
+            clean_up_disk: false,
+            par_status: nzbg_core::models::ParStatus::None,
+            unpack_status: nzbg_core::models::UnpackStatus::None,
+            move_status: nzbg_core::models::MoveStatus::None,
+            delete_status: nzbg_core::models::DeleteStatus::None,
+            mark_status: nzbg_core::models::MarkStatus::None,
+            url_status: nzbg_core::models::UrlStatus::None,
+            health: 1000,
+            critical_health: 1000,
+            files: vec![],
+            completed_files: vec![],
+            server_stats: vec![],
+            parameters: vec![],
+            post_info: None,
+            message_count: 0,
+            cached_message_count: 0,
+        }
+    }
+
+    #[tokio::test]
+    async fn history_cleanup_skips_when_keep_days_zero() {
+        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1);
+        coordinator.add_to_history(
+            sample_nzb(1, "old-entry"),
+            nzbg_core::models::HistoryKind::Nzb,
+        );
+        tokio::spawn(async move { coordinator.run().await });
+
+        let mut cleanup = HistoryCleanup {
+            keep_days: 0,
+            queue: Some(handle.clone()),
+        };
+        cleanup.tick().await.expect("tick");
+
+        let history = handle.get_history().await.expect("history");
+        assert_eq!(
+            history.len(),
+            1,
+            "entry should not be deleted when keep_days=0"
+        );
+
+        handle.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn history_cleanup_skips_when_no_queue() {
+        let mut cleanup = HistoryCleanup {
+            keep_days: 7,
+            queue: None,
+        };
+        cleanup
+            .tick()
+            .await
+            .expect("tick without queue should succeed");
+    }
+
+    #[tokio::test]
+    async fn history_cleanup_preserves_fresh_entries() {
+        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1);
+        coordinator.add_to_history(sample_nzb(1, "fresh"), nzbg_core::models::HistoryKind::Nzb);
+        tokio::spawn(async move { coordinator.run().await });
+
+        let mut cleanup = HistoryCleanup {
+            keep_days: 1,
+            queue: Some(handle.clone()),
+        };
+        cleanup.tick().await.expect("tick");
+
+        let history = handle.get_history().await.expect("history");
+        assert_eq!(history.len(), 1, "fresh entry should not be deleted");
+
+        handle.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn history_cleanup_deletes_old_entries() {
+        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1);
+
+        let queue = nzbg_core::models::DownloadQueue {
+            queue: vec![],
+            history: vec![nzbg_core::models::HistoryInfo {
+                id: 1,
+                kind: nzbg_core::models::HistoryKind::Nzb,
+                time: std::time::SystemTime::UNIX_EPOCH,
+                nzb_info: sample_nzb(1, "old-entry"),
+            }],
+            next_nzb_id: 3,
+            next_file_id: 1,
+        };
+        coordinator.seed_state(queue, false, 0);
+        coordinator.add_to_history(
+            sample_nzb(2, "fresh-entry"),
+            nzbg_core::models::HistoryKind::Nzb,
+        );
+
+        tokio::spawn(async move { coordinator.run().await });
+
+        let mut cleanup = HistoryCleanup {
+            keep_days: 1,
+            queue: Some(handle.clone()),
+        };
+        cleanup.tick().await.expect("tick");
+
+        let history = handle.get_history().await.expect("history");
+        assert_eq!(history.len(), 1, "only old entry should be deleted");
+        assert_eq!(history[0].name, "fresh-entry");
+
+        handle.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn history_cleanup_deletes_multiple_old_entries() {
+        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1);
+
+        let history_entries: Vec<_> = (1..=3)
+            .map(|i| nzbg_core::models::HistoryInfo {
+                id: i,
+                kind: nzbg_core::models::HistoryKind::Nzb,
+                time: std::time::SystemTime::UNIX_EPOCH,
+                nzb_info: sample_nzb(i, &format!("old-{i}")),
+            })
+            .collect();
+        let queue = nzbg_core::models::DownloadQueue {
+            queue: vec![],
+            history: history_entries,
+            next_nzb_id: 4,
+            next_file_id: 1,
+        };
+        coordinator.seed_state(queue, false, 0);
+
+        tokio::spawn(async move { coordinator.run().await });
+
+        let mut cleanup = HistoryCleanup {
+            keep_days: 1,
+            queue: Some(handle.clone()),
+        };
+        cleanup.tick().await.expect("tick");
+
+        let history = handle.get_history().await.expect("history");
+        assert!(history.is_empty(), "all old entries should be deleted");
+
+        handle.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn health_checker_check_cert_no_path_skips() {
+        let checker = HealthChecker {
+            dest_dir: PathBuf::from("/tmp"),
+            cert_path: None,
+            disk: None,
+            queue: None,
+        };
+        checker
+            .check_certificate_expiry()
+            .await
+            .expect("should succeed when no cert configured");
+    }
+
+    #[tokio::test]
+    async fn health_checker_check_cert_missing_file_doesnt_error() {
+        let checker = HealthChecker {
+            dest_dir: PathBuf::from("/tmp"),
+            cert_path: Some(PathBuf::from("/nonexistent/cert.pem")),
+            disk: None,
+            queue: None,
+        };
+        checker
+            .check_certificate_expiry()
+            .await
+            .expect("should succeed even when cert file is missing");
+    }
+
+    #[tokio::test]
+    async fn health_checker_check_cert_existing_file_succeeds() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let cert_file = tmp.path().join("test.pem");
+        std::fs::write(&cert_file, b"fake cert data").expect("write");
+        let checker = HealthChecker {
+            dest_dir: PathBuf::from("/tmp"),
+            cert_path: Some(cert_file),
+            disk: None,
+            queue: None,
+        };
+        checker
+            .check_certificate_expiry()
+            .await
+            .expect("should succeed for existing cert file");
+    }
+
+    #[tokio::test]
+    async fn health_checker_check_consistency_no_deps_skips() {
+        let checker = HealthChecker {
+            dest_dir: PathBuf::from("/tmp"),
+            cert_path: None,
+            disk: None,
+            queue: None,
+        };
+        checker
+            .check_queue_consistency()
+            .await
+            .expect("should succeed when no disk/queue configured");
+    }
+
+    #[tokio::test]
+    async fn health_checker_check_consistency_empty_queue() {
+        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1);
+        tokio::spawn(async move { coordinator.run().await });
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let disk = std::sync::Arc::new(
+            nzbg_diskstate::DiskState::new(tmp.path().to_path_buf(), nzbg_diskstate::JsonFormat)
+                .expect("disk state"),
+        );
+
+        let checker = HealthChecker {
+            dest_dir: PathBuf::from("/tmp"),
+            cert_path: None,
+            disk: Some(disk),
+            queue: Some(handle.clone()),
+        };
+        checker
+            .check_queue_consistency()
+            .await
+            .expect("should succeed with empty queue");
+
+        handle.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn health_checker_check_consistency_reports_warnings() {
+        let nzb_info = sample_nzb(1, "test");
+        let queue = nzbg_core::models::DownloadQueue {
+            queue: vec![nzb_info],
+            history: vec![],
+            next_nzb_id: 2,
+            next_file_id: 1,
+        };
+
+        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1);
+        coordinator.seed_state(queue, false, 0);
+        tokio::spawn(async move { coordinator.run().await });
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let disk = std::sync::Arc::new(
+            nzbg_diskstate::DiskState::new(tmp.path().to_path_buf(), nzbg_diskstate::JsonFormat)
+                .expect("disk state"),
+        );
+
+        let checker = HealthChecker {
+            dest_dir: PathBuf::from("/tmp"),
+            cert_path: None,
+            disk: Some(disk),
+            queue: Some(handle.clone()),
+        };
+        let result = checker.check_queue_consistency().await;
+        assert!(result.is_ok(), "should succeed even with warnings");
+
+        handle.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn connection_cleanup_logs_cleaned_count() {
+        let server = nzbg_nntp::NewsServer {
+            id: 1,
+            name: "test".to_string(),
+            active: true,
+            host: "localhost".to_string(),
+            port: 119,
+            username: None,
+            password: None,
+            encryption: nzbg_nntp::Encryption::None,
+            cipher: None,
+            connections: 2,
+            retention: 0,
+            level: 0,
+            optional: false,
+            group: 0,
+            join_group: true,
+            ip_version: nzbg_nntp::IpVersion::Auto,
+            cert_verification: false,
+        };
+        let manager = std::sync::Arc::new(nzbg_nntp::ServerPoolManager::new(vec![server]));
+        let mut cleanup = ConnectionCleanup::new().with_pool(manager);
+        let result = cleanup.tick().await;
+        assert!(result.is_ok());
     }
 }

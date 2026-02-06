@@ -10,6 +10,6 @@ pub use crate::coordinator::{
 };
 pub use crate::error::QueueError;
 pub use crate::status::{
-    FileListEntry, HistoryListEntry, NzbCompletionNotice, NzbListEntry, NzbSnapshotEntry,
-    QueueSnapshot, QueueStatus, SegmentStatus,
+    FileArticleSnapshot, FileListEntry, HistoryListEntry, NzbCompletionNotice, NzbListEntry,
+    NzbSnapshotEntry, QueueSnapshot, QueueStatus, SegmentStatus,
 };

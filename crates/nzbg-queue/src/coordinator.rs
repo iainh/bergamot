@@ -11,8 +11,8 @@ use nzbg_core::models::{
 use crate::command::{EditAction, MovePosition, QueueCommand};
 use crate::error::QueueError;
 use crate::status::{
-    HistoryListEntry, NzbCompletionNotice, NzbListEntry, NzbSnapshotEntry, QueueSnapshot,
-    QueueStatus, SegmentStatus,
+    FileArticleSnapshot, HistoryListEntry, NzbCompletionNotice, NzbListEntry, NzbSnapshotEntry,
+    QueueSnapshot, QueueStatus, SegmentStatus,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -28,6 +28,7 @@ pub struct ArticleAssignment {
     pub message_id: String,
     pub groups: Vec<String>,
     pub output_filename: String,
+    pub expected_size: u64,
 }
 
 #[derive(Debug)]
@@ -245,6 +246,17 @@ impl QueueHandle {
             .map_err(|_| QueueError::Shutdown)
     }
 
+    pub async fn get_all_file_article_states(
+        &self,
+    ) -> Result<Vec<crate::status::FileArticleSnapshot>, QueueError> {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        self.command_tx
+            .send(QueueCommand::GetAllFileArticleStates { reply: reply_tx })
+            .await
+            .map_err(|_| QueueError::Shutdown)?;
+        reply_rx.await.map_err(|_| QueueError::Shutdown)
+    }
+
     pub async fn shutdown(&self) -> Result<(), QueueError> {
         self.command_tx
             .send(QueueCommand::Shutdown)
@@ -371,6 +383,7 @@ impl QueueCoordinator {
                 message_id: segment.message_id.clone(),
                 groups: file.groups.clone(),
                 output_filename: file.output_filename.clone(),
+                expected_size: segment.size,
             },
         ))
     }
@@ -595,6 +608,10 @@ impl QueueCoordinator {
                 move_status,
             } => {
                 self.update_post_status(nzb_id, par_status, unpack_status, move_status);
+            }
+            QueueCommand::GetAllFileArticleStates { reply } => {
+                let states = self.build_all_file_article_states();
+                let _ = reply.send(states);
             }
             QueueCommand::SetStrategy { strategy } => {
                 self.strategy = strategy;
@@ -856,23 +873,41 @@ impl QueueCoordinator {
                 .queue
                 .queue
                 .iter()
-                .map(|nzb| NzbSnapshotEntry {
-                    id: nzb.id,
-                    name: nzb.name.clone(),
-                    filename: nzb.filename.clone(),
-                    category: nzb.category.clone(),
-                    dest_dir: nzb.dest_dir.clone(),
-                    priority: nzb.priority,
-                    paused: nzb.paused,
-                    total_size: nzb.size,
-                    downloaded_size: nzb.success_size,
-                    failed_size: nzb.failed_size,
-                    health: nzb.health,
-                    critical_health: nzb.critical_health,
-                    total_article_count: nzb.total_article_count,
-                    success_article_count: nzb.success_article_count,
-                    failed_article_count: nzb.failed_article_count,
-                    file_ids: nzb.files.iter().map(|f| f.id).collect(),
+                .map(|nzb| {
+                    let final_dir = if nzb.final_dir.as_os_str().is_empty() {
+                        None
+                    } else {
+                        Some(nzb.final_dir.clone())
+                    };
+                    NzbSnapshotEntry {
+                        id: nzb.id,
+                        name: nzb.name.clone(),
+                        filename: nzb.filename.clone(),
+                        url: nzb.url.clone(),
+                        category: nzb.category.clone(),
+                        dest_dir: nzb.dest_dir.clone(),
+                        final_dir,
+                        priority: nzb.priority,
+                        paused: nzb.paused,
+                        dupe_key: nzb.dup_key.clone(),
+                        dupe_score: nzb.dup_score,
+                        dupe_mode: nzb.dup_mode,
+                        added_time: nzb.added_time,
+                        total_size: nzb.size,
+                        downloaded_size: nzb.success_size,
+                        failed_size: nzb.failed_size,
+                        health: nzb.health,
+                        critical_health: nzb.critical_health,
+                        total_article_count: nzb.total_article_count,
+                        success_article_count: nzb.success_article_count,
+                        failed_article_count: nzb.failed_article_count,
+                        parameters: nzb
+                            .parameters
+                            .iter()
+                            .map(|p| (p.name.clone(), p.value.clone()))
+                            .collect(),
+                        file_ids: nzb.files.iter().map(|f| f.id).collect(),
+                    }
                 })
                 .collect(),
             history: self.build_history_list(),
@@ -919,6 +954,29 @@ impl QueueCoordinator {
                 completed: f.completed,
             })
             .collect())
+    }
+
+    fn build_all_file_article_states(&self) -> Vec<FileArticleSnapshot> {
+        let mut states = Vec::new();
+        for nzb in &self.queue.queue {
+            for file in &nzb.files {
+                let completed_articles: Vec<(u32, u32)> = file
+                    .articles
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, a)| a.status == ArticleStatus::Finished)
+                    .map(|(idx, a)| (idx as u32, a.crc))
+                    .collect();
+                if !completed_articles.is_empty() {
+                    states.push(FileArticleSnapshot {
+                        file_id: file.id,
+                        total_articles: file.total_articles,
+                        completed_articles,
+                    });
+                }
+            }
+        }
+        states
     }
 
     fn build_history_list(&self) -> Vec<HistoryListEntry> {
@@ -2692,6 +2750,85 @@ mod tests {
 
         assert!(coordinator.queue.queue.is_empty());
         assert_eq!(coordinator.queue.history.len(), 1);
+    }
+
+    #[test]
+    fn build_all_file_article_states_returns_completed_articles() {
+        let (mut coordinator, _handle, _rx, _rate_rx) = QueueCoordinator::new(2, 1);
+        let mut nzb = sample_nzb(1, "test");
+        nzb.files = vec![FileInfo {
+            id: 10,
+            articles: vec![
+                ArticleInfo {
+                    part_number: 1,
+                    message_id: "a@b".to_string(),
+                    size: 100,
+                    status: ArticleStatus::Finished,
+                    segment_offset: 0,
+                    segment_size: 100,
+                    crc: 0xAABB,
+                },
+                ArticleInfo {
+                    part_number: 2,
+                    message_id: "c@d".to_string(),
+                    size: 200,
+                    status: ArticleStatus::Undefined,
+                    segment_offset: 0,
+                    segment_size: 200,
+                    crc: 0,
+                },
+                ArticleInfo {
+                    part_number: 3,
+                    message_id: "e@f".to_string(),
+                    size: 300,
+                    status: ArticleStatus::Finished,
+                    segment_offset: 0,
+                    segment_size: 300,
+                    crc: 0xCCDD,
+                },
+            ],
+            total_articles: 3,
+            ..sample_file()
+        }];
+        coordinator.queue.queue.push(nzb);
+
+        let states = coordinator.build_all_file_article_states();
+        assert_eq!(states.len(), 1);
+        assert_eq!(states[0].file_id, 10);
+        assert_eq!(states[0].total_articles, 3);
+        assert_eq!(states[0].completed_articles, vec![(0, 0xAABB), (2, 0xCCDD)]);
+    }
+
+    #[test]
+    fn build_all_file_article_states_skips_files_with_no_completions() {
+        let (mut coordinator, _handle, _rx, _rate_rx) = QueueCoordinator::new(2, 1);
+        let mut nzb = sample_nzb(1, "test");
+        nzb.files = vec![FileInfo {
+            id: 20,
+            total_articles: 1,
+            ..sample_file()
+        }];
+        coordinator.queue.queue.push(nzb);
+
+        let states = coordinator.build_all_file_article_states();
+        assert!(states.is_empty());
+    }
+
+    #[tokio::test]
+    async fn get_all_file_article_states_via_handle() {
+        let _nzb_file = write_sample_nzb();
+        let (mut coordinator, handle, _rx, _rate_rx) = QueueCoordinator::new(2, 1);
+        tokio::spawn(async move { coordinator.run().await });
+
+        handle
+            .add_nzb(_nzb_file.path().to_path_buf(), None, Priority::Normal)
+            .await
+            .expect("add");
+
+        let states = handle.get_all_file_article_states().await.expect("states");
+        assert!(states.is_empty());
+
+        handle.shutdown().await.expect("shutdown");
     }
 
     #[test]

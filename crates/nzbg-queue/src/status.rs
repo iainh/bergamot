@@ -40,10 +40,16 @@ pub struct NzbSnapshotEntry {
     pub id: u32,
     pub name: String,
     pub filename: String,
+    pub url: String,
     pub category: String,
     pub dest_dir: std::path::PathBuf,
+    pub final_dir: Option<std::path::PathBuf>,
     pub priority: Priority,
     pub paused: bool,
+    pub dupe_key: String,
+    pub dupe_score: i32,
+    pub dupe_mode: nzbg_core::models::DupMode,
+    pub added_time: std::time::SystemTime,
     pub total_size: u64,
     pub downloaded_size: u64,
     pub failed_size: u64,
@@ -52,6 +58,7 @@ pub struct NzbSnapshotEntry {
     pub total_article_count: u32,
     pub success_article_count: u32,
     pub failed_article_count: u32,
+    pub parameters: Vec<(String, String)>,
     pub file_ids: Vec<u32>,
 }
 
@@ -85,6 +92,13 @@ pub struct FileListEntry {
     pub failed_articles: u32,
     pub active_downloads: u32,
     pub completed: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct FileArticleSnapshot {
+    pub file_id: u32,
+    pub total_articles: u32,
+    pub completed_articles: Vec<(u32, u32)>,
 }
 
 #[derive(Debug, Clone)]

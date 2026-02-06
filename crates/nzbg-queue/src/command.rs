@@ -6,7 +6,9 @@ use crate::coordinator::ArticleId;
 use crate::error::QueueError;
 use nzbg_core::models::MarkStatus;
 
-use crate::status::{FileListEntry, HistoryListEntry, NzbListEntry, QueueSnapshot, QueueStatus};
+use crate::status::{
+    FileArticleSnapshot, FileListEntry, HistoryListEntry, NzbListEntry, QueueSnapshot, QueueStatus,
+};
 
 #[derive(Debug)]
 pub struct DownloadResult {
@@ -109,6 +111,9 @@ pub enum QueueCommand {
         par_status: Option<nzbg_core::models::ParStatus>,
         unpack_status: Option<nzbg_core::models::UnpackStatus>,
         move_status: Option<nzbg_core::models::MoveStatus>,
+    },
+    GetAllFileArticleStates {
+        reply: oneshot::Sender<Vec<FileArticleSnapshot>>,
     },
     SetStrategy {
         strategy: nzbg_core::models::PostStrategy,

@@ -21,12 +21,20 @@ pub struct AuthState {
     pub config: ServerConfig,
 }
 
+pub fn unauthorized_response() -> Response {
+    Response::builder()
+        .status(StatusCode::UNAUTHORIZED)
+        .header("WWW-Authenticate", "Basic realm=\"nzbg\"")
+        .body(axum::body::Body::empty())
+        .unwrap()
+}
+
 pub async fn auth_middleware(
     State(state): State<AuthState>,
     connect_info: Option<ConnectInfo<SocketAddr>>,
     request: Request,
     next: Next,
-) -> Result<Response, StatusCode> {
+) -> Result<Response, Response> {
     let config = &state.config;
 
     if !config.authorized_ips.is_empty() {
@@ -34,7 +42,10 @@ pub async fn auth_middleware(
             .map(|ci| ci.0.ip().to_string())
             .unwrap_or_default();
         if !is_ip_allowed(&client_ip, &config.authorized_ips) {
-            return Err(StatusCode::FORBIDDEN);
+            return Err(Response::builder()
+                .status(StatusCode::FORBIDDEN)
+                .body(axum::body::Body::empty())
+                .unwrap());
         }
     }
 
@@ -50,7 +61,7 @@ pub async fn auth_middleware(
         .unwrap_or(AccessLevel::Denied);
 
     if access == AccessLevel::Denied {
-        return Err(StatusCode::UNAUTHORIZED);
+        return Err(unauthorized_response());
     }
 
     let mut request = request;
@@ -185,6 +196,19 @@ pub fn verify_session_cookie(cookie: &str, secret: &str) -> Option<AccessLevel> 
         "add" => Some(AccessLevel::Add),
         _ => None,
     }
+}
+
+pub fn extract_access(request: &Request, config: &ServerConfig) -> AccessLevel {
+    extract_session_cookie(request)
+        .and_then(|cookie| verify_session_cookie(&cookie, &config.control_password))
+        .or_else(|| {
+            extract_url_credentials(request)
+                .and_then(|(user, pass)| authenticate(&user, &pass, config))
+        })
+        .or_else(|| {
+            extract_basic_auth(request).and_then(|(user, pass)| authenticate(&user, &pass, config))
+        })
+        .unwrap_or(AccessLevel::Denied)
 }
 
 fn extract_session_cookie(request: &Request) -> Option<String> {
