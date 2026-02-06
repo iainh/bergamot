@@ -18,17 +18,29 @@ pub enum QueueCommand {
         delete_files: bool,
         reply: oneshot::Sender<Result<(), QueueError>>,
     },
-    PauseNzb { id: u32 },
-    ResumeNzb { id: u32 },
+    PauseNzb {
+        id: u32,
+    },
+    ResumeNzb {
+        id: u32,
+    },
     MoveNzb {
         id: u32,
         position: MovePosition,
     },
-    PauseFile { nzb_id: u32, file_index: u32 },
-    ResumeFile { nzb_id: u32, file_index: u32 },
+    PauseFile {
+        nzb_id: u32,
+        file_index: u32,
+    },
+    ResumeFile {
+        nzb_id: u32,
+        file_index: u32,
+    },
     PauseAll,
     ResumeAll,
-    SetDownloadRate { bytes_per_sec: u64 },
+    SetDownloadRate {
+        bytes_per_sec: u64,
+    },
     EditQueue {
         action: EditAction,
         ids: Vec<u32>,

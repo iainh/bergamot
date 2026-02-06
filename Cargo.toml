@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
   "crates/nzbg",
+  "crates/nzbg-scheduler",
   "crates/nzbg-core",
   "crates/nzbg-nzb",
   "crates/nzbg-nntp",

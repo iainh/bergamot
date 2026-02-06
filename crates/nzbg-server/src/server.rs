@@ -1,16 +1,16 @@
 use std::sync::Arc;
 
 use axum::routing::{get, post};
-use axum::{middleware, Json, Router};
+use axum::{Json, Router, middleware};
 use tokio::net::TcpListener;
 use tower_http::compression::CompressionLayer;
 use tower_http::cors::CorsLayer;
 use tower_http::services::ServeDir;
 
-use crate::auth::{auth_middleware, AccessLevel, AuthState, required_access};
+use crate::auth::{AccessLevel, AuthState, auth_middleware, required_access};
 use crate::config::ServerConfig;
 use crate::error::{JsonRpcError, JsonRpcErrorBody};
-use crate::rpc::{dispatch_rpc, JsonRpcRequest, JsonRpcResponse};
+use crate::rpc::{JsonRpcRequest, JsonRpcResponse, dispatch_rpc};
 use crate::status::StatusResponse;
 
 #[derive(Debug, Clone)]
@@ -68,7 +68,10 @@ impl WebServer {
             .fallback_service(ServeDir::new(&self.config.web_dir))
             .layer(CompressionLayer::new().gzip(true))
             .layer(CorsLayer::permissive())
-            .layer(middleware::from_fn_with_state(auth_state.clone(), auth_middleware))
+            .layer(middleware::from_fn_with_state(
+                auth_state.clone(),
+                auth_middleware,
+            ))
             .with_state(self.state.clone());
 
         let bind_addr = format!("{}:{}", self.config.control_ip, self.config.control_port);
@@ -107,8 +110,14 @@ async fn handle_jsonprpc(
     axum::Extension(access): axum::Extension<AccessLevel>,
     axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
 ) -> String {
-    let callback = params.get("callback").cloned().unwrap_or_else(|| "cb".to_string());
-    let method = params.get("method").cloned().unwrap_or_else(|| "status".to_string());
+    let callback = params
+        .get("callback")
+        .cloned()
+        .unwrap_or_else(|| "cb".to_string());
+    let method = params
+        .get("method")
+        .cloned()
+        .unwrap_or_else(|| "status".to_string());
     let response = match dispatch_rpc(&method, &serde_json::json!([]), &state).await {
         Ok(result) => JsonRpcResponse {
             jsonrpc: "2.0".to_string(),
@@ -124,17 +133,24 @@ async fn handle_jsonprpc(
         },
     };
     let _ = access;
-    format!("{}({});", callback, serde_json::to_string(&response).unwrap())
+    format!(
+        "{}({});",
+        callback,
+        serde_json::to_string(&response).unwrap()
+    )
 }
 
 async fn handle_xmlrpc() -> Json<JsonRpcResponse> {
     Json(JsonRpcResponse {
         jsonrpc: "2.0".to_string(),
         result: None,
-        error: Some(serde_json::to_value(JsonRpcErrorBody {
-            code: -32000,
-            message: "XML-RPC not implemented".to_string(),
-        }).unwrap()),
+        error: Some(
+            serde_json::to_value(JsonRpcErrorBody {
+                code: -32000,
+                message: "XML-RPC not implemented".to_string(),
+            })
+            .unwrap(),
+        ),
         id: serde_json::json!(0),
     })
 }
@@ -178,8 +194,8 @@ async fn handle_api_shortcut(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::http::{Request, StatusCode};
     use axum::body::Body;
+    use axum::http::{Request, StatusCode};
     use tower::ServiceExt;
 
     fn server_config() -> ServerConfig {

@@ -43,8 +43,5 @@ pub struct NzbInfo {
 pub enum ParStatus {
     NotPar,
     MainPar,
-    RepairVolume {
-        block_offset: u32,
-        block_count: u32,
-    },
+    RepairVolume { block_offset: u32, block_count: u32 },
 }

@@ -2,9 +2,9 @@ use std::sync::Arc;
 
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
+use tokio_rustls::TlsConnector;
 use tokio_rustls::client::TlsStream;
 use tokio_rustls::rustls::{ClientConfig, RootCertStore, pki_types::ServerName};
-use tokio_rustls::TlsConnector;
 
 use crate::error::NntpError;
 use crate::model::{Encryption, NewsServer, NntpResponse};
@@ -110,7 +110,8 @@ impl NntpConnection {
     }
 
     pub async fn authenticate(&mut self, username: &str, password: &str) -> Result<(), NntpError> {
-        self.send_command(&format!("AUTHINFO USER {username}")).await?;
+        self.send_command(&format!("AUTHINFO USER {username}"))
+            .await?;
         let resp = self.read_response().await?;
 
         match resp.code {
@@ -122,7 +123,8 @@ impl NntpConnection {
             _ => return Err(NntpError::AuthFailed(resp.message)),
         }
 
-        self.send_command(&format!("AUTHINFO PASS {password}")).await?;
+        self.send_command(&format!("AUTHINFO PASS {password}"))
+            .await?;
         let resp = self.read_response().await?;
         match resp.code {
             281 => {
@@ -212,7 +214,10 @@ fn expect_code(resp: &NntpResponse, expected: &[u16]) -> Result<(), NntpError> {
     if expected.contains(&resp.code) {
         Ok(())
     } else {
-        Err(NntpError::UnexpectedResponse(resp.code, resp.message.clone()))
+        Err(NntpError::UnexpectedResponse(
+            resp.code,
+            resp.message.clone(),
+        ))
     }
 }
 

@@ -4,8 +4,8 @@ use std::io::BufRead;
 use std::sync::LazyLock;
 
 use flate2::read::GzDecoder;
-use quick_xml::events::{BytesStart, Event};
 use quick_xml::Reader;
+use quick_xml::events::{BytesStart, Event};
 use regex::Regex;
 
 use crate::error::NzbError;
@@ -124,14 +124,10 @@ impl NzbParser {
             (ParseState::InSegments, b"segment") => {
                 let bytes = Self::get_attr(e, b"bytes")?
                     .and_then(|s| s.parse::<u64>().ok())
-                    .ok_or_else(|| {
-                        NzbError::InvalidSegment("missing bytes attribute".into())
-                    })?;
+                    .ok_or_else(|| NzbError::InvalidSegment("missing bytes attribute".into()))?;
                 let number = Self::get_attr(e, b"number")?
                     .and_then(|s| s.parse::<u32>().ok())
-                    .ok_or_else(|| {
-                        NzbError::InvalidSegment("missing number attribute".into())
-                    })?;
+                    .ok_or_else(|| NzbError::InvalidSegment("missing number attribute".into()))?;
                 ParseState::InSegment { bytes, number }
             }
             _ => return Ok(()),
@@ -164,9 +160,7 @@ impl NzbParser {
                 let message_id = std::mem::take(&mut self.current_text);
                 if let Some(ref mut f) = self.current_file {
                     if message_id.is_empty() {
-                        return Err(NzbError::InvalidSegment(
-                            "missing message id".into(),
-                        ));
+                        return Err(NzbError::InvalidSegment("missing message id".into()));
                     }
                     f.segments.push(Segment {
                         number: *number,
@@ -180,14 +174,10 @@ impl NzbParser {
             (ParseState::InFile, b"file") => {
                 if let Some(builder) = self.current_file.take() {
                     if builder.groups.is_empty() {
-                        return Err(NzbError::MalformedNzb(
-                            "file missing groups".into(),
-                        ));
+                        return Err(NzbError::MalformedNzb("file missing groups".into()));
                     }
                     if builder.segments.is_empty() {
-                        return Err(NzbError::MalformedNzb(
-                            "file missing segments".into(),
-                        ));
+                        return Err(NzbError::MalformedNzb("file missing segments".into()));
                     }
                     let filename = extract_filename(&builder.subject);
                     let par_status = classify_par(&filename);
@@ -269,9 +259,8 @@ pub fn parse_nzb_auto(data: &[u8]) -> Result<NzbInfo, NzbError> {
     }
 }
 
-static FILENAME_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#""([^\"]+\.[a-zA-Z0-9]{2,4})""#).expect("valid regex")
-});
+static FILENAME_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#""([^\"]+\.[a-zA-Z0-9]{2,4})""#).expect("valid regex"));
 
 pub fn extract_filename(subject: &str) -> Option<String> {
     FILENAME_RE
@@ -280,9 +269,8 @@ pub fn extract_filename(subject: &str) -> Option<String> {
         .map(|cap| cap[1].to_string())
 }
 
-static PAR2_VOL_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)\.vol(\d+)\+(\d+)\.par2$").expect("valid regex")
-});
+static PAR2_VOL_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)\.vol(\d+)\+(\d+)\.par2$").expect("valid regex"));
 
 pub fn classify_par(filename: &Option<String>) -> ParStatus {
     let name = match filename {
@@ -311,7 +299,11 @@ pub fn classify_par(filename: &Option<String>) -> ParStatus {
 pub fn compute_content_hash(files: &[NzbFile]) -> u32 {
     let mut ids: Vec<&str> = files
         .iter()
-        .flat_map(|file| file.segments.iter().map(|segment| segment.message_id.as_str()))
+        .flat_map(|file| {
+            file.segments
+                .iter()
+                .map(|segment| segment.message_id.as_str())
+        })
         .collect();
     ids.sort_unstable();
 
@@ -477,8 +469,8 @@ mod tests {
 
     #[test]
     fn parse_nzb_auto_handles_gzip_payload() {
-        use flate2::write::GzEncoder;
         use flate2::Compression;
+        use flate2::write::GzEncoder;
 
         let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
         std::io::Write::write_all(&mut encoder, SAMPLE.as_bytes()).expect("write");
@@ -502,10 +494,7 @@ mod tests {
 
     #[test]
     fn classify_par_returns_main_and_repair_variants() {
-        assert_eq!(
-            classify_par(&Some("show.par2".into())),
-            ParStatus::MainPar
-        );
+        assert_eq!(classify_par(&Some("show.par2".into())), ParStatus::MainPar);
         assert_eq!(
             classify_par(&Some("show.vol00+01.par2".into())),
             ParStatus::RepairVolume {
@@ -513,10 +502,7 @@ mod tests {
                 block_count: 1,
             }
         );
-        assert_eq!(
-            classify_par(&Some("show.mkv".into())),
-            ParStatus::NotPar
-        );
+        assert_eq!(classify_par(&Some("show.mkv".into())), ParStatus::NotPar);
     }
 
     #[test]

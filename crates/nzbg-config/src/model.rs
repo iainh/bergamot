@@ -166,16 +166,22 @@ impl Config {
         self.raw.insert(key.to_string(), resolved.clone());
         match key {
             "DownloadRate" => {
-                self.download_rate = resolved.parse().map_err(|_| crate::error::ConfigError::InvalidValue {
-                    option: key.into(),
-                    value: value.into(),
-                })?;
+                self.download_rate =
+                    resolved
+                        .parse()
+                        .map_err(|_| crate::error::ConfigError::InvalidValue {
+                            option: key.into(),
+                            value: value.into(),
+                        })?;
             }
             "DiskSpace" => {
-                self.disk_space = resolved.parse().map_err(|_| crate::error::ConfigError::InvalidValue {
-                    option: key.into(),
-                    value: value.into(),
-                })?;
+                self.disk_space =
+                    resolved
+                        .parse()
+                        .map_err(|_| crate::error::ConfigError::InvalidValue {
+                            option: key.into(),
+                            value: value.into(),
+                        })?;
             }
             _ => {}
         }
@@ -193,6 +199,10 @@ impl Config {
         }
         std::fs::write(path, &output)?;
         Ok(())
+    }
+
+    pub fn raw(&self) -> &HashMap<String, String> {
+        &self.raw
     }
 }
 

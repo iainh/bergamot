@@ -65,7 +65,8 @@ pub fn extract_servers(raw: &HashMap<String, String>) -> Vec<ServerConfig> {
                 servers.push(ServerConfig {
                     id: id as u32,
                     active: parse_bool(raw.get(&format!("{prefix}Active")), true),
-                    name: raw.get(&format!("{prefix}Name"))
+                    name: raw
+                        .get(&format!("{prefix}Name"))
                         .cloned()
                         .unwrap_or_default(),
                     host: host.clone(),

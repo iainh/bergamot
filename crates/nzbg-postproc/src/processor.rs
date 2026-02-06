@@ -100,7 +100,10 @@ impl<E: Par2Engine> PostProcessor<E> {
     }
 
     async fn par_verify(&self, ctx: &PostProcessContext) -> Result<Par2Result, PostProcessError> {
-        let par2_file = ctx.request.working_dir.join(format!("{}.par2", ctx.request.nzb_name));
+        let par2_file = ctx
+            .request
+            .working_dir
+            .join(format!("{}.par2", ctx.request.nzb_name));
         let result = self
             .par2
             .verify(&par2_file, &ctx.request.working_dir)
@@ -109,7 +112,10 @@ impl<E: Par2Engine> PostProcessor<E> {
     }
 
     async fn par_repair(&self, ctx: &PostProcessContext) -> Result<Par2Result, PostProcessError> {
-        let par2_file = ctx.request.working_dir.join(format!("{}.par2", ctx.request.nzb_name));
+        let par2_file = ctx
+            .request
+            .working_dir
+            .join(format!("{}.par2", ctx.request.nzb_name));
         let result = self
             .par2
             .repair(&par2_file, &ctx.request.working_dir)
@@ -129,11 +135,19 @@ mod tests {
 
     #[async_trait]
     impl Par2Engine for FakePar2 {
-        async fn verify(&self, _par2_file: &std::path::Path, _working_dir: &std::path::Path) -> Result<Par2Result, crate::error::Par2Error> {
+        async fn verify(
+            &self,
+            _par2_file: &std::path::Path,
+            _working_dir: &std::path::Path,
+        ) -> Result<Par2Result, crate::error::Par2Error> {
             Ok(Par2Result::AllFilesOk)
         }
 
-        async fn repair(&self, _par2_file: &std::path::Path, _working_dir: &std::path::Path) -> Result<Par2Result, crate::error::Par2Error> {
+        async fn repair(
+            &self,
+            _par2_file: &std::path::Path,
+            _working_dir: &std::path::Path,
+        ) -> Result<Par2Result, crate::error::Par2Error> {
             Ok(Par2Result::RepairComplete)
         }
     }

@@ -29,8 +29,7 @@ pub async fn auth_middleware(
     let access = extract_url_credentials(&request)
         .and_then(|(user, pass)| authenticate(&user, &pass, config))
         .or_else(|| {
-            extract_basic_auth(&request)
-                .and_then(|(user, pass)| authenticate(&user, &pass, config))
+            extract_basic_auth(&request).and_then(|(user, pass)| authenticate(&user, &pass, config))
         })
         .unwrap_or(AccessLevel::Denied);
 
@@ -60,10 +59,10 @@ pub fn required_access(method: &str) -> AccessLevel {
     match method {
         "version" => AccessLevel::Add,
         "append" | "scan" => AccessLevel::Add,
-        "status" | "sysinfo" | "systemhealth"
-        | "listgroups" | "listfiles" | "history"
-        | "log" | "loadlog" | "servervolumes"
-        | "config" | "configtemplates" | "loadconfig" => AccessLevel::Restricted,
+        "status" | "sysinfo" | "systemhealth" | "listgroups" | "listfiles" | "history" | "log"
+        | "loadlog" | "servervolumes" | "config" | "configtemplates" | "loadconfig" => {
+            AccessLevel::Restricted
+        }
         _ => AccessLevel::Control,
     }
 }
@@ -71,7 +70,9 @@ pub fn required_access(method: &str) -> AccessLevel {
 fn extract_basic_auth(request: &Request) -> Option<(String, String)> {
     let header = request.headers().get("Authorization")?.to_str().ok()?;
     let encoded = header.strip_prefix("Basic ")?;
-    let decoded = base64::engine::general_purpose::STANDARD.decode(encoded).ok()?;
+    let decoded = base64::engine::general_purpose::STANDARD
+        .decode(encoded)
+        .ok()?;
     let decoded = String::from_utf8(decoded).ok()?;
     let (user, pass) = decoded.split_once(':')?;
     Some((user.to_string(), pass.to_string()))

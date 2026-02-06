@@ -111,7 +111,10 @@ impl YencDecoder {
             .ok_or(YencError::MissingField { field: "name" })?;
         self.file_size = parse_u64("size", size)?;
         self.filename = name.clone();
-        self.part_number = fields.get("part").map(|val| parse_u32("part", val)).transpose()?;
+        self.part_number = fields
+            .get("part")
+            .map(|val| parse_u32("part", val))
+            .transpose()?;
         Ok(())
     }
 
@@ -130,8 +133,14 @@ impl YencDecoder {
 
     fn parse_yend(&mut self, line: &[u8]) -> Result<Option<u32>, YencError> {
         let fields = parse_key_values(line)?;
-        let expected_crc = fields.get("pcrc32").map(|val| parse_hex_u32("pcrc32", val)).transpose()?;
-        let expected_size = fields.get("size").map(|val| parse_u64("size", val)).transpose()?;
+        let expected_crc = fields
+            .get("pcrc32")
+            .map(|val| parse_hex_u32("pcrc32", val))
+            .transpose()?;
+        let expected_size = fields
+            .get("size")
+            .map(|val| parse_u64("size", val))
+            .transpose()?;
         if let Some(expected_size) = expected_size
             && expected_size != self.decoded.len() as u64
         {
@@ -140,7 +149,10 @@ impl YencDecoder {
         Ok(expected_crc)
     }
 
-    fn finalize_segment(&mut self, expected_crc: Option<u32>) -> Result<Option<DecodedSegment>, YencError> {
+    fn finalize_segment(
+        &mut self,
+        expected_crc: Option<u32>,
+    ) -> Result<Option<DecodedSegment>, YencError> {
         if self.decoded.is_empty() {
             return Err(YencError::UnexpectedEnd);
         }
@@ -156,7 +168,9 @@ impl YencDecoder {
         }
 
         let begin = self.part_begin.unwrap_or(1);
-        let end = self.part_end.unwrap_or(begin + self.decoded.len() as u64 - 1);
+        let end = self
+            .part_end
+            .unwrap_or(begin + self.decoded.len() as u64 - 1);
         let data = std::mem::take(&mut self.decoded);
         self.part_crc = Hasher::new();
 

@@ -26,10 +26,12 @@ pub async fn dispatch_rpc(
 ) -> Result<serde_json::Value, JsonRpcError> {
     match method {
         "version" => Ok(serde_json::json!(state.version())),
-        "status" => Ok(serde_json::to_value(state.status()).map_err(|err| JsonRpcError {
-            code: -32000,
-            message: err.to_string(),
-        })?),
+        "status" => Ok(
+            serde_json::to_value(state.status()).map_err(|err| JsonRpcError {
+                code: -32000,
+                message: err.to_string(),
+            })?,
+        ),
         _ => Err(JsonRpcError {
             code: -32601,
             message: format!("Method not found: {method}"),

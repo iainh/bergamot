@@ -9,8 +9,13 @@ use crate::error::Par2Error;
 pub enum Par2Result {
     AllFilesOk,
     RepairComplete,
-    RepairNeeded { blocks_needed: usize, blocks_available: usize },
-    RepairFailed { reason: String },
+    RepairNeeded {
+        blocks_needed: usize,
+        blocks_available: usize,
+    },
+    RepairFailed {
+        reason: String,
+    },
 }
 
 #[async_trait]

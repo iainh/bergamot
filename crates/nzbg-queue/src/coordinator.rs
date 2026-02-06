@@ -172,7 +172,11 @@ impl QueueCoordinator {
     }
 
     fn mark_segment_status(&mut self, article_id: ArticleId, status: SegmentStatus) {
-        if let Some(nzb) = self.queue.queue.iter_mut().find(|nzb| nzb.id == article_id.nzb_id)
+        if let Some(nzb) = self
+            .queue
+            .queue
+            .iter_mut()
+            .find(|nzb| nzb.id == article_id.nzb_id)
             && let Some(file) = nzb.files.get_mut(article_id.file_idx as usize)
             && let Some(segment) = file.articles.get_mut(article_id.seg_idx as usize)
         {
@@ -481,7 +485,11 @@ mod tests {
         });
 
         let id = handle
-            .add_nzb(std::path::PathBuf::from("/tmp/test.nzb"), None, Priority::Normal)
+            .add_nzb(
+                std::path::PathBuf::from("/tmp/test.nzb"),
+                None,
+                Priority::Normal,
+            )
             .await
             .expect("add nzb");
         assert_eq!(id, 1);
