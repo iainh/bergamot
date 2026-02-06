@@ -71,27 +71,25 @@ downloader at all.
 
 ---
 
-## Phase 3 — RPC Completeness
+## Phase 3 — RPC Completeness ✅
 
-These RPC methods currently return hardcoded/empty values and need real implementations.
-
-| # | RPC Method | Current Behavior | Needed |
-|---|------------|-----------------|--------|
-| 11 | `listfiles` | Returns `[]` | Return file details for a given NZBID |
-| 12 | `postqueue` | Returns `[]` | Return active post-processing jobs |
-| 13 | `loadlog` | Returns `[]` | Read from `LogBuffer` (already created in app.rs) |
-| 14 | `writelog` | Returns `true` | Write a log entry to the buffer |
-| 15 | `servervolumes` | Returns `[]` | Wire `StatsTracker` to NNTP fetch path, return real data |
-| 16 | `config` / `loadconfig` | Returns `[]` | Return current config key-value pairs |
-| 17 | `saveconfig` | Returns `true` | Call `Config::save()` and reload |
-| 18 | `configtemplates` | Returns `[]` | Return config option metadata |
-| 19 | `feeds` | Returns `[]` | Wire `FeedCoordinator`, return feed status |
-| 20 | `sysinfo` | Not implemented (404) | Return system info (version, OS, uptime, disk space) |
-| 21 | `systemhealth` | Not implemented (404) | Return health check results |
-| 22 | `log` | Not implemented (404) | Return log entries from buffer |
-| 23 | `pausepost`/`resumepost` | Returns `true` | Wire to actual postproc pause state |
-| 24 | `pausescan`/`resumescan` | Returns `true` | Wire to scanner pause state |
-| 25 | `scan` | Returns `true` | Trigger immediate NZB directory scan |
+| # | RPC Method | Status |
+|---|------------|--------|
+| 11 | `listfiles` | ✅ Returns file details (ID, filename, subject, size, articles, paused) for a given NZBID via GetFileList queue command |
+| 12 | `postqueue` | ✅ Returns paused status with jobs list; paused state via AtomicBool |
+| 13 | `loadlog` | ✅ Reads from LogBuffer with since_id filtering |
+| 14 | `writelog` | ✅ Writes log entry to LogBuffer with level mapping |
+| 15 | `servervolumes` | Deferred — needs NNTP StatsTracker wiring (Phase 6) |
+| 16 | `config` / `loadconfig` | ✅ Returns current config key-value pairs from shared RwLock<Config> |
+| 17 | `saveconfig` | ✅ Updates options via Config::set_option() and persists to disk |
+| 18 | `configtemplates` | ✅ Returns metadata for known config options |
+| 19 | `feeds` | Deferred — needs FeedCoordinator (Phase 4) |
+| 20 | `sysinfo` | ✅ Returns version, OS, architecture, uptime |
+| 21 | `systemhealth` | ✅ Returns queue availability and health status |
+| 22 | `log` | ✅ Alias to loadlog |
+| 23 | `pausepost`/`resumepost` | ✅ Toggles AtomicBool pause state, reflected in postqueue |
+| 24 | `pausescan`/`resumescan` | ✅ Toggles AtomicBool scan pause state |
+| 25 | `scan` | ✅ Sends trigger on mpsc channel for immediate directory scan |
 
 ---
 
