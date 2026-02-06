@@ -25,6 +25,7 @@ pub struct NzbListEntry {
 #[derive(Debug, Clone)]
 pub struct QueueSnapshot {
     pub nzbs: Vec<NzbSnapshotEntry>,
+    pub history: Vec<HistoryListEntry>,
     pub next_nzb_id: u32,
     pub next_file_id: u32,
     pub download_paused: bool,
@@ -49,4 +50,20 @@ pub struct NzbSnapshotEntry {
     pub success_article_count: u32,
     pub failed_article_count: u32,
     pub file_ids: Vec<u32>,
+}
+
+#[derive(Debug, Clone)]
+pub struct HistoryListEntry {
+    pub id: u32,
+    pub name: String,
+    pub category: String,
+    pub kind: nzbg_core::models::HistoryKind,
+    pub time: std::time::SystemTime,
+    pub size: u64,
+    pub par_status: nzbg_core::models::ParStatus,
+    pub unpack_status: nzbg_core::models::UnpackStatus,
+    pub move_status: nzbg_core::models::MoveStatus,
+    pub delete_status: nzbg_core::models::DeleteStatus,
+    pub mark_status: nzbg_core::models::MarkStatus,
+    pub health: u32,
 }

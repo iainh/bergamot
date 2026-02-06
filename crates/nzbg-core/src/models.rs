@@ -340,6 +340,15 @@ pub enum HistoryStatus {
     Warning = 2,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum PostStrategy {
+    #[default]
+    Sequential,
+    Balanced,
+    Rocket,
+    Aggressive,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

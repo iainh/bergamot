@@ -1,60 +1,184 @@
 # nzbg Implementation Plan
 
-## Current State
+## Current State (Post-TDD Audit)
 
-14 library crates with real implementations and tests. Binary entrypoints are stubs. No crate wires everything together yet.
+14 workspace crates with real implementations and comprehensive tests. The binary
+entrypoint, config loading, tracing, CLI parsing, daemon mode, web server,
+scheduler services, download worker, and graceful shutdown are all wired together
+in `app.rs`. However, an end-to-end audit reveals that **many components only
+work to the extent needed to pass their tests** — the actual runtime cannot
+download anything yet.
 
-## Phase A — MVP (end-to-end download works)
+### What Works
 
-| # | Gap | Crates Affected |
-|---|-----|-----------------|
-| 1 | **Binary entrypoint + wiring** — config → tracing → spawn coordinator/server/scheduler → graceful shutdown | `nzbg`, `src/main.rs` |
-| 2 | **Download worker loop** — coordinator selects article → NNTP `BODY` → yEnc decode → write to disk → report back | `nzbg-queue`, `nzbg-nntp`, `nzbg-yenc` |
-| 3 | **Scheduler tick() real implementations** — at minimum "fill download slots" and periodic diskstate flush | `nzbg-scheduler` |
-| 4 | **Disk state integration** — load on startup, persist on changes + periodic + shutdown | `nzbg-diskstate` |
-| 5 | **RPC methods beyond version/status** — need at least `append`, `listgroups`, `editqueue`, `shutdown` | `nzbg-server` |
-| 6 | **Logging setup** — tracing subscriber + ring buffer sink for web UI | `nzbg-logging` |
-| 7 | **CLI parsing** — config path, log level, daemon mode (via `clap`) | `nzbg` |
-| 8 | **Web UI static file serving** | `nzbg-server` |
+- **Binary entrypoint + wiring** — config → tracing → spawn coordinator/server/scheduler → graceful shutdown ✅
+- **CLI parsing** — config path, log level, daemon mode, pidfile ✅
+- **Config parsing** — key=value format, variable interpolation, server/category extraction ✅
+- **NZB parsing** — full XML parser with gzip support, filename extraction, par2 classification, dedup ✅
+- **NNTP protocol** — connect, authenticate, TLS/STARTTLS, GROUP, BODY, dot-unstuffing ✅
+- **NNTP connection pool** — multi-server with level/group sorting, semaphore limits, backoff ✅
+- **yEnc decoding** — single-part and multi-part segments, CRC verification ✅
+- **Queue coordinator** — actor model, command dispatch, article assignment, health/critical-health ✅
+- **Download worker** — fetch → decode → write segment to disk, speed limiting, article cache ✅
+- **Web server** — JSON-RPC, JSONP, URL-credential auth, Basic auth, static file serving ✅
+- **RPC dispatch** — append, listgroups, editqueue, status, version, shutdown, history, rate, pause/resume ✅
+- **Scheduler** — task parsing, weekday/time matching, service runner with shutdown ✅
+- **NZB directory scanner** — watches nzb_dir, renames to .queued, adds to queue ✅
+- **Disk state** — JSON serialization, atomic writes, state lock, recovery, consistency checks ✅
+- **Post-processing** — PAR2 verify/repair, unpack (rar/7z/zip), cleanup, move-to-destination ✅
+- **Extension system** — script runner, env construction, output parsing, config injection ✅
+- **Feed system** — RSS/Atom/Newznab parsing, filter evaluation, history dedup, coordinator ✅
+- **Logging** — tracing layer → ring buffer, log levels, history coordinator ✅
+- **History operations** — return-to-queue, redownload (reset state), mark good/bad, delete ✅
+- **Speed limiting** — token bucket limiter, rate watch channel from coordinator ✅
+- **Article cache** — bounded LRU cache with eviction ✅
+- **Daemon mode / pidfile** — double-fork daemonize, pidfile create/cleanup ✅
 
-## Phase B — Functional (daily-use quality)
+### Critical Gap: Nothing Actually Downloads
 
-| # | Gap |
-|---|-----|
-| 9 | **NNTP connection pool + multi-server failover** (levels, groups, per-server backoff) |
-| 10 | **Full queue coordinator behaviors** — priority algorithm, PAR2 on-demand unpause, health calculation, dupe detection |
-| 11 | **Post-processing pipeline** — unpack (rar/7z/zip), cleanup, move-to-destination, PAR2 rename |
-| 12 | **Extension execution** — subprocess runner with `NZBOP_*`/`NZBPP_*` env vars, stdout protocol |
-| 13 | **Feed coordinator** — RSS polling, HTTP fetch, filter matching, dedup |
-| 14 | **Full RPC method surface** (~30 methods for Sonarr/Radarr/web UI compat) |
-| 15 | **NZB acquisition paths** — directory scan, URL fetch with retries |
+The **#1 blocker** is that `QueueCommand::AddNzb` in `coordinator.rs` creates an
+`NzbInfo` with `files: Vec::new()`. The NZB file content is never read or parsed.
+Since `next_assignment()` iterates `nzb.files` to find segments with
+`ArticleStatus::Undefined`, an empty files list means zero assignments are ever
+produced and the download worker sits idle.
 
-## Phase C — Feature-complete
+---
 
-| # | Gap |
-|---|-----|
-| 16 | Full history operations (return-to-queue, redownload, mark good/bad) |
-| 17 | Speed limiting / quotas / bandwidth scheduling |
-| 18 | Advanced postproc strategies (Balanced/Rocket/Aggressive, direct unpack) |
-| 19 | Daemon mode / systemd / pidfile |
-| 20 | Article cache + IO batching performance optimizations |
+## Phase 1 — Make Downloads Work (Critical Path)
 
-## Recommended Critical Path
+These items must be completed in order for the application to function as a
+downloader at all.
 
-1. Binary wiring (config + tracing + shutdown + spawn tasks)
-2. Download worker loop (NNTP BODY → yEnc decode → write segment → report)
-3. Diskstate integration (restore + periodic snapshot + shutdown flush)
-4. Basic RPC (append, status, queue controls, shutdown)
-5. Web UI static serving
-6. Multi-server pools + retry/failover
-7. Postproc pipeline (unpack/move/cleanup + extensions)
-8. Feed + scan-dir acquisition
-9. RPC compatibility (full method surface)
+| # | Gap | Detail | Crates |
+|---|-----|--------|--------|
+| 1 | **NZB ingestion on enqueue** | Read + parse NZB file content using `nzbg-nzb` parser inside `AddNzb` handler. Map parsed `NzbFile`/`Segment` structs into `FileInfo`/`ArticleInfo` on the queue's `NzbInfo`. Populate sizes, article counts, groups. | `nzbg-queue` |
+| 2 | **File/NZB size tracking on download** | `handle_download_complete()` must update `remaining_size`, `success_size`, `failed_size` on both the file and NZB when a segment succeeds/fails. | `nzbg-queue` |
+| 3 | **Completion detection** | Detect when all articles in a file are finished (mark file completed). Detect when all files in an NZB are finished (move NZB to history). | `nzbg-queue` |
+| 4 | **Disk state restore on startup** | Call `disk.load_queue()` on startup and seed the in-memory `QueueCoordinator` with restored state, so partially-downloaded NZBs resume after restart. | `nzbg`, `nzbg-queue` |
+| 5 | **Output filename from NZB metadata** | Use `filename` from parsed NZB (subject extraction) instead of `file-{idx}` when writing segments to disk. | `nzbg` (download.rs) |
+
+---
+
+## Phase 2 — Post-Processing Integration
+
+These items connect the post-processing pipeline to the download lifecycle.
+
+| # | Gap | Detail | Crates |
+|---|-----|--------|--------|
+| 6 | **Start PostProcessor in app.rs** | Create a channel, spawn `PostProcessor::run()`, wire it into the app lifecycle with shutdown. | `nzbg`, `nzbg-postproc` |
+| 7 | **Emit PostProcessRequest on NZB completion** | When the queue detects an NZB has finished downloading, send a `PostProcessRequest` to the postproc channel. | `nzbg-queue`, `nzbg` |
+| 8 | **PAR2 file discovery** | Find actual `.par2` files in the working directory instead of assuming `{nzb_name}.par2`. | `nzbg-postproc` |
+| 9 | **Update queue/history statuses from postproc** | Feed `par_status`, `unpack_status`, `move_status` back to the queue/history after each postproc stage completes. | `nzbg-postproc`, `nzbg-queue` |
+| 10 | **Extension execution during postproc** | Call `ExtensionRunner` at appropriate postproc stages (post-process scripts). Wire `ExtensionManager` with script discovery from `script_dir`. | `nzbg-postproc`, `nzbg-extension` |
+
+---
+
+## Phase 3 — RPC Completeness
+
+These RPC methods currently return hardcoded/empty values and need real implementations.
+
+| # | RPC Method | Current Behavior | Needed |
+|---|------------|-----------------|--------|
+| 11 | `listfiles` | Returns `[]` | Return file details for a given NZBID |
+| 12 | `postqueue` | Returns `[]` | Return active post-processing jobs |
+| 13 | `loadlog` | Returns `[]` | Read from `LogBuffer` (already created in app.rs) |
+| 14 | `writelog` | Returns `true` | Write a log entry to the buffer |
+| 15 | `servervolumes` | Returns `[]` | Wire `StatsTracker` to NNTP fetch path, return real data |
+| 16 | `config` / `loadconfig` | Returns `[]` | Return current config key-value pairs |
+| 17 | `saveconfig` | Returns `true` | Call `Config::save()` and reload |
+| 18 | `configtemplates` | Returns `[]` | Return config option metadata |
+| 19 | `feeds` | Returns `[]` | Wire `FeedCoordinator`, return feed status |
+| 20 | `sysinfo` | Not implemented (404) | Return system info (version, OS, uptime, disk space) |
+| 21 | `systemhealth` | Not implemented (404) | Return health check results |
+| 22 | `log` | Not implemented (404) | Return log entries from buffer |
+| 23 | `pausepost`/`resumepost` | Returns `true` | Wire to actual postproc pause state |
+| 24 | `pausescan`/`resumescan` | Returns `true` | Wire to scanner pause state |
+| 25 | `scan` | Returns `true` | Trigger immediate NZB directory scan |
+
+---
+
+## Phase 4 — Feed & Scheduler Integration
+
+| # | Gap | Detail | Crates |
+|---|-----|--------|--------|
+| 26 | **Wire FeedCoordinator into app** | Start feed coordinator, connect to scheduler and queue. Accepted feed items should trigger NZB URL fetch + enqueue. | `nzbg`, `nzbg-feed` |
+| 27 | **Implement scheduler FetchFeed command** | Currently logs "not yet implemented". Should trigger `FeedCoordinator::process_feed()`. | `nzbg-scheduler` |
+| 28 | **Implement ActivateServer/DeactivateServer** | Currently logs "not yet implemented". Should toggle server active state in the pool. | `nzbg-scheduler`, `nzbg-nntp` |
+| 29 | **Implement remaining scheduler commands** | `PausePostProcess`, `UnpausePostProcess`, `Extensions`, `Process`, `PauseScan`, `UnpauseScan` all log warnings. | `nzbg-scheduler` |
+| 30 | **Feed filter Age/Rating/Genre/Tag** | `FilterCondition::matches()` returns `false` for these fields. | `nzbg-feed` |
+| 31 | **Feed persistence** | `DiskState::save_feeds/load_feeds` exist but are never called. Wire feed history to disk state. | `nzbg-feed`, `nzbg-diskstate` |
+| 32 | **URL-based NZB downloads** | `fetch_nzb_url()` exists in scheduler but nothing calls it. RPC `append` only accepts file paths. | `nzbg-scheduler`, `nzbg-server` |
+
+---
+
+## Phase 5 — Server & Auth Hardening
+
+| # | Gap | Detail | Crates |
+|---|-----|--------|--------|
+| 33 | **HTTPS/TLS control server** | `secure_control` config is mapped but `secure_cert`/`secure_key` are set to `None`. Server always binds plain TCP. | `nzbg`, `nzbg-server` |
+| 34 | **Authorized IP enforcement** | `authorized_ips` config is read but `auth_middleware` never checks client IP. | `nzbg-server` |
+| 35 | **XML-RPC endpoint** | `/xmlrpc` returns "not implemented" error. Many NZBGet clients use XML-RPC. | `nzbg-server` |
+| 36 | **AppState live updates** | `download_rate` and `remaining_bytes` in `AppState` are always 0. Need periodic update from queue status. | `nzbg-server`, `nzbg` |
+| 37 | **Form-based auth** | `form_auth` config exists but no form login endpoint. | `nzbg-server` |
+
+---
+
+## Phase 6 — Operational Completeness
+
+| # | Gap | Detail | Crates |
+|---|-----|--------|--------|
+| 38 | **NNTP connection lifecycle** | Pool holds idle connections forever. Need idle timeout, max pool size, periodic QUIT, broken connection detection. | `nzbg-nntp` |
+| 39 | **Server volume stats** | `StatsTracker` exists but `record_bytes()` is never called from the NNTP fetch path. | `nzbg-scheduler`, `nzbg-nntp` |
+| 40 | **DiskSpaceMonitor pause/resume** | Detects low space and logs, but does not call queue API to pause/resume downloads. | `nzbg-scheduler` |
+| 41 | **HistoryCleanup** | Computes cutoff but does not actually delete old history entries or disk files. | `nzbg-scheduler` |
+| 42 | **ConnectionCleanup** | `tick()` is empty no-op. | `nzbg-scheduler` |
+| 43 | **HealthChecker** | `check_certificate_expiry()` and `check_queue_consistency()` are empty. | `nzbg-scheduler` |
+| 44 | **DiskStateFlush snapshot fidelity** | `snapshot_to_queue_state()` uses hardcoded defaults for `dupe_key`, `url`, `added_time`, `post_process_parameters`. | `nzbg-scheduler`, `nzbg-diskstate` |
+| 45 | **File article state persistence** | `save_file_state/load_file_state` exist but no runtime code uses them for per-file segment bitmaps. | `nzbg-diskstate` |
+| 46 | **Speed limiter placement** | Rate limiting is applied after decode, not around network I/O. Doesn't bound actual bandwidth during fetch. | `nzbg` (download.rs) |
+
+---
+
+## Previously Completed ✅
+
+| Item | Status |
+|------|--------|
+| Full history operations (return-to-queue, redownload, mark good/bad) | ✅ |
+| Speed limiting / quotas / bandwidth scheduling | ✅ |
+| Advanced postproc strategies (Balanced/Rocket/Aggressive) | ✅ |
+| Daemon mode / systemd / pidfile | ✅ |
+| Article cache + IO batching | ✅ |
+| Binary wiring (config + tracing + shutdown + spawn tasks) | ✅ |
+| Download worker loop (NNTP BODY → yEnc → write → report) | ✅ |
+| Basic RPC (append, status, queue controls, shutdown, history) | ✅ |
+| Web UI static file serving | ✅ |
+| Multi-server pools + retry/failover | ✅ |
+| NZB directory scanner | ✅ |
+| Logging with tracing layer + ring buffer | ✅ |
+| CLI parsing with clap | ✅ |
+| Disk state serialization + atomic writes | ✅ |
+
+---
 
 ## Key Design Guardrails
 
-- **State ownership**: Keep the coordinator as the single owner of mutable queue state (actor model). Don't leak `Arc<Mutex<QueueState>>` everywhere.
-- **Cancellation safety**: Download tasks must handle shutdown without corrupting partially-written files; mark articles `Undefined` on cancellation so they retry after restart.
-- **Backpressure**: Bounded channels between API/feed/scheduler and coordinator; avoid unbounded spawning on large queues.
-- **Compatibility**: Limit RPC to the minimum viable set until end-to-end flow is solid; add methods only when a real client needs them.
-- **Filesystem correctness**: Atomic renames, temp suffixes, pre-allocation strategy, cross-device moves.
+- **State ownership**: Keep the coordinator as the single owner of mutable queue
+  state (actor model). Don't leak `Arc<Mutex<QueueState>>` everywhere.
+- **Cancellation safety**: Download tasks must handle shutdown without corrupting
+  partially-written files; mark articles `Undefined` on cancellation so they retry
+  after restart.
+- **Backpressure**: Bounded channels between API/feed/scheduler and coordinator;
+  avoid unbounded spawning on large queues.
+- **Compatibility**: Limit RPC to the minimum viable set until end-to-end flow is
+  solid; add methods only when a real client needs them.
+- **Filesystem correctness**: Atomic renames, temp suffixes, pre-allocation
+  strategy, cross-device moves.
+
+## Recommended Priority
+
+1. **Phase 1** (NZB ingestion + download lifecycle) — without this, the app does nothing useful
+2. **Phase 2** (Post-processing) — without this, downloaded files are raw segments
+3. **Phase 4** (Feeds + scheduler) — enables automated downloading
+4. **Phase 3** (RPC completeness) — enables Sonarr/Radarr/web UI compatibility
+5. **Phase 5** (Server hardening) — needed for production deployment
+6. **Phase 6** (Operational) — polish for reliability and performance

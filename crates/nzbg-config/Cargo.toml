@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 dirs = "5.0"
+nzbg-core = { path = "../nzbg-core" }
 thiserror = "2.0"
 
 [dev-dependencies]

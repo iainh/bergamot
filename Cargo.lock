@@ -945,6 +945,7 @@ dependencies = [
  "clap",
  "crc32fast",
  "dirs",
+ "libc",
  "nzbg-config",
  "nzbg-diskstate",
  "nzbg-logging",
@@ -964,6 +965,7 @@ name = "nzbg-config"
 version = "0.1.0"
 dependencies = [
  "dirs",
+ "nzbg-core",
  "tempfile",
  "thiserror 2.0.18",
 ]
@@ -1059,6 +1061,7 @@ name = "nzbg-postproc"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "nzbg-core",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
@@ -1069,7 +1072,9 @@ name = "nzbg-queue"
 version = "0.1.0"
 dependencies = [
  "nzbg-core",
+ "nzbg-nzb",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -1104,6 +1109,7 @@ dependencies = [
  "nzbg-queue",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tower",

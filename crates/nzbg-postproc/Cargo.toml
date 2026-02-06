@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 async-trait = "0.1"
+nzbg-core = { path = "../nzbg-core" }
 thiserror = "2.0"
 tokio = { version = "1", features = ["fs", "macros", "process", "sync", "rt-multi-thread"] }
 

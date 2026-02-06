@@ -10,10 +10,4 @@ pub struct Config {
     pub ext_cleanup_disk: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PostStrategy {
-    Sequential,
-    Balanced,
-    Rocket,
-    Aggressive,
-}
+pub use nzbg_core::models::PostStrategy;

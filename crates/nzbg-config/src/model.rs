@@ -28,6 +28,7 @@ pub struct Config {
     pub article_cache: u32,
     pub disk_space: u32,
     pub keep_history: u32,
+    pub post_strategy: nzbg_core::models::PostStrategy,
     raw: HashMap<String, String>,
 }
 
@@ -131,6 +132,16 @@ impl Config {
             .and_then(|value| value.parse().ok())
             .unwrap_or(30);
 
+        let post_strategy = raw
+            .get("PostStrategy")
+            .map(|value| match value.to_lowercase().as_str() {
+                "balanced" => nzbg_core::models::PostStrategy::Balanced,
+                "rocket" => nzbg_core::models::PostStrategy::Rocket,
+                "aggressive" => nzbg_core::models::PostStrategy::Aggressive,
+                _ => nzbg_core::models::PostStrategy::Sequential,
+            })
+            .unwrap_or_default();
+
         Self {
             main_dir,
             dest_dir,
@@ -157,6 +168,7 @@ impl Config {
             article_cache,
             disk_space,
             keep_history,
+            post_strategy,
             raw,
         }
     }
@@ -240,4 +252,40 @@ pub struct CategoryConfig {
     pub unpack: bool,
     pub extensions: Vec<String>,
     pub aliases: Vec<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn post_strategy_parses_from_config() {
+        let mut raw = HashMap::new();
+        raw.insert("PostStrategy".to_string(), "Rocket".to_string());
+        let config = Config::from_raw(raw);
+        assert_eq!(
+            config.post_strategy,
+            nzbg_core::models::PostStrategy::Rocket
+        );
+    }
+
+    #[test]
+    fn post_strategy_defaults_to_sequential() {
+        let config = Config::from_raw(HashMap::new());
+        assert_eq!(
+            config.post_strategy,
+            nzbg_core::models::PostStrategy::Sequential
+        );
+    }
+
+    #[test]
+    fn post_strategy_case_insensitive() {
+        let mut raw = HashMap::new();
+        raw.insert("PostStrategy".to_string(), "aggressive".to_string());
+        let config = Config::from_raw(raw);
+        assert_eq!(
+            config.post_strategy,
+            nzbg_core::models::PostStrategy::Aggressive
+        );
+    }
 }

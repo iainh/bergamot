@@ -11,6 +11,9 @@ pub struct Cli {
     #[arg(short = 'D', long, help = "Run in foreground (do not daemonize)")]
     pub foreground: bool,
 
+    #[arg(long, value_name = "FILE")]
+    pub pidfile: Option<PathBuf>,
+
     #[arg(
         short,
         long,
@@ -45,5 +48,17 @@ mod tests {
         assert_eq!(cli.config.unwrap(), PathBuf::from("/etc/nzbg.conf"));
         assert!(cli.foreground);
         assert_eq!(cli.log_level, "debug");
+    }
+
+    #[test]
+    fn cli_parses_pidfile_option() {
+        let cli = Cli::try_parse_from(["nzbg", "--pidfile", "/var/run/nzbg.pid"]).expect("parse");
+        assert_eq!(cli.pidfile.unwrap(), PathBuf::from("/var/run/nzbg.pid"));
+    }
+
+    #[test]
+    fn cli_pidfile_defaults_to_none() {
+        let cli = Cli::try_parse_from(["nzbg"]).expect("parse");
+        assert!(cli.pidfile.is_none());
     }
 }

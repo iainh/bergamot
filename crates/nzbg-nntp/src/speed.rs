@@ -18,6 +18,14 @@ impl SpeedLimiter {
         }
     }
 
+    pub fn rate(&self) -> u64 {
+        self.rate
+    }
+
+    pub fn set_rate(&mut self, rate_bytes_per_sec: u64) {
+        self.rate = rate_bytes_per_sec;
+    }
+
     pub async fn acquire(&mut self, bytes: u64) {
         if self.rate == 0 {
             return;
@@ -46,7 +54,7 @@ mod tests {
     async fn acquire_allows_unlimited_rate() {
         let mut limiter = SpeedLimiter::new(0);
         limiter.acquire(1024).await;
-        assert_eq!(limiter.rate, 0);
+        assert_eq!(limiter.rate(), 0);
     }
 
     #[tokio::test]
@@ -55,5 +63,21 @@ mod tests {
         let before = limiter.tokens;
         limiter.acquire(500).await;
         assert!(limiter.tokens < before);
+    }
+
+    #[tokio::test]
+    async fn set_rate_changes_rate() {
+        let mut limiter = SpeedLimiter::new(1000);
+        assert_eq!(limiter.rate(), 1000);
+        limiter.set_rate(5000);
+        assert_eq!(limiter.rate(), 5000);
+    }
+
+    #[tokio::test]
+    async fn set_rate_to_zero_disables_limiting() {
+        let mut limiter = SpeedLimiter::new(1000);
+        limiter.set_rate(0);
+        limiter.acquire(1_000_000).await;
+        assert_eq!(limiter.rate(), 0);
     }
 }

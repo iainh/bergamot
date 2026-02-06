@@ -1,9 +1,15 @@
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use anyhow::{Context, Result};
+use tokio::sync::{Mutex, watch};
 
+use nzbg_nntp::SpeedLimiter;
 use nzbg_queue::{ArticleAssignment, DownloadOutcome, DownloadResult, QueueHandle};
 use nzbg_yenc::YencDecoder;
+
+use crate::cache::ArticleCache;
+use crate::writer::FileWriterPool;
 
 #[async_trait::async_trait]
 pub trait ArticleFetcher: Send + Sync {
@@ -35,20 +41,42 @@ impl ArticleFetcher for NntpPoolFetcher {
 pub async fn download_worker(
     mut assignment_rx: tokio::sync::mpsc::Receiver<ArticleAssignment>,
     queue_handle: QueueHandle,
-    fetcher: std::sync::Arc<dyn ArticleFetcher>,
+    fetcher: Arc<dyn ArticleFetcher>,
     inter_dir: PathBuf,
+    rate_rx: watch::Receiver<u64>,
+    cache: Arc<dyn ArticleCache>,
+    writer_pool: Arc<FileWriterPool>,
 ) {
+    let initial_rate = *rate_rx.borrow();
+    let limiter = Arc::new(Mutex::new(SpeedLimiter::new(initial_rate)));
+
+    let watcher_limiter = limiter.clone();
+    let mut watcher_rx = rate_rx.clone();
+    tokio::spawn(async move {
+        while watcher_rx.changed().await.is_ok() {
+            let rate = *watcher_rx.borrow();
+            watcher_limiter.lock().await.set_rate(rate);
+        }
+    });
+
     while let Some(assignment) = assignment_rx.recv().await {
         let fetcher = fetcher.clone();
         let handle = queue_handle.clone();
         let dir = inter_dir.clone();
+        let limiter = limiter.clone();
+        let cache = cache.clone();
+        let writer_pool = writer_pool.clone();
         tokio::spawn(async move {
-            let result = fetch_and_decode(&fetcher, &assignment, &dir).await;
+            let result =
+                fetch_and_decode(&fetcher, &assignment, &dir, cache.as_ref(), &writer_pool).await;
             let download_result = match result {
-                Ok((data, offset, crc)) => DownloadResult {
-                    article_id: assignment.article_id,
-                    outcome: DownloadOutcome::Success { data, offset, crc },
-                },
+                Ok((data, offset, crc)) => {
+                    limiter.lock().await.acquire(data.len() as u64).await;
+                    DownloadResult {
+                        article_id: assignment.article_id,
+                        outcome: DownloadOutcome::Success { data, offset, crc },
+                    }
+                }
                 Err(err) => DownloadResult {
                     article_id: assignment.article_id,
                     outcome: DownloadOutcome::Failure {
@@ -65,11 +93,20 @@ async fn fetch_and_decode(
     fetcher: &std::sync::Arc<dyn ArticleFetcher>,
     assignment: &ArticleAssignment,
     inter_dir: &Path,
+    cache: &dyn ArticleCache,
+    writer_pool: &FileWriterPool,
 ) -> Result<(Vec<u8>, u64, u32)> {
-    let lines = fetcher
-        .fetch_body(&assignment.message_id, &assignment.groups)
-        .await
-        .context("fetching article body")?;
+    let lines = if let Some(cached) = cache.get(&assignment.message_id) {
+        cached.split(|&b| b == b'\n').map(|s| s.to_vec()).collect()
+    } else {
+        let fetched = fetcher
+            .fetch_body(&assignment.message_id, &assignment.groups)
+            .await
+            .context("fetching article body")?;
+        let raw: Vec<u8> = fetched.join(&b'\n');
+        cache.put(assignment.message_id.clone(), raw);
+        fetched
+    };
 
     let mut decoder = YencDecoder::new();
     let mut segment = None;
@@ -83,47 +120,19 @@ async fn fetch_and_decode(
     let offset = segment.begin.saturating_sub(1);
 
     let out_dir = inter_dir.join(format!("nzb-{}", assignment.article_id.nzb_id));
-    tokio::fs::create_dir_all(&out_dir)
-        .await
-        .context("creating output directory")?;
-
     let file_path = out_dir.join(format!("file-{}", assignment.article_id.file_idx));
-    write_segment(&file_path, offset, &segment.data)
+    writer_pool
+        .write_segment(&file_path, offset, &segment.data)
         .await
         .context("writing segment to disk")?;
 
     Ok((segment.data, offset, segment.crc32))
 }
 
-async fn write_segment(path: &Path, offset: u64, data: &[u8]) -> Result<()> {
-    use tokio::io::AsyncWriteExt;
-
-    let file = tokio::fs::OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .write(true)
-        .open(path)
-        .await
-        .context("opening output file")?;
-
-    let std_file = file.into_std().await;
-    let target_len = offset + data.len() as u64;
-    if std_file.metadata()?.len() < target_len {
-        std_file.set_len(target_len)?;
-    }
-
-    let mut file = tokio::fs::File::from_std(std_file);
-    use tokio::io::AsyncSeekExt;
-    file.seek(std::io::SeekFrom::Start(offset)).await?;
-    file.write_all(data).await?;
-    file.flush().await?;
-
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cache::NoopCache;
     use nzbg_queue::ArticleId;
     use std::sync::Arc;
 
@@ -162,9 +171,12 @@ mod tests {
             groups: vec!["alt.test".to_string()],
         };
 
-        let (data, offset, crc) = fetch_and_decode(&fetcher, &assignment, tmp.path())
-            .await
-            .expect("decode");
+        let cache = NoopCache;
+        let writer_pool = FileWriterPool::new();
+        let (data, offset, crc) =
+            fetch_and_decode(&fetcher, &assignment, tmp.path(), &cache, &writer_pool)
+                .await
+                .expect("decode");
         assert_eq!(data, b"abc");
         assert_eq!(offset, 0);
         assert_eq!(crc, crc32fast::hash(b"abc"));
@@ -186,9 +198,12 @@ mod tests {
             groups: vec![],
         };
 
-        fetch_and_decode(&fetcher, &assignment, tmp.path())
+        let cache = NoopCache;
+        let writer_pool = FileWriterPool::new();
+        fetch_and_decode(&fetcher, &assignment, tmp.path(), &cache, &writer_pool)
             .await
             .expect("decode");
+        writer_pool.flush_all().await.expect("flush");
 
         let file_path = tmp.path().join("nzb-1").join("file-0");
         let content = tokio::fs::read(&file_path).await.expect("read file");
@@ -201,7 +216,8 @@ mod tests {
             lines: yenc_test_lines(),
         });
         let tmp = tempfile::tempdir().expect("tempdir");
-        let (_coordinator, handle, _assignment_rx) = nzbg_queue::QueueCoordinator::new(2, 1);
+        let (_coordinator, handle, _assignment_rx, _rate_rx) =
+            nzbg_queue::QueueCoordinator::new(2, 1);
 
         let assignment = ArticleAssignment {
             article_id: ArticleId {
@@ -217,13 +233,45 @@ mod tests {
         tx.send(assignment).await.expect("send");
         drop(tx);
 
+        let (_rate_tx, rate_rx) = tokio::sync::watch::channel(0u64);
+        let cache: Arc<dyn ArticleCache> = Arc::new(NoopCache);
+        let writer_pool = Arc::new(FileWriterPool::new());
         let worker_handle = tokio::spawn(download_worker(
             rx,
             handle.clone(),
             fetcher,
             tmp.path().to_path_buf(),
+            rate_rx,
+            cache,
+            writer_pool,
         ));
 
         worker_handle.await.expect("worker");
+    }
+
+    #[tokio::test]
+    async fn download_worker_rate_watcher_updates_limiter() {
+        let (rate_tx, rate_rx) = tokio::sync::watch::channel(0u64);
+
+        let initial_rate = *rate_rx.borrow();
+        let limiter = Arc::new(tokio::sync::Mutex::new(nzbg_nntp::SpeedLimiter::new(
+            initial_rate,
+        )));
+
+        let watcher_limiter = limiter.clone();
+        let mut watcher_rx = rate_rx.clone();
+        tokio::spawn(async move {
+            while watcher_rx.changed().await.is_ok() {
+                let rate = *watcher_rx.borrow();
+                watcher_limiter.lock().await.set_rate(rate);
+            }
+        });
+
+        rate_tx.send(500_000).expect("send rate");
+        tokio::task::yield_now().await;
+        tokio::task::yield_now().await;
+
+        let locked = limiter.lock().await;
+        assert_eq!(locked.rate(), 500_000);
     }
 }

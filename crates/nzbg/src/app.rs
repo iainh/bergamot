@@ -53,6 +53,15 @@ pub async fn run(config: Config, fetcher: Arc<dyn crate::download::ArticleFetche
     let web_config = Arc::new(web_server_config(&config));
     let inter_dir = config.inter_dir.clone();
 
+    let cache: Arc<dyn crate::cache::ArticleCache> = if config.article_cache > 0 {
+        Arc::new(crate::cache::BoundedCache::new(
+            config.article_cache as usize * 1024 * 1024,
+        ))
+    } else {
+        Arc::new(crate::cache::NoopCache)
+    };
+    let writer_pool = Arc::new(crate::writer::FileWriterPool::new());
+
     let state_dir = config.queue_dir.clone();
     let _state_lock = StateLock::acquire(&state_dir).context("acquiring state lock")?;
     let disk = Arc::new(DiskState::new(state_dir, JsonFormat).context("creating disk state")?);
@@ -61,7 +70,8 @@ pub async fn run(config: Config, fetcher: Arc<dyn crate::download::ArticleFetche
         tracing::warn!("disk state recovery: {err}");
     }
 
-    let (mut coordinator, queue_handle, assignment_rx) = nzbg_queue::QueueCoordinator::new(4, 2);
+    let (mut coordinator, queue_handle, assignment_rx, rate_rx) =
+        nzbg_queue::QueueCoordinator::new(4, 2);
 
     let (shutdown_handle, mut shutdown_rx) = ShutdownHandle::new();
     let app_state = Arc::new(
@@ -74,11 +84,15 @@ pub async fn run(config: Config, fetcher: Arc<dyn crate::download::ArticleFetche
         coordinator.run().await;
     });
 
+    let worker_writer_pool = writer_pool.clone();
     let worker_handle = tokio::spawn(crate::download::download_worker(
         assignment_rx,
         queue_handle.clone(),
         fetcher,
         inter_dir,
+        rate_rx,
+        cache,
+        worker_writer_pool,
     ));
 
     let deps = nzbg_scheduler::ServiceDeps {
@@ -113,6 +127,10 @@ pub async fn run(config: Config, fetcher: Arc<dyn crate::download::ArticleFetche
     nzbg_scheduler::shutdown_services(scheduler_tx, scheduler_handles).await;
     server_handle.abort();
     worker_handle.abort();
+
+    if let Err(err) = writer_pool.flush_all().await {
+        tracing::warn!("flushing writer pool: {err}");
+    }
 
     if let Ok(snapshot) = queue_handle.get_queue_snapshot().await {
         let state = nzbg_scheduler::DiskStateFlush::snapshot_to_queue_state(&snapshot);

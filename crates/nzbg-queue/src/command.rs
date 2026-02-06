@@ -4,7 +4,9 @@ use nzbg_core::models::{DupMode, Priority};
 
 use crate::coordinator::ArticleId;
 use crate::error::QueueError;
-use crate::status::{NzbListEntry, QueueSnapshot, QueueStatus};
+use nzbg_core::models::MarkStatus;
+
+use crate::status::{HistoryListEntry, NzbListEntry, QueueSnapshot, QueueStatus};
 
 #[derive(Debug)]
 pub struct DownloadResult {
@@ -77,6 +79,29 @@ pub enum QueueCommand {
     DownloadComplete(DownloadResult),
     ParUnpause {
         nzb_id: u32,
+    },
+    GetHistory {
+        reply: oneshot::Sender<Vec<HistoryListEntry>>,
+    },
+    HistoryReturn {
+        history_id: u32,
+        reply: oneshot::Sender<Result<u32, QueueError>>,
+    },
+    HistoryRedownload {
+        history_id: u32,
+        reply: oneshot::Sender<Result<u32, QueueError>>,
+    },
+    HistoryMark {
+        history_id: u32,
+        mark: MarkStatus,
+        reply: oneshot::Sender<Result<(), QueueError>>,
+    },
+    HistoryDelete {
+        history_id: u32,
+        reply: oneshot::Sender<Result<(), QueueError>>,
+    },
+    SetStrategy {
+        strategy: nzbg_core::models::PostStrategy,
     },
     Shutdown,
 }

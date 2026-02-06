@@ -5,9 +5,11 @@ edition = "2024"
 
 [dependencies]
 nzbg-core = { path = "../nzbg-core" }
+nzbg-nzb = { path = "../nzbg-nzb" }
 thiserror = "2.0"
 tokio = { version = "1", features = ["macros", "sync", "time", "rt-multi-thread"] }
 tracing = "0.1"
 
 [dev-dependencies]
 serde_json = "1.0"
+tempfile = "3.11"

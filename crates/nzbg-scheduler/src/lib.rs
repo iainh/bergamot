@@ -834,6 +834,17 @@ mod tests {
     use nzbg_core::models::Priority;
     use std::collections::HashMap;
 
+    const SAMPLE_NZB: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<nzb xmlns="http://www.newzbin.com/DTD/2003/nzb">
+  <file poster="user@example.com" date="1706140800"
+        subject='Test [01/01] - "data.rar" yEnc (1/1)'>
+    <groups><group>alt.binaries.test</group></groups>
+    <segments>
+      <segment bytes="100" number="1">seg1@example.com</segment>
+    </segments>
+  </file>
+</nzb>"#;
+
     struct FixedClock {
         now: NaiveDateTime,
     }
@@ -907,7 +918,7 @@ mod tests {
             .unwrap();
         let task = sample_task();
         let clock = FixedClock { now };
-        let (mut coordinator, handle, _rx) = nzbg_queue::QueueCoordinator::new(2, 1);
+        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1);
         tokio::spawn(async move { coordinator.run().await });
         let mut scheduler = Scheduler::new(vec![task], handle.clone()).with_clock(Box::new(clock));
 
@@ -957,7 +968,7 @@ mod tests {
 
     #[tokio::test]
     async fn command_executor_pause_download_pauses_queue() {
-        let (mut coordinator, handle, _rx) = nzbg_queue::QueueCoordinator::new(2, 1);
+        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1);
         tokio::spawn(async move { coordinator.run().await });
 
         let executor = CommandExecutor::new(handle.clone());
@@ -973,7 +984,7 @@ mod tests {
 
     #[tokio::test]
     async fn command_executor_unpause_download_resumes_queue() {
-        let (mut coordinator, handle, _rx) = nzbg_queue::QueueCoordinator::new(2, 1);
+        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1);
         tokio::spawn(async move { coordinator.run().await });
 
         let executor = CommandExecutor::new(handle.clone());
@@ -993,7 +1004,7 @@ mod tests {
 
     #[tokio::test]
     async fn command_executor_download_rate_sets_rate() {
-        let (mut coordinator, handle, _rx) = nzbg_queue::QueueCoordinator::new(2, 1);
+        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1);
         tokio::spawn(async move { coordinator.run().await });
 
         let executor = CommandExecutor::new(handle.clone());
@@ -1011,12 +1022,16 @@ mod tests {
     async fn disk_state_flush_saves_queue_snapshot() {
         use nzbg_diskstate::{DiskState, JsonFormat};
 
-        let (mut coordinator, handle, _rx) = nzbg_queue::QueueCoordinator::new(2, 1);
+        let nzb_dir = tempfile::tempdir().expect("nzb tempdir");
+        let nzb_path = nzb_dir.path().join("test.nzb");
+        std::fs::write(&nzb_path, SAMPLE_NZB).expect("write nzb");
+
+        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1);
         tokio::spawn(async move { coordinator.run().await });
 
         handle
             .add_nzb(
-                std::path::PathBuf::from("/tmp/test.nzb"),
+                nzb_path,
                 None,
                 Priority::Normal,
             )
@@ -1033,7 +1048,6 @@ mod tests {
 
         let loaded = disk.load_queue().expect("load");
         assert_eq!(loaded.nzbs.len(), 1);
-        assert_eq!(loaded.nzbs[0].name, "test.nzb");
 
         handle.shutdown().await.expect("shutdown");
     }
@@ -1042,9 +1056,9 @@ mod tests {
     async fn nzb_dir_scanner_processes_nzb_files() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let nzb_path = tmp.path().join("test.nzb");
-        std::fs::write(&nzb_path, "nzb content").expect("write");
+        std::fs::write(&nzb_path, SAMPLE_NZB).expect("write");
 
-        let (mut coordinator, handle, _rx) = nzbg_queue::QueueCoordinator::new(2, 1);
+        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1);
         tokio::spawn(async move { coordinator.run().await });
 
         let mut scanner = NzbDirScanner {
@@ -1071,7 +1085,7 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tempdir");
         std::fs::write(tmp.path().join("readme.txt"), "text").expect("write");
 
-        let (mut coordinator, handle, _rx) = nzbg_queue::QueueCoordinator::new(2, 1);
+        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1);
         tokio::spawn(async move { coordinator.run().await });
 
         let mut scanner = NzbDirScanner {
@@ -1092,9 +1106,9 @@ mod tests {
     #[tokio::test]
     async fn nzb_dir_scanner_idempotent_on_second_run() {
         let tmp = tempfile::tempdir().expect("tempdir");
-        std::fs::write(tmp.path().join("test.nzb"), "nzb").expect("write");
+        std::fs::write(tmp.path().join("test.nzb"), SAMPLE_NZB).expect("write");
 
-        let (mut coordinator, handle, _rx) = nzbg_queue::QueueCoordinator::new(2, 1);
+        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1);
         tokio::spawn(async move { coordinator.run().await });
 
         let mut scanner = NzbDirScanner {

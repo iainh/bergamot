@@ -1,6 +1,9 @@
 mod app;
+mod cache;
 mod cli;
+mod daemon;
 mod download;
+mod writer;
 
 use std::sync::Arc;
 
@@ -57,20 +60,36 @@ fn build_fetcher(config: &nzbg_config::Config) -> Arc<dyn download::ArticleFetch
     Arc::new(download::NntpPoolFetcher::new(pool))
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    let config_path = match cli.config {
-        Some(path) => path,
-        None => app::default_config_path()
-            .context("no config file found; use --config to specify one")?,
-    };
+    if !cli.foreground {
+        daemon::daemonize()?;
+    }
 
-    let config = app::load_config(&config_path)?;
-    let _log_buffer = app::init_tracing(&cli.log_level);
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .context("building tokio runtime")?;
 
-    tracing::info!("nzbg starting");
-    let fetcher = build_fetcher(&config);
-    app::run(config, fetcher).await
+    rt.block_on(async {
+        let _pidfile = cli
+            .pidfile
+            .as_deref()
+            .map(daemon::PidFile::create)
+            .transpose()?;
+
+        let config_path = match cli.config {
+            Some(path) => path,
+            None => app::default_config_path()
+                .context("no config file found; use --config to specify one")?,
+        };
+
+        let config = app::load_config(&config_path)?;
+        let _log_buffer = app::init_tracing(&cli.log_level);
+
+        tracing::info!("nzbg starting");
+        let fetcher = build_fetcher(&config);
+        app::run(config, fetcher).await
+    })
 }
