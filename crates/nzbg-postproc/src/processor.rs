@@ -10,6 +10,21 @@ use crate::mover::{move_to_destination, resolve_dest_dir};
 use crate::par2::{Par2Engine, Par2Result};
 use crate::unpack::{UnpackResult, Unpacker, detect_archives};
 
+pub struct ExtensionContext {
+    pub nzb_id: u32,
+    pub nzb_name: String,
+    pub working_dir: PathBuf,
+    pub category: String,
+    pub par_status: String,
+    pub unpack_status: String,
+    pub parameters: Vec<(String, String)>,
+}
+
+#[async_trait::async_trait]
+pub trait ExtensionExecutor: Send + Sync {
+    async fn run_post_process(&self, ctx: &ExtensionContext) -> Result<(), PostProcessError>;
+}
+
 #[derive(Debug, Clone)]
 pub struct PostProcessRequest {
     pub nzb_id: i64,
@@ -61,6 +76,7 @@ pub struct PostProcessor<E: Par2Engine, U: Unpacker> {
     history: Arc<Mutex<Vec<String>>>,
     par2: Arc<E>,
     unpacker: Arc<U>,
+    extensions: Option<Arc<dyn ExtensionExecutor>>,
 }
 
 impl<E: Par2Engine, U: Unpacker> PostProcessor<E, U> {
@@ -77,7 +93,13 @@ impl<E: Par2Engine, U: Unpacker> PostProcessor<E, U> {
             history,
             par2,
             unpacker,
+            extensions: None,
         }
+    }
+
+    pub fn with_extensions(mut self, executor: Arc<dyn ExtensionExecutor>) -> Self {
+        self.extensions = Some(executor);
+        self
     }
 
     pub async fn run(&mut self) {
@@ -115,6 +137,29 @@ impl<E: Par2Engine, U: Unpacker> PostProcessor<E, U> {
             self.config.append_category_dir,
         );
         let _ = move_to_destination(&ctx.request.working_dir, &dest).await;
+
+        if let Some(executor) = &self.extensions {
+            ctx.set_stage(PostStage::Extensions);
+            let par_status_str = match ctx.par_result {
+                Some(Par2Result::AllFilesOk) | Some(Par2Result::RepairComplete) => "SUCCESS",
+                Some(Par2Result::RepairNeeded { .. }) | Some(Par2Result::RepairFailed { .. }) => {
+                    "FAILURE"
+                }
+                None => "NONE",
+            };
+            let ext_ctx = ExtensionContext {
+                nzb_id: ctx.request.nzb_id as u32,
+                nzb_name: ctx.request.nzb_name.clone(),
+                working_dir: ctx.request.working_dir.clone(),
+                category: ctx.request.category.clone().unwrap_or_default(),
+                par_status: par_status_str.to_string(),
+                unpack_status: "SUCCESS".to_string(),
+                parameters: ctx.request.parameters.clone(),
+            };
+            if let Err(err) = executor.run_post_process(&ext_ctx).await {
+                tracing::warn!("extension execution failed: {err}");
+            }
+        }
 
         ctx.set_stage(PostStage::Finished);
         let mut history = self.history.lock().expect("history lock");
@@ -371,5 +416,98 @@ mod tests {
         assert_eq!(history.as_slice(), ["test_nzb"]);
 
         assert!(dest.path().join("movies").join("archive.unpacked").exists());
+    }
+
+    struct FakeExtensionExecutor {
+        calls: Mutex<Vec<(u32, String, PathBuf, String)>>,
+    }
+
+    impl FakeExtensionExecutor {
+        fn new() -> Self {
+            Self {
+                calls: Mutex::new(Vec::new()),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl ExtensionExecutor for FakeExtensionExecutor {
+        async fn run_post_process(&self, ctx: &ExtensionContext) -> Result<(), PostProcessError> {
+            self.calls.lock().unwrap().push((
+                ctx.nzb_id,
+                ctx.nzb_name.clone(),
+                ctx.working_dir.clone(),
+                ctx.category.clone(),
+            ));
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn extensions_called_during_post_processing() {
+        let working = tempfile::tempdir().unwrap();
+        let dest = tempfile::tempdir().unwrap();
+        let (tx, rx) = mpsc::channel(1);
+        let config = test_config(dest.path().to_path_buf());
+        let history = Arc::new(Mutex::new(Vec::new()));
+        let par2 = Arc::new(FakePar2);
+        let unpacker = Arc::new(FakeUnpacker);
+        let executor = Arc::new(FakeExtensionExecutor::new());
+        let executor_ref = executor.clone();
+        let mut processor = PostProcessor::new(rx, config, history.clone(), par2, unpacker)
+            .with_extensions(executor);
+
+        let request = PostProcessRequest {
+            nzb_id: 7,
+            nzb_name: "ext-test".to_string(),
+            working_dir: working.path().to_path_buf(),
+            category: Some("tv".to_string()),
+            parameters: vec![],
+        };
+
+        let handle = tokio::spawn(async move {
+            processor.run().await;
+        });
+
+        tx.send(request).await.expect("send");
+        drop(tx);
+        handle.await.expect("join");
+
+        let calls = executor_ref.calls.lock().unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].0, 7);
+        assert_eq!(calls[0].1, "ext-test");
+        assert_eq!(calls[0].3, "tv");
+    }
+
+    #[tokio::test]
+    async fn no_extensions_still_works() {
+        let working = tempfile::tempdir().unwrap();
+        let dest = tempfile::tempdir().unwrap();
+        let (tx, rx) = mpsc::channel(1);
+        let config = test_config(dest.path().to_path_buf());
+        let history = Arc::new(Mutex::new(Vec::new()));
+        let par2 = Arc::new(FakePar2);
+        let unpacker = Arc::new(FakeUnpacker);
+        let mut processor = PostProcessor::new(rx, config, history.clone(), par2, unpacker);
+
+        let request = PostProcessRequest {
+            nzb_id: 1,
+            nzb_name: "no-ext".to_string(),
+            working_dir: working.path().to_path_buf(),
+            category: None,
+            parameters: vec![],
+        };
+
+        let handle = tokio::spawn(async move {
+            processor.run().await;
+        });
+
+        tx.send(request).await.expect("send");
+        drop(tx);
+        handle.await.expect("join");
+
+        let history = history.lock().expect("lock");
+        assert_eq!(history.as_slice(), ["no-ext"]);
     }
 }

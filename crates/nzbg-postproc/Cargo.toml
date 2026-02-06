@@ -6,8 +6,10 @@ edition = "2024"
 [dependencies]
 async-trait = "0.1"
 nzbg-core = { path = "../nzbg-core" }
+nzbg-extension = { path = "../nzbg-extension" }
 thiserror = "2.0"
 tokio = { version = "1", features = ["fs", "macros", "process", "sync", "rt-multi-thread"] }
+tracing = "0.1"
 
 [dev-dependencies]
 tempfile = "3"
