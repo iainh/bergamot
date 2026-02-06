@@ -24,6 +24,8 @@ pub struct AppState {
     shutdown: Option<ShutdownHandle>,
     disk: Option<std::sync::Arc<nzbg_diskstate::DiskState<nzbg_diskstate::JsonFormat>>>,
     log_buffer: Option<std::sync::Arc<nzbg_logging::LogBuffer>>,
+    config: Option<std::sync::Arc<std::sync::RwLock<nzbg_config::Config>>>,
+    config_path: Option<std::path::PathBuf>,
 }
 
 impl Default for AppState {
@@ -37,6 +39,8 @@ impl Default for AppState {
             shutdown: None,
             disk: None,
             log_buffer: None,
+            config: None,
+            config_path: None,
         }
     }
 }
@@ -67,6 +71,24 @@ impl AppState {
 
     pub fn log_buffer(&self) -> Option<&std::sync::Arc<nzbg_logging::LogBuffer>> {
         self.log_buffer.as_ref()
+    }
+
+    pub fn with_config(
+        mut self,
+        config: std::sync::Arc<std::sync::RwLock<nzbg_config::Config>>,
+        config_path: std::path::PathBuf,
+    ) -> Self {
+        self.config = Some(config);
+        self.config_path = Some(config_path);
+        self
+    }
+
+    pub fn config(&self) -> Option<&std::sync::Arc<std::sync::RwLock<nzbg_config::Config>>> {
+        self.config.as_ref()
+    }
+
+    pub fn config_path(&self) -> Option<&std::path::Path> {
+        self.config_path.as_deref()
     }
 
     pub fn version(&self) -> &str {

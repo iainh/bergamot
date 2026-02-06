@@ -46,10 +46,9 @@ pub async fn dispatch_rpc(
         "loadlog" => rpc_loadlog(params, state),
         "log" => rpc_loadlog(params, state),
         "servervolumes" => Ok(serde_json::json!([])),
-        "config" => Ok(serde_json::json!([])),
-        "loadconfig" => Ok(serde_json::json!([])),
-        "saveconfig" => Ok(serde_json::json!(true)),
-        "configtemplates" => Ok(serde_json::json!([])),
+        "config" | "loadconfig" => rpc_loadconfig(state),
+        "saveconfig" => rpc_saveconfig(params, state),
+        "configtemplates" => rpc_configtemplates(),
         "history" => rpc_history(params, state).await,
         "rate" => rpc_rate(params, state).await,
         "pausedownload" => rpc_pausedownload(state).await,
@@ -318,6 +317,76 @@ fn rpc_systemhealth(state: &AppState) -> Result<serde_json::Value, JsonRpcError>
         "Healthy": queue_available,
         "QueueAvailable": queue_available,
     }))
+}
+
+fn rpc_loadconfig(state: &AppState) -> Result<serde_json::Value, JsonRpcError> {
+    let config = state
+        .config()
+        .ok_or_else(|| rpc_error("Config not available"))?;
+    let config = config
+        .read()
+        .map_err(|_| rpc_error("Config lock poisoned"))?;
+    let entries: Vec<serde_json::Value> = config
+        .raw()
+        .iter()
+        .map(|(k, v)| {
+            serde_json::json!({
+                "Name": k,
+                "Value": v,
+            })
+        })
+        .collect();
+    Ok(serde_json::json!(entries))
+}
+
+fn rpc_saveconfig(
+    params: &serde_json::Value,
+    state: &AppState,
+) -> Result<serde_json::Value, JsonRpcError> {
+    let config_arc = state
+        .config()
+        .ok_or_else(|| rpc_error("Config not available"))?;
+    let config_path = state
+        .config_path()
+        .ok_or_else(|| rpc_error("Config path not available"))?;
+
+    let arr = params
+        .as_array()
+        .ok_or_else(|| rpc_error("params must be an array"))?;
+
+    {
+        let mut config = config_arc
+            .write()
+            .map_err(|_| rpc_error("Config lock poisoned"))?;
+        for entry in arr {
+            if let (Some(name), Some(value)) = (
+                entry.get("Name").and_then(|v| v.as_str()),
+                entry.get("Value").and_then(|v| v.as_str()),
+            ) {
+                let _ = config.set_option(name, value);
+            }
+        }
+        config
+            .save(config_path)
+            .map_err(|e| rpc_error(format!("saving config: {e}")))?;
+    }
+
+    Ok(serde_json::json!(true))
+}
+
+fn rpc_configtemplates() -> Result<serde_json::Value, JsonRpcError> {
+    let templates = vec![
+        serde_json::json!({"Name": "MainDir", "DisplayName": "Main Directory", "Section": "Paths", "Type": "string"}),
+        serde_json::json!({"Name": "DestDir", "DisplayName": "Destination Directory", "Section": "Paths", "Type": "string"}),
+        serde_json::json!({"Name": "InterDir", "DisplayName": "Intermediate Directory", "Section": "Paths", "Type": "string"}),
+        serde_json::json!({"Name": "NzbDir", "DisplayName": "NZB Directory", "Section": "Paths", "Type": "string"}),
+        serde_json::json!({"Name": "ControlIP", "DisplayName": "Control IP", "Section": "Server", "Type": "string"}),
+        serde_json::json!({"Name": "ControlPort", "DisplayName": "Control Port", "Section": "Server", "Type": "number"}),
+        serde_json::json!({"Name": "DownloadRate", "DisplayName": "Download Rate", "Section": "Download", "Type": "number"}),
+        serde_json::json!({"Name": "ArticleCache", "DisplayName": "Article Cache", "Section": "Download", "Type": "number"}),
+        serde_json::json!({"Name": "DiskSpace", "DisplayName": "Disk Space", "Section": "Download", "Type": "number"}),
+    ];
+    Ok(serde_json::json!(templates))
 }
 
 fn rpc_writelog(
@@ -742,40 +811,60 @@ mod tests {
         assert_eq!(result, serde_json::json!([]));
     }
 
-    #[tokio::test]
-    async fn dispatch_config_returns_empty_array() {
-        let state = AppState::default();
-        let result = dispatch_rpc("config", &serde_json::json!([]), &state)
-            .await
-            .expect("config");
-        assert_eq!(result, serde_json::json!([]));
+    fn state_with_config() -> (AppState, tempfile::TempDir) {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let config_path = tmp.path().join("nzbg.conf");
+        std::fs::write(&config_path, "ControlPort=6789\nMainDir=/tmp/nzbg\n").expect("write");
+        let raw =
+            nzbg_config::parse_config("ControlPort=6789\nMainDir=/tmp/nzbg\n").expect("parse");
+        let config = nzbg_config::Config::from_raw(raw);
+        let config = std::sync::Arc::new(std::sync::RwLock::new(config));
+        let state = AppState::default().with_config(config, config_path);
+        (state, tmp)
     }
 
     #[tokio::test]
-    async fn dispatch_loadconfig_returns_empty_array() {
-        let state = AppState::default();
+    async fn dispatch_loadconfig_returns_config_entries() {
+        let (state, _tmp) = state_with_config();
         let result = dispatch_rpc("loadconfig", &serde_json::json!([]), &state)
             .await
             .expect("loadconfig");
-        assert_eq!(result, serde_json::json!([]));
+        let entries = result.as_array().expect("array");
+        assert!(entries.iter().any(|e| e["Name"] == "ControlPort"));
     }
 
     #[tokio::test]
-    async fn dispatch_saveconfig_returns_true() {
-        let state = AppState::default();
-        let result = dispatch_rpc("saveconfig", &serde_json::json!([]), &state)
+    async fn dispatch_config_returns_same_as_loadconfig() {
+        let (state, _tmp) = state_with_config();
+        let result = dispatch_rpc("config", &serde_json::json!([]), &state)
+            .await
+            .expect("config");
+        let entries = result.as_array().expect("array");
+        assert!(entries.iter().any(|e| e["Name"] == "MainDir"));
+    }
+
+    #[tokio::test]
+    async fn dispatch_saveconfig_persists_changes() {
+        let (state, tmp) = state_with_config();
+        let params = serde_json::json!([{"Name": "DownloadRate", "Value": "500"}]);
+        let result = dispatch_rpc("saveconfig", &params, &state)
             .await
             .expect("saveconfig");
         assert_eq!(result, serde_json::json!(true));
+
+        let saved = std::fs::read_to_string(tmp.path().join("nzbg.conf")).expect("read");
+        assert!(saved.contains("DownloadRate=500"));
     }
 
     #[tokio::test]
-    async fn dispatch_configtemplates_returns_empty_array() {
+    async fn dispatch_configtemplates_returns_known_options() {
         let state = AppState::default();
         let result = dispatch_rpc("configtemplates", &serde_json::json!([]), &state)
             .await
             .expect("configtemplates");
-        assert_eq!(result, serde_json::json!([]));
+        let entries = result.as_array().expect("array");
+        assert!(entries.iter().any(|e| e["Name"] == "MainDir"));
+        assert!(entries.iter().any(|e| e["Name"] == "ControlPort"));
     }
 
     #[tokio::test]

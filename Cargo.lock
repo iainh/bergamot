@@ -1115,6 +1115,7 @@ dependencies = [
  "axum",
  "base64",
  "chrono",
+ "nzbg-config",
  "nzbg-core",
  "nzbg-diskstate",
  "nzbg-logging",
