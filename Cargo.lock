@@ -231,6 +231,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "nzbg-queue"
+version = "0.1.0"
+dependencies = [
+ "nzbg-core",
+ "serde_json",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "nzbg-yenc"
 version = "0.1.0"
 dependencies = [

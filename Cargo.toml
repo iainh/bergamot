@@ -6,4 +6,5 @@ members = [
   "crates/nzbg-nzb",
   "crates/nzbg-nntp",
   "crates/nzbg-yenc",
+  "crates/nzbg-queue",
 ]
