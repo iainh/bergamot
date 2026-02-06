@@ -6,6 +6,7 @@ members = [
   "crates/nzbg-feed",
   "crates/nzbg-extension",
   "crates/nzbg-diskstate",
+  "crates/nzbg-logging",
   "crates/nzbg-core",
   "crates/nzbg-nzb",
   "crates/nzbg-nntp",
