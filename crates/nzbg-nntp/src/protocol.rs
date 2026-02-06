@@ -9,7 +9,7 @@ use tokio_rustls::rustls::{ClientConfig, RootCertStore, pki_types::ServerName};
 use crate::error::NntpError;
 use crate::model::{Encryption, NewsServer, NntpResponse};
 
-pub(crate) trait NntpIo: AsyncRead + AsyncWrite + Send + Unpin {}
+pub trait NntpIo: AsyncRead + AsyncWrite + Send + Unpin {}
 
 impl<T> NntpIo for T where T: AsyncRead + AsyncWrite + Send + Unpin {}
 
@@ -72,6 +72,19 @@ impl<'a> BodyReader<'a> {
 }
 
 impl NntpConnection {
+    pub async fn from_stream(server_id: u32, stream: NntpStream) -> Result<Self, NntpError> {
+        let mut conn = NntpConnection {
+            server_id,
+            stream,
+            current_group: None,
+            authenticated: false,
+        };
+
+        let greeting = conn.read_response().await?;
+        expect_code(&greeting, &[200, 201])?;
+        Ok(conn)
+    }
+
     pub async fn connect(server: &NewsServer) -> Result<Self, NntpError> {
         let tcp = TcpStream::connect((server.host.as_str(), server.port)).await?;
 

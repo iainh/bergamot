@@ -7,7 +7,29 @@ use nzbg_yenc::YencDecoder;
 
 #[async_trait::async_trait]
 pub trait ArticleFetcher: Send + Sync {
-    async fn fetch_body(&self, message_id: &str) -> Result<Vec<Vec<u8>>>;
+    async fn fetch_body(&self, message_id: &str, groups: &[String]) -> Result<Vec<Vec<u8>>>;
+}
+
+pub struct NntpPoolFetcher {
+    pool: nzbg_nntp::ServerPool,
+}
+
+impl NntpPoolFetcher {
+    pub fn new(pool: nzbg_nntp::ServerPool) -> Self {
+        Self { pool }
+    }
+}
+
+#[async_trait::async_trait]
+impl ArticleFetcher for NntpPoolFetcher {
+    async fn fetch_body(&self, message_id: &str, groups: &[String]) -> Result<Vec<Vec<u8>>> {
+        let data = self
+            .pool
+            .fetch_article(message_id, groups)
+            .await
+            .context("fetching article from NNTP pool")?;
+        Ok(data.split(|&b| b == b'\n').map(|s| s.to_vec()).collect())
+    }
 }
 
 pub async fn download_worker(
@@ -45,7 +67,7 @@ async fn fetch_and_decode(
     inter_dir: &Path,
 ) -> Result<(Vec<u8>, u64, u32)> {
     let lines = fetcher
-        .fetch_body(&assignment.message_id)
+        .fetch_body(&assignment.message_id, &assignment.groups)
         .await
         .context("fetching article body")?;
 
@@ -111,7 +133,7 @@ mod tests {
 
     #[async_trait::async_trait]
     impl ArticleFetcher for MockFetcher {
-        async fn fetch_body(&self, _message_id: &str) -> Result<Vec<Vec<u8>>> {
+        async fn fetch_body(&self, _message_id: &str, _groups: &[String]) -> Result<Vec<Vec<u8>>> {
             Ok(self.lines.clone())
         }
     }

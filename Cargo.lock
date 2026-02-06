@@ -850,6 +850,7 @@ dependencies = [
 name = "nzbg-nntp"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "rustls",
  "serde",
  "thiserror 2.0.18",
