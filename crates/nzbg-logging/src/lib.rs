@@ -55,6 +55,11 @@ impl LogBuffer {
         messages.push_back(message);
     }
 
+    pub fn clear(&self) {
+        let mut messages = self.messages.lock().expect("log buffer lock");
+        messages.clear();
+    }
+
     pub fn messages_since(&self, since_id: u32) -> Vec<LogMessage> {
         let messages = self.messages.lock().expect("log buffer lock");
         messages

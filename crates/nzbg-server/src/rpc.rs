@@ -66,7 +66,12 @@ pub async fn dispatch_rpc(
         "editserver" => Ok(serde_json::json!(true)),
         "scheduleresume" => Ok(serde_json::json!(true)),
         "reload" => Ok(serde_json::json!(true)),
-        "clearlog" => Ok(serde_json::json!(true)),
+        "clearlog" => {
+            if let Some(buffer) = state.log_buffer() {
+                buffer.clear();
+            }
+            Ok(serde_json::json!(true))
+        }
         "readurl" => {
             let arr = params.as_array();
             let url = arr.and_then(|a| a.first()).and_then(|v| v.as_str()).unwrap_or("");
