@@ -5,6 +5,7 @@ use anyhow::{Context, Result};
 use tracing_subscriber::EnvFilter;
 
 use nzbg_config::{Config, parse_config};
+use nzbg_diskstate::{DiskState, JsonFormat, StateLock};
 use nzbg_server::{AppState, ServerConfig as WebServerConfig, WebServer};
 
 pub fn load_config(path: &Path) -> Result<Config> {
@@ -43,21 +44,32 @@ pub async fn run(config: Config, fetcher: Arc<dyn crate::download::ArticleFetche
     let app_state = Arc::new(AppState::default());
     let inter_dir = config.inter_dir.clone();
 
-    let (mut coordinator, _queue_handle, assignment_rx) = nzbg_queue::QueueCoordinator::new(4, 2);
+    let state_dir = config.queue_dir.clone();
+    let _state_lock = StateLock::acquire(&state_dir).context("acquiring state lock")?;
+    let disk = Arc::new(DiskState::new(state_dir, JsonFormat).context("creating disk state")?);
+
+    if let Err(err) = disk.recover() {
+        tracing::warn!("disk state recovery: {err}");
+    }
+
+    let (mut coordinator, queue_handle, assignment_rx) = nzbg_queue::QueueCoordinator::new(4, 2);
 
     let coordinator_handle = tokio::spawn(async move {
         coordinator.run().await;
     });
 
-    let queue_handle_for_worker = _queue_handle.clone();
     let worker_handle = tokio::spawn(crate::download::download_worker(
         assignment_rx,
-        queue_handle_for_worker,
+        queue_handle.clone(),
         fetcher,
         inter_dir,
     ));
 
-    let (scheduler_tx, scheduler_handles) = nzbg_scheduler::start_services(&config).await?;
+    let deps = nzbg_scheduler::ServiceDeps {
+        queue: queue_handle.clone(),
+        disk: disk.clone(),
+    };
+    let (scheduler_tx, scheduler_handles) = nzbg_scheduler::start_services(&config, deps).await?;
 
     let server = WebServer::new(web_config, app_state);
     let server_handle = tokio::spawn(async move {
@@ -69,10 +81,18 @@ pub async fn run(config: Config, fetcher: Arc<dyn crate::download::ArticleFetche
     tokio::signal::ctrl_c().await.context("awaiting ctrl-c")?;
     tracing::info!("shutdown signal received");
 
-    let _ = _queue_handle.shutdown().await;
     nzbg_scheduler::shutdown_services(scheduler_tx, scheduler_handles).await;
     server_handle.abort();
     worker_handle.abort();
+
+    if let Ok(snapshot) = queue_handle.get_queue_snapshot().await {
+        let state = nzbg_scheduler::DiskStateFlush::snapshot_to_queue_state(&snapshot);
+        let disk_clone = disk.clone();
+        let _ = tokio::task::spawn_blocking(move || disk_clone.save_queue(&state)).await;
+        tracing::info!("final disk state flush complete");
+    }
+
+    let _ = queue_handle.shutdown().await;
     let _ = coordinator_handle.await;
 
     tracing::info!("shutdown complete");

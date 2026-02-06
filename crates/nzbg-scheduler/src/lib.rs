@@ -37,11 +37,17 @@ pub async fn run_service(mut service: Box<dyn Service>, mut shutdown: broadcast:
     }
 }
 
+pub struct ServiceDeps {
+    pub queue: nzbg_queue::QueueHandle,
+    pub disk: std::sync::Arc<nzbg_diskstate::DiskState<nzbg_diskstate::JsonFormat>>,
+}
+
 pub async fn start_services(
     config: &Config,
+    deps: ServiceDeps,
 ) -> anyhow::Result<(broadcast::Sender<()>, Vec<tokio::task::JoinHandle<()>>)> {
     let (shutdown_tx, _) = broadcast::channel::<()>(1);
-    let services = build_services(config)?;
+    let services = build_services(config, deps)?;
     let mut handles = Vec::with_capacity(services.len());
 
     for service in services {
@@ -63,13 +69,14 @@ pub async fn shutdown_services(
     tracing::info!("all services stopped");
 }
 
-fn build_services(config: &Config) -> anyhow::Result<Vec<Box<dyn Service>>> {
-    let scheduler = Scheduler::from_config(config)?;
+fn build_services(config: &Config, deps: ServiceDeps) -> anyhow::Result<Vec<Box<dyn Service>>> {
+    let scheduler = Scheduler::from_config(config, deps.queue.clone())?;
     let scanner = NzbDirScanner::from_config(config);
     let disk_space = DiskSpaceMonitor::from_config(config);
     let history = HistoryCleanup::from_config(config);
     let stats = StatsTracker::from_config(config);
     let health = HealthChecker::from_config(config);
+    let disk_flush = DiskStateFlush::new(deps.queue, deps.disk);
 
     Ok(vec![
         Box::new(scheduler),
@@ -79,6 +86,7 @@ fn build_services(config: &Config) -> anyhow::Result<Vec<Box<dyn Service>>> {
         Box::new(history),
         Box::new(stats),
         Box::new(health),
+        Box::new(disk_flush),
     ])
 }
 
@@ -138,17 +146,17 @@ pub struct Scheduler {
 }
 
 impl Scheduler {
-    pub fn new(tasks: Vec<ScheduledTask>) -> Self {
+    pub fn new(tasks: Vec<ScheduledTask>, queue: nzbg_queue::QueueHandle) -> Self {
         Self {
             tasks,
-            executor: CommandExecutor,
+            executor: CommandExecutor::new(queue),
             clock: Box::new(SystemClock),
         }
     }
 
-    pub fn from_config(config: &Config) -> anyhow::Result<Self> {
+    pub fn from_config(config: &Config, queue: nzbg_queue::QueueHandle) -> anyhow::Result<Self> {
         let tasks = parse_scheduler_tasks(config.raw())?;
-        Ok(Self::new(tasks))
+        Ok(Self::new(tasks, queue))
     }
 
     pub fn with_executor(mut self, executor: CommandExecutor) -> Self {
@@ -161,7 +169,7 @@ impl Scheduler {
         self
     }
 
-    fn tick_with_time(&mut self, now: NaiveDateTime) -> anyhow::Result<()> {
+    async fn tick_with_time(&mut self, now: NaiveDateTime) -> anyhow::Result<()> {
         for task in &mut self.tasks {
             if task.should_execute(now) {
                 tracing::info!(
@@ -170,7 +178,7 @@ impl Scheduler {
                     task.command,
                     task.param
                 );
-                self.executor.execute(&task.command, &task.param)?;
+                self.executor.execute(&task.command, &task.param).await?;
                 task.last_executed = Some(now);
             }
         }
@@ -189,27 +197,43 @@ impl Service for Scheduler {
     }
 
     async fn tick(&mut self) -> anyhow::Result<()> {
-        self.tick_with_time(self.clock.now())
+        self.tick_with_time(self.clock.now()).await
     }
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct CommandExecutor;
+#[derive(Debug, Clone)]
+pub struct CommandExecutor {
+    queue: nzbg_queue::QueueHandle,
+}
 
 impl CommandExecutor {
-    pub fn execute(&self, command: &SchedulerCommand, param: &str) -> anyhow::Result<()> {
+    pub fn new(queue: nzbg_queue::QueueHandle) -> Self {
+        Self { queue }
+    }
+
+    pub async fn execute(&self, command: &SchedulerCommand, param: &str) -> anyhow::Result<()> {
         match command {
+            SchedulerCommand::PauseDownload => {
+                self.queue.pause_all().await?;
+            }
+            SchedulerCommand::UnpauseDownload => {
+                self.queue.resume_all().await?;
+            }
             SchedulerCommand::DownloadRate => {
-                let _rate: u32 = param.parse().unwrap_or(0);
+                let rate_kb: u64 = param.parse().unwrap_or(0);
+                self.queue.set_download_rate(rate_kb * 1024).await?;
             }
             SchedulerCommand::ActivateServer => {
                 let _server_id: u32 = param.parse().context("activate server id")?;
+                tracing::warn!("activate server not yet implemented");
             }
             SchedulerCommand::DeactivateServer => {
                 let _server_id: u32 = param.parse().context("deactivate server id")?;
+                tracing::warn!("deactivate server not yet implemented");
             }
             SchedulerCommand::FetchFeed => {
                 let _feed_id: u32 = param.parse().context("fetch feed id")?;
+                tracing::warn!("fetch feed not yet implemented");
             }
             _ => {
                 tracing::warn!("unimplemented scheduler command: {command:?}");
@@ -543,6 +567,84 @@ impl Service for HealthChecker {
     }
 }
 
+pub struct DiskStateFlush {
+    queue: nzbg_queue::QueueHandle,
+    disk: std::sync::Arc<nzbg_diskstate::DiskState<nzbg_diskstate::JsonFormat>>,
+}
+
+impl DiskStateFlush {
+    pub fn new(
+        queue: nzbg_queue::QueueHandle,
+        disk: std::sync::Arc<nzbg_diskstate::DiskState<nzbg_diskstate::JsonFormat>>,
+    ) -> Self {
+        Self { queue, disk }
+    }
+
+    pub fn snapshot_to_queue_state(
+        snapshot: &nzbg_queue::QueueSnapshot,
+    ) -> nzbg_diskstate::QueueState {
+        nzbg_diskstate::QueueState {
+            version: 3,
+            nzbs: snapshot
+                .nzbs
+                .iter()
+                .map(|nzb| nzbg_diskstate::NzbState {
+                    id: nzb.id,
+                    name: nzb.name.clone(),
+                    filename: nzb.filename.clone(),
+                    category: nzb.category.clone(),
+                    dest_dir: nzb.dest_dir.clone(),
+                    final_dir: None,
+                    priority: nzb.priority as i32,
+                    paused: nzb.paused,
+                    url: None,
+                    dupe_key: String::new(),
+                    dupe_score: 0,
+                    dupe_mode: nzbg_core::models::DupMode::Score,
+                    added_time: chrono::Utc::now(),
+                    total_size: nzb.total_size,
+                    downloaded_size: nzb.downloaded_size,
+                    failed_size: nzb.failed_size,
+                    file_ids: nzb.file_ids.clone(),
+                    post_process_parameters: std::collections::HashMap::new(),
+                    health: nzb.health,
+                    critical_health: nzb.critical_health,
+                    total_article_count: nzb.total_article_count,
+                    success_article_count: nzb.success_article_count,
+                    failed_article_count: nzb.failed_article_count,
+                })
+                .collect(),
+            next_nzb_id: snapshot.next_nzb_id,
+            next_file_id: snapshot.next_file_id,
+            download_paused: snapshot.download_paused,
+            speed_limit: snapshot.speed_limit,
+        }
+    }
+}
+
+#[async_trait]
+impl Service for DiskStateFlush {
+    fn name(&self) -> &str {
+        "DiskStateFlush"
+    }
+
+    fn interval(&self) -> Duration {
+        Duration::from_secs(5)
+    }
+
+    async fn tick(&mut self) -> anyhow::Result<()> {
+        let snapshot = self
+            .queue
+            .get_queue_snapshot()
+            .await
+            .map_err(|e| anyhow::anyhow!("failed to get queue snapshot: {e}"))?;
+        let state = Self::snapshot_to_queue_state(&snapshot);
+        let disk = self.disk.clone();
+        tokio::task::spawn_blocking(move || disk.save_queue(&state)).await??;
+        Ok(())
+    }
+}
+
 pub fn parse_weekdays(value: &str) -> anyhow::Result<u8> {
     let mut mask = 0u8;
     for part in value.split(',') {
@@ -655,6 +757,7 @@ fn parse_seconds_option(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use nzbg_core::models::Priority;
     use std::collections::HashMap;
 
     struct FixedClock {
@@ -722,19 +825,22 @@ mod tests {
         assert!(task.should_execute(now));
     }
 
-    #[test]
-    fn scheduler_tick_updates_last_executed() {
+    #[tokio::test]
+    async fn scheduler_tick_updates_last_executed() {
         let now = NaiveDate::from_ymd_opt(2024, 1, 3)
             .unwrap()
             .and_hms_opt(3, 0, 0)
             .unwrap();
         let task = sample_task();
         let clock = FixedClock { now };
-        let mut scheduler = Scheduler::new(vec![task]).with_clock(Box::new(clock));
+        let (mut coordinator, handle, _rx) = nzbg_queue::QueueCoordinator::new(2, 1);
+        tokio::spawn(async move { coordinator.run().await });
+        let mut scheduler = Scheduler::new(vec![task], handle.clone()).with_clock(Box::new(clock));
 
-        scheduler.tick_with_time(now).expect("tick");
+        scheduler.tick_with_time(now).await.expect("tick");
 
         assert_eq!(scheduler.tasks[0].last_executed, Some(now));
+        handle.shutdown().await.expect("shutdown");
     }
 
     #[test]
@@ -773,5 +879,88 @@ mod tests {
 
         let tasks = parse_scheduler_tasks(&raw).expect("tasks");
         assert_eq!(tasks.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn command_executor_pause_download_pauses_queue() {
+        let (mut coordinator, handle, _rx) = nzbg_queue::QueueCoordinator::new(2, 1);
+        tokio::spawn(async move { coordinator.run().await });
+
+        let executor = CommandExecutor::new(handle.clone());
+        executor
+            .execute(&SchedulerCommand::PauseDownload, "")
+            .await
+            .expect("execute");
+
+        let status = handle.get_status().await.expect("status");
+        assert!(status.paused);
+        handle.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn command_executor_unpause_download_resumes_queue() {
+        let (mut coordinator, handle, _rx) = nzbg_queue::QueueCoordinator::new(2, 1);
+        tokio::spawn(async move { coordinator.run().await });
+
+        let executor = CommandExecutor::new(handle.clone());
+        executor
+            .execute(&SchedulerCommand::PauseDownload, "")
+            .await
+            .expect("pause");
+        executor
+            .execute(&SchedulerCommand::UnpauseDownload, "")
+            .await
+            .expect("unpause");
+
+        let status = handle.get_status().await.expect("status");
+        assert!(!status.paused);
+        handle.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn command_executor_download_rate_sets_rate() {
+        let (mut coordinator, handle, _rx) = nzbg_queue::QueueCoordinator::new(2, 1);
+        tokio::spawn(async move { coordinator.run().await });
+
+        let executor = CommandExecutor::new(handle.clone());
+        executor
+            .execute(&SchedulerCommand::DownloadRate, "500")
+            .await
+            .expect("rate");
+
+        let status = handle.get_status().await.expect("status");
+        assert_eq!(status.download_rate, 500 * 1024);
+        handle.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn disk_state_flush_saves_queue_snapshot() {
+        use nzbg_diskstate::{DiskState, JsonFormat};
+
+        let (mut coordinator, handle, _rx) = nzbg_queue::QueueCoordinator::new(2, 1);
+        tokio::spawn(async move { coordinator.run().await });
+
+        handle
+            .add_nzb(
+                std::path::PathBuf::from("/tmp/test.nzb"),
+                None,
+                Priority::Normal,
+            )
+            .await
+            .expect("add");
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let disk = std::sync::Arc::new(
+            DiskState::new(tmp.path().to_path_buf(), JsonFormat).expect("disk"),
+        );
+
+        let mut flusher = DiskStateFlush::new(handle.clone(), disk.clone());
+        flusher.tick().await.expect("tick");
+
+        let loaded = disk.load_queue().expect("load");
+        assert_eq!(loaded.nzbs.len(), 1);
+        assert_eq!(loaded.nzbs[0].name, "test.nzb");
+
+        handle.shutdown().await.expect("shutdown");
     }
 }

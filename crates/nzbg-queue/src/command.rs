@@ -4,7 +4,7 @@ use nzbg_core::models::{DupMode, Priority};
 
 use crate::coordinator::ArticleId;
 use crate::error::QueueError;
-use crate::status::{NzbListEntry, QueueStatus};
+use crate::status::{NzbListEntry, QueueSnapshot, QueueStatus};
 
 #[derive(Debug)]
 pub struct DownloadResult {
@@ -70,6 +70,9 @@ pub enum QueueCommand {
     },
     GetNzbList {
         reply: oneshot::Sender<Vec<NzbListEntry>>,
+    },
+    GetQueueSnapshot {
+        reply: oneshot::Sender<QueueSnapshot>,
     },
     DownloadComplete(DownloadResult),
     Shutdown,

@@ -9,8 +9,12 @@ async-trait = "0.1"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 fs2 = "0.4"
 nzbg-config = { path = "../nzbg-config" }
+nzbg-core = { path = "../nzbg-core" }
+nzbg-diskstate = { path = "../nzbg-diskstate" }
+nzbg-queue = { path = "../nzbg-queue" }
 tokio = { version = "1.35", features = ["fs", "macros", "rt", "sync", "time"] }
 tracing = "0.1"
 
 [dev-dependencies]
 serde_json = "1.0"
+tempfile = "3"

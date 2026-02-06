@@ -12,6 +12,7 @@ pub enum SegmentStatus {
 pub struct QueueStatus {
     pub queued: usize,
     pub paused: bool,
+    pub download_rate: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -19,4 +20,33 @@ pub struct NzbListEntry {
     pub id: u32,
     pub name: String,
     pub priority: Priority,
+}
+
+#[derive(Debug, Clone)]
+pub struct QueueSnapshot {
+    pub nzbs: Vec<NzbSnapshotEntry>,
+    pub next_nzb_id: u32,
+    pub next_file_id: u32,
+    pub download_paused: bool,
+    pub speed_limit: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct NzbSnapshotEntry {
+    pub id: u32,
+    pub name: String,
+    pub filename: String,
+    pub category: String,
+    pub dest_dir: std::path::PathBuf,
+    pub priority: Priority,
+    pub paused: bool,
+    pub total_size: u64,
+    pub downloaded_size: u64,
+    pub failed_size: u64,
+    pub health: u32,
+    pub critical_health: u32,
+    pub total_article_count: u32,
+    pub success_article_count: u32,
+    pub failed_article_count: u32,
+    pub file_ids: Vec<u32>,
 }

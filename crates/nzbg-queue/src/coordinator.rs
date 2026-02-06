@@ -7,7 +7,7 @@ use nzbg_core::models::{DownloadQueue, FileInfo, NzbInfo, Priority};
 
 use crate::command::{EditAction, MovePosition, QueueCommand};
 use crate::error::QueueError;
-use crate::status::{NzbListEntry, QueueStatus, SegmentStatus};
+use crate::status::{NzbListEntry, NzbSnapshotEntry, QueueSnapshot, QueueStatus, SegmentStatus};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ArticleId {
@@ -74,6 +74,36 @@ impl QueueHandle {
             .map_err(|_| QueueError::Shutdown)
     }
 
+    pub async fn pause_all(&self) -> Result<(), QueueError> {
+        self.command_tx
+            .send(QueueCommand::PauseAll)
+            .await
+            .map_err(|_| QueueError::Shutdown)
+    }
+
+    pub async fn resume_all(&self) -> Result<(), QueueError> {
+        self.command_tx
+            .send(QueueCommand::ResumeAll)
+            .await
+            .map_err(|_| QueueError::Shutdown)
+    }
+
+    pub async fn set_download_rate(&self, bytes_per_sec: u64) -> Result<(), QueueError> {
+        self.command_tx
+            .send(QueueCommand::SetDownloadRate { bytes_per_sec })
+            .await
+            .map_err(|_| QueueError::Shutdown)
+    }
+
+    pub async fn get_queue_snapshot(&self) -> Result<QueueSnapshot, QueueError> {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        self.command_tx
+            .send(QueueCommand::GetQueueSnapshot { reply: reply_tx })
+            .await
+            .map_err(|_| QueueError::Shutdown)?;
+        reply_rx.await.map_err(|_| QueueError::Shutdown)
+    }
+
     pub async fn shutdown(&self) -> Result<(), QueueError> {
         self.command_tx
             .send(QueueCommand::Shutdown)
@@ -87,6 +117,7 @@ pub struct QueueCoordinator {
     active_downloads: HashMap<ArticleId, ActiveDownload>,
     max_connections: usize,
     max_articles_per_file: usize,
+    download_rate: u64,
     paused: bool,
     shutdown: bool,
     command_rx: mpsc::Receiver<QueueCommand>,
@@ -111,6 +142,7 @@ impl QueueCoordinator {
             active_downloads: HashMap::new(),
             max_connections,
             max_articles_per_file,
+            download_rate: 0,
             paused: false,
             shutdown: false,
             command_rx,
@@ -356,7 +388,9 @@ impl QueueCoordinator {
             QueueCommand::ResumeAll => {
                 self.paused = false;
             }
-            QueueCommand::SetDownloadRate { .. } => {}
+            QueueCommand::SetDownloadRate { bytes_per_sec } => {
+                self.download_rate = bytes_per_sec;
+            }
             QueueCommand::EditQueue { action, ids, reply } => {
                 let result = self.apply_edit(action, ids);
                 let _ = reply.send(result);
@@ -365,6 +399,7 @@ impl QueueCoordinator {
                 let status = QueueStatus {
                     queued: self.queue.queue.len(),
                     paused: self.paused,
+                    download_rate: self.download_rate,
                 };
                 let _ = reply.send(status);
             }
@@ -380,6 +415,10 @@ impl QueueCoordinator {
                     })
                     .collect();
                 let _ = reply.send(list);
+            }
+            QueueCommand::GetQueueSnapshot { reply } => {
+                let snapshot = self.build_snapshot();
+                let _ = reply.send(snapshot);
             }
             QueueCommand::DownloadComplete(result) => {
                 self.handle_download_complete(result);
@@ -513,6 +552,38 @@ impl QueueCoordinator {
         Ok(())
     }
 
+    fn build_snapshot(&self) -> QueueSnapshot {
+        QueueSnapshot {
+            nzbs: self
+                .queue
+                .queue
+                .iter()
+                .map(|nzb| NzbSnapshotEntry {
+                    id: nzb.id,
+                    name: nzb.name.clone(),
+                    filename: nzb.filename.clone(),
+                    category: nzb.category.clone(),
+                    dest_dir: nzb.dest_dir.clone(),
+                    priority: nzb.priority,
+                    paused: nzb.paused,
+                    total_size: nzb.size,
+                    downloaded_size: nzb.success_size,
+                    failed_size: nzb.failed_size,
+                    health: nzb.health,
+                    critical_health: nzb.critical_health,
+                    total_article_count: nzb.total_article_count,
+                    success_article_count: nzb.success_article_count,
+                    failed_article_count: nzb.failed_article_count,
+                    file_ids: nzb.files.iter().map(|f| f.id).collect(),
+                })
+                .collect(),
+            next_nzb_id: self.queue.next_nzb_id,
+            next_file_id: self.queue.next_file_id,
+            download_paused: self.paused,
+            speed_limit: self.download_rate,
+        }
+    }
+
     fn file_mut(&mut self, nzb_id: u32, file_index: u32) -> Option<&mut FileInfo> {
         self.queue
             .queue
@@ -561,6 +632,64 @@ mod tests {
             crc: 0,
             server_stats: vec![],
         }
+    }
+
+    #[tokio::test]
+    async fn pause_all_sets_paused_flag() {
+        let (mut coordinator, handle, _rx) = QueueCoordinator::new(2, 1);
+        tokio::spawn(async move { coordinator.run().await });
+
+        handle.pause_all().await.expect("pause");
+        let status = handle.get_status().await.expect("status");
+        assert!(status.paused);
+
+        handle.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn resume_all_clears_paused_flag() {
+        let (mut coordinator, handle, _rx) = QueueCoordinator::new(2, 1);
+        tokio::spawn(async move { coordinator.run().await });
+
+        handle.pause_all().await.expect("pause");
+        handle.resume_all().await.expect("resume");
+        let status = handle.get_status().await.expect("status");
+        assert!(!status.paused);
+
+        handle.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn set_download_rate_updates_rate() {
+        let (mut coordinator, handle, _rx) = QueueCoordinator::new(2, 1);
+        tokio::spawn(async move { coordinator.run().await });
+
+        handle.set_download_rate(500_000).await.expect("rate");
+        let status = handle.get_status().await.expect("status");
+        assert_eq!(status.download_rate, 500_000);
+
+        handle.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn get_queue_snapshot_returns_state() {
+        let (mut coordinator, handle, _rx) = QueueCoordinator::new(2, 1);
+        tokio::spawn(async move { coordinator.run().await });
+
+        handle
+            .add_nzb(
+                std::path::PathBuf::from("/tmp/test.nzb"),
+                None,
+                Priority::Normal,
+            )
+            .await
+            .expect("add");
+
+        let snapshot = handle.get_queue_snapshot().await.expect("snapshot");
+        assert_eq!(snapshot.nzbs.len(), 1);
+        assert_eq!(snapshot.nzbs[0].name, "test.nzb");
+
+        handle.shutdown().await.expect("shutdown");
     }
 
     #[tokio::test]
