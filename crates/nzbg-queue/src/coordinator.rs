@@ -140,6 +140,21 @@ impl QueueHandle {
             .map_err(|_| QueueError::Shutdown)
     }
 
+    pub async fn get_file_list(
+        &self,
+        nzb_id: u32,
+    ) -> Result<Vec<crate::status::FileListEntry>, QueueError> {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        self.command_tx
+            .send(QueueCommand::GetFileList {
+                nzb_id,
+                reply: reply_tx,
+            })
+            .await
+            .map_err(|_| QueueError::Shutdown)?;
+        reply_rx.await.map_err(|_| QueueError::Shutdown)?
+    }
+
     pub async fn get_history(&self) -> Result<Vec<crate::status::HistoryListEntry>, QueueError> {
         let (reply_tx, reply_rx) = oneshot::channel();
         self.command_tx
@@ -542,6 +557,10 @@ impl QueueCoordinator {
             QueueCommand::ParUnpause { nzb_id } => {
                 self.unpause_par_files(nzb_id);
             }
+            QueueCommand::GetFileList { nzb_id, reply } => {
+                let result = self.build_file_list(nzb_id);
+                let _ = reply.send(result);
+            }
             QueueCommand::GetHistory { reply } => {
                 let list = self.build_history_list();
                 let _ = reply.send(list);
@@ -867,6 +886,36 @@ impl QueueCoordinator {
             .iter_mut()
             .find(|nzb| nzb.id == nzb_id)
             .and_then(|nzb| nzb.files.get_mut(file_index as usize))
+    }
+
+    fn build_file_list(
+        &self,
+        nzb_id: u32,
+    ) -> Result<Vec<crate::status::FileListEntry>, QueueError> {
+        let nzb = self
+            .queue
+            .queue
+            .iter()
+            .find(|n| n.id == nzb_id)
+            .ok_or(QueueError::NzbNotFound(nzb_id))?;
+        Ok(nzb
+            .files
+            .iter()
+            .map(|f| crate::status::FileListEntry {
+                id: f.id,
+                nzb_id: f.nzb_id,
+                filename: f.filename.clone(),
+                subject: f.subject.clone(),
+                size: f.size,
+                remaining_size: f.remaining_size,
+                paused: f.paused,
+                total_articles: f.total_articles,
+                success_articles: f.success_articles,
+                failed_articles: f.failed_articles,
+                active_downloads: f.active_downloads,
+                completed: f.completed,
+            })
+            .collect())
     }
 
     fn build_history_list(&self) -> Vec<HistoryListEntry> {

@@ -71,6 +71,22 @@ pub struct HistoryListEntry {
 }
 
 #[derive(Debug, Clone)]
+pub struct FileListEntry {
+    pub id: u32,
+    pub nzb_id: u32,
+    pub filename: String,
+    pub subject: String,
+    pub size: u64,
+    pub remaining_size: u64,
+    pub paused: bool,
+    pub total_articles: u32,
+    pub success_articles: u32,
+    pub failed_articles: u32,
+    pub active_downloads: u32,
+    pub completed: bool,
+}
+
+#[derive(Debug, Clone)]
 pub struct NzbCompletionNotice {
     pub nzb_id: u32,
     pub nzb_name: String,

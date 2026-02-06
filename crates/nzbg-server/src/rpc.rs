@@ -265,11 +265,38 @@ async fn rpc_shutdown(state: &AppState) -> Result<serde_json::Value, JsonRpcErro
 }
 
 async fn rpc_listfiles(
-    _params: &serde_json::Value,
+    params: &serde_json::Value,
     state: &AppState,
 ) -> Result<serde_json::Value, JsonRpcError> {
-    let _queue = require_queue(state)?;
-    Ok(serde_json::json!([]))
+    let queue = require_queue(state)?;
+    let arr = params.as_array();
+    let nzb_id = arr
+        .and_then(|a| a.first())
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0) as u32;
+
+    let files = queue.get_file_list(nzb_id).await.map_err(rpc_error)?;
+    let entries: Vec<serde_json::Value> = files
+        .into_iter()
+        .map(|f| {
+            serde_json::json!({
+                "ID": f.id,
+                "NZBID": f.nzb_id,
+                "Filename": f.filename,
+                "Subject": f.subject,
+                "FileSizeLo": (f.size & 0xFFFF_FFFF) as u32,
+                "FileSizeHi": (f.size >> 32) as u32,
+                "RemainingSizeLo": (f.remaining_size & 0xFFFF_FFFF) as u32,
+                "RemainingSizeHi": (f.remaining_size >> 32) as u32,
+                "Paused": f.paused,
+                "TotalArticles": f.total_articles,
+                "SuccessArticles": f.success_articles,
+                "FailedArticles": f.failed_articles,
+                "ActiveDownloads": f.active_downloads,
+            })
+        })
+        .collect();
+    Ok(serde_json::json!(entries))
 }
 
 async fn rpc_rate(
@@ -527,12 +554,22 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn dispatch_listfiles_returns_empty_array() {
+    async fn dispatch_listfiles_returns_file_details() {
         let (state, handle, _coord) = state_with_queue();
-        let result = dispatch_rpc("listfiles", &serde_json::json!([1]), &state)
+        let _nzb_file = nzb_tempfile();
+        let id = handle
+            .add_nzb(_nzb_file.path().to_path_buf(), None, Priority::Normal)
+            .await
+            .expect("add");
+
+        let result = dispatch_rpc("listfiles", &serde_json::json!([id]), &state)
             .await
             .expect("listfiles");
-        assert_eq!(result, serde_json::json!([]));
+        let files = result.as_array().expect("array");
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0]["NZBID"], id);
+        assert_eq!(files[0]["Filename"], "data.rar");
+        assert_eq!(files[0]["TotalArticles"], 1);
         handle.shutdown().await.expect("shutdown");
     }
 
