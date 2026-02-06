@@ -26,6 +26,9 @@ pub struct AppState {
     log_buffer: Option<std::sync::Arc<nzbg_logging::LogBuffer>>,
     config: Option<std::sync::Arc<std::sync::RwLock<nzbg_config::Config>>>,
     config_path: Option<std::path::PathBuf>,
+    postproc_paused: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    scan_paused: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    scan_trigger: Option<tokio::sync::mpsc::Sender<()>>,
 }
 
 impl Default for AppState {
@@ -41,6 +44,9 @@ impl Default for AppState {
             log_buffer: None,
             config: None,
             config_path: None,
+            postproc_paused: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            scan_paused: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            scan_trigger: None,
         }
     }
 }
@@ -89,6 +95,23 @@ impl AppState {
 
     pub fn config_path(&self) -> Option<&std::path::Path> {
         self.config_path.as_deref()
+    }
+
+    pub fn with_scan_trigger(mut self, tx: tokio::sync::mpsc::Sender<()>) -> Self {
+        self.scan_trigger = Some(tx);
+        self
+    }
+
+    pub fn postproc_paused(&self) -> &std::sync::Arc<std::sync::atomic::AtomicBool> {
+        &self.postproc_paused
+    }
+
+    pub fn scan_paused(&self) -> &std::sync::Arc<std::sync::atomic::AtomicBool> {
+        &self.scan_paused
+    }
+
+    pub fn scan_trigger(&self) -> Option<&tokio::sync::mpsc::Sender<()>> {
+        self.scan_trigger.as_ref()
     }
 
     pub fn version(&self) -> &str {

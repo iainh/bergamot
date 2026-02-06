@@ -41,7 +41,7 @@ pub async fn dispatch_rpc(
         "editqueue" => rpc_editqueue(params, state).await,
         "shutdown" => rpc_shutdown(state).await,
         "listfiles" => rpc_listfiles(params, state).await,
-        "postqueue" => Ok(serde_json::json!([])),
+        "postqueue" => rpc_postqueue(state),
         "writelog" => rpc_writelog(params, state),
         "loadlog" => rpc_loadlog(params, state),
         "log" => rpc_loadlog(params, state),
@@ -53,11 +53,11 @@ pub async fn dispatch_rpc(
         "rate" => rpc_rate(params, state).await,
         "pausedownload" => rpc_pausedownload(state).await,
         "resumedownload" => rpc_resumedownload(state).await,
-        "pausepost" => Ok(serde_json::json!(true)),
-        "resumepost" => Ok(serde_json::json!(true)),
-        "pausescan" => Ok(serde_json::json!(true)),
-        "resumescan" => Ok(serde_json::json!(true)),
-        "scan" => Ok(serde_json::json!(true)),
+        "pausepost" => rpc_pausepost(state),
+        "resumepost" => rpc_resumepost(state),
+        "pausescan" => rpc_pausescan(state),
+        "resumescan" => rpc_resumescan(state),
+        "scan" => rpc_scan(state).await,
         "feeds" => Ok(serde_json::json!([])),
         "sysinfo" => rpc_sysinfo(state),
         "systemhealth" => rpc_systemhealth(state),
@@ -299,6 +299,51 @@ async fn rpc_listfiles(
         })
         .collect();
     Ok(serde_json::json!(entries))
+}
+
+fn rpc_postqueue(state: &AppState) -> Result<serde_json::Value, JsonRpcError> {
+    let paused = state
+        .postproc_paused()
+        .load(std::sync::atomic::Ordering::Relaxed);
+    Ok(serde_json::json!({
+        "Paused": paused,
+        "Jobs": [],
+    }))
+}
+
+fn rpc_pausepost(state: &AppState) -> Result<serde_json::Value, JsonRpcError> {
+    state
+        .postproc_paused()
+        .store(true, std::sync::atomic::Ordering::Relaxed);
+    Ok(serde_json::json!(true))
+}
+
+fn rpc_resumepost(state: &AppState) -> Result<serde_json::Value, JsonRpcError> {
+    state
+        .postproc_paused()
+        .store(false, std::sync::atomic::Ordering::Relaxed);
+    Ok(serde_json::json!(true))
+}
+
+fn rpc_pausescan(state: &AppState) -> Result<serde_json::Value, JsonRpcError> {
+    state
+        .scan_paused()
+        .store(true, std::sync::atomic::Ordering::Relaxed);
+    Ok(serde_json::json!(true))
+}
+
+fn rpc_resumescan(state: &AppState) -> Result<serde_json::Value, JsonRpcError> {
+    state
+        .scan_paused()
+        .store(false, std::sync::atomic::Ordering::Relaxed);
+    Ok(serde_json::json!(true))
+}
+
+async fn rpc_scan(state: &AppState) -> Result<serde_json::Value, JsonRpcError> {
+    if let Some(tx) = state.scan_trigger() {
+        let _ = tx.send(()).await;
+    }
+    Ok(serde_json::json!(true))
 }
 
 fn rpc_sysinfo(state: &AppState) -> Result<serde_json::Value, JsonRpcError> {
@@ -737,12 +782,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn dispatch_postqueue_returns_empty_array() {
+    async fn dispatch_postqueue_returns_paused_status() {
         let state = AppState::default();
         let result = dispatch_rpc("postqueue", &serde_json::json!([]), &state)
             .await
             .expect("postqueue");
-        assert_eq!(result, serde_json::json!([]));
+        assert_eq!(result["Paused"], false);
     }
 
     fn state_with_log() -> AppState {
@@ -908,48 +953,81 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn dispatch_pausepost_returns_true() {
+    async fn dispatch_pausepost_sets_paused_state() {
         let state = AppState::default();
         let result = dispatch_rpc("pausepost", &serde_json::json!([]), &state)
             .await
             .expect("pausepost");
         assert_eq!(result, serde_json::json!(true));
+        assert!(
+            state
+                .postproc_paused()
+                .load(std::sync::atomic::Ordering::Relaxed)
+        );
+
+        let pq = dispatch_rpc("postqueue", &serde_json::json!([]), &state)
+            .await
+            .expect("postqueue");
+        assert_eq!(pq["Paused"], true);
     }
 
     #[tokio::test]
-    async fn dispatch_resumepost_returns_true() {
+    async fn dispatch_resumepost_clears_paused_state() {
         let state = AppState::default();
+        state
+            .postproc_paused()
+            .store(true, std::sync::atomic::Ordering::Relaxed);
         let result = dispatch_rpc("resumepost", &serde_json::json!([]), &state)
             .await
             .expect("resumepost");
         assert_eq!(result, serde_json::json!(true));
+        assert!(
+            !state
+                .postproc_paused()
+                .load(std::sync::atomic::Ordering::Relaxed)
+        );
     }
 
     #[tokio::test]
-    async fn dispatch_pausescan_returns_true() {
+    async fn dispatch_pausescan_sets_scan_paused() {
         let state = AppState::default();
         let result = dispatch_rpc("pausescan", &serde_json::json!([]), &state)
             .await
             .expect("pausescan");
         assert_eq!(result, serde_json::json!(true));
+        assert!(
+            state
+                .scan_paused()
+                .load(std::sync::atomic::Ordering::Relaxed)
+        );
     }
 
     #[tokio::test]
-    async fn dispatch_resumescan_returns_true() {
+    async fn dispatch_resumescan_clears_scan_paused() {
         let state = AppState::default();
+        state
+            .scan_paused()
+            .store(true, std::sync::atomic::Ordering::Relaxed);
         let result = dispatch_rpc("resumescan", &serde_json::json!([]), &state)
             .await
             .expect("resumescan");
         assert_eq!(result, serde_json::json!(true));
+        assert!(
+            !state
+                .scan_paused()
+                .load(std::sync::atomic::Ordering::Relaxed)
+        );
     }
 
     #[tokio::test]
-    async fn dispatch_scan_returns_true() {
-        let state = AppState::default();
+    async fn dispatch_scan_triggers_scan() {
+        let (tx, mut rx) = tokio::sync::mpsc::channel(1);
+        let state = AppState::default().with_scan_trigger(tx);
         let result = dispatch_rpc("scan", &serde_json::json!([]), &state)
             .await
             .expect("scan");
         assert_eq!(result, serde_json::json!(true));
+        assert!(rx.try_recv().is_ok());
     }
 
     #[tokio::test]
