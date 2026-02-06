@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use chrono::{Duration, Utc};
+use tokio::sync::{mpsc, oneshot};
 
 use crate::fetch::FeedFetcher;
 use crate::rss::parse_feed;
@@ -8,6 +9,61 @@ use crate::{
     FeedConfig, FeedFilter, FeedHistoryDb, FeedInfo, FeedItemInfo, FeedItemStatus, FeedStatus,
     FilterAction,
 };
+
+pub enum FeedCommand {
+    ProcessFeed {
+        feed_id: u32,
+        reply: oneshot::Sender<Result<Vec<FeedItemInfo>, String>>,
+    },
+    Tick,
+    GetInfos {
+        reply: oneshot::Sender<Vec<FeedInfo>>,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub struct FeedHandle {
+    tx: mpsc::Sender<FeedCommand>,
+}
+
+impl FeedHandle {
+    pub fn new(tx: mpsc::Sender<FeedCommand>) -> Self {
+        Self { tx }
+    }
+
+    pub async fn process_feed(&self, feed_id: u32) -> Result<Vec<FeedItemInfo>, anyhow::Error> {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        self.tx
+            .send(FeedCommand::ProcessFeed {
+                feed_id,
+                reply: reply_tx,
+            })
+            .await
+            .map_err(|_| anyhow::anyhow!("feed coordinator shut down"))?;
+        reply_rx
+            .await
+            .map_err(|_| anyhow::anyhow!("feed coordinator dropped reply"))?
+            .map_err(|e| anyhow::anyhow!(e))
+    }
+
+    pub async fn tick(&self) -> Result<(), anyhow::Error> {
+        self.tx
+            .send(FeedCommand::Tick)
+            .await
+            .map_err(|_| anyhow::anyhow!("feed coordinator shut down"))
+    }
+
+    pub async fn get_infos(&self) -> Result<Vec<FeedInfo>, anyhow::Error> {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        self.tx
+            .send(FeedCommand::GetInfos { reply: reply_tx })
+            .await
+            .map_err(|_| anyhow::anyhow!("feed coordinator shut down"))?;
+        reply_rx
+            .await
+            .map_err(|_| anyhow::anyhow!("feed coordinator dropped reply"))
+    }
+}
 
 pub struct FeedCoordinator {
     feeds: Vec<FeedConfig>,
@@ -124,6 +180,39 @@ impl FeedCoordinator {
         results
     }
 
+    pub fn feed_infos(&self) -> Vec<FeedInfo> {
+        self.feed_infos.values().cloned().collect()
+    }
+
+    pub fn find_feed(&self, feed_id: u32) -> Option<&FeedConfig> {
+        self.feeds.iter().find(|f| f.id == feed_id)
+    }
+
+    pub fn history(&self) -> &FeedHistoryDb {
+        &self.history
+    }
+
+    pub async fn run_actor(mut self, mut rx: mpsc::Receiver<FeedCommand>) {
+        while let Some(cmd) = rx.recv().await {
+            match cmd {
+                FeedCommand::ProcessFeed { feed_id, reply } => {
+                    let result = if let Some(feed) = self.find_feed(feed_id).cloned() {
+                        self.process_feed(&feed).await.map_err(|e| e.to_string())
+                    } else {
+                        Err(format!("feed {feed_id} not found"))
+                    };
+                    let _ = reply.send(result);
+                }
+                FeedCommand::Tick => {
+                    let _ = self.tick().await;
+                }
+                FeedCommand::GetInfos { reply } => {
+                    let _ = reply.send(self.feed_infos());
+                }
+            }
+        }
+    }
+
     fn get_or_parse_filter(&mut self, filter_text: &str) -> Result<FeedFilter, anyhow::Error> {
         if let Some(filter) = self.filter_cache.get(filter_text) {
             return Ok(filter.clone());
@@ -225,6 +314,59 @@ mod tests {
 
         let second = coordinator.process_feed(&feed).await.unwrap();
         assert_eq!(second.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn feed_handle_process_feed_returns_items() {
+        let fetcher = MockFetcher {
+            response: TEST_RSS.as_bytes().to_vec(),
+        };
+        let feed = test_feed_config();
+        let history = FeedHistoryDb::new(30);
+        let coordinator = FeedCoordinator::new(vec![feed.clone()], history, Box::new(fetcher));
+
+        let (tx, rx) = tokio::sync::mpsc::channel(4);
+        let handle = FeedHandle::new(tx);
+        tokio::spawn(coordinator.run_actor(rx));
+
+        let items = handle.process_feed(1).await.unwrap();
+        assert_eq!(items.len(), 2);
+        assert!(items.iter().all(|i| i.title.starts_with("Good.")));
+    }
+
+    #[tokio::test]
+    async fn feed_handle_process_unknown_feed_returns_error() {
+        let fetcher = MockFetcher {
+            response: TEST_RSS.as_bytes().to_vec(),
+        };
+        let feed = test_feed_config();
+        let history = FeedHistoryDb::new(30);
+        let coordinator = FeedCoordinator::new(vec![feed], history, Box::new(fetcher));
+
+        let (tx, rx) = tokio::sync::mpsc::channel(4);
+        let handle = FeedHandle::new(tx);
+        tokio::spawn(coordinator.run_actor(rx));
+
+        let result = handle.process_feed(999).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn feed_handle_get_infos_returns_feed_list() {
+        let fetcher = MockFetcher {
+            response: TEST_RSS.as_bytes().to_vec(),
+        };
+        let feed = test_feed_config();
+        let history = FeedHistoryDb::new(30);
+        let coordinator = FeedCoordinator::new(vec![feed], history, Box::new(fetcher));
+
+        let (tx, rx) = tokio::sync::mpsc::channel(4);
+        let handle = FeedHandle::new(tx);
+        tokio::spawn(coordinator.run_actor(rx));
+
+        let infos = handle.get_infos().await.unwrap();
+        assert_eq!(infos.len(), 1);
+        assert_eq!(infos[0].name, "Test Feed");
     }
 
     #[tokio::test]

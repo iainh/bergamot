@@ -2,6 +2,8 @@ pub mod coordinator;
 pub mod fetch;
 pub mod rss;
 
+pub use coordinator::{FeedCommand, FeedCoordinator, FeedHandle};
+
 use std::collections::HashMap;
 
 use chrono::{DateTime, Utc};

@@ -1100,6 +1100,7 @@ dependencies = [
  "nzbg-config",
  "nzbg-core",
  "nzbg-diskstate",
+ "nzbg-feed",
  "nzbg-queue",
  "reqwest",
  "serde_json",

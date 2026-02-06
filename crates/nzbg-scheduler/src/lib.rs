@@ -223,6 +223,7 @@ pub struct CommandDeps {
     pub postproc_paused: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
     pub scan_paused: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
     pub scan_trigger: Option<tokio::sync::mpsc::Sender<()>>,
+    pub feed_handle: Option<nzbg_feed::FeedHandle>,
 }
 
 #[derive(Debug, Clone)]
@@ -290,8 +291,19 @@ impl CommandExecutor {
                 }
             }
             SchedulerCommand::FetchFeed => {
-                let _feed_id: u32 = param.parse().context("fetch feed id")?;
-                tracing::warn!("fetch feed not yet implemented");
+                let feed_id: u32 = param.parse().context("fetch feed id")?;
+                if let Some(feed_handle) = &self.deps.feed_handle {
+                    match feed_handle.process_feed(feed_id).await {
+                        Ok(items) => {
+                            tracing::info!("feed {feed_id}: fetched {} items", items.len());
+                        }
+                        Err(err) => {
+                            tracing::warn!("feed {feed_id} fetch error: {err}");
+                        }
+                    }
+                } else {
+                    tracing::warn!("feed coordinator not available");
+                }
             }
             SchedulerCommand::Extensions => {
                 tracing::info!("extensions command: {param}");
@@ -1296,6 +1308,52 @@ mod tests {
 
         let received = trigger_rx.try_recv();
         assert!(received.is_ok());
+        handle.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn command_executor_fetch_feed_calls_handle() {
+        use nzbg_feed::{FeedConfig, FeedCoordinator, FeedHandle, FeedHistoryDb};
+
+        struct MockFetcher;
+        #[async_trait::async_trait]
+        impl nzbg_feed::fetch::FeedFetcher for MockFetcher {
+            async fn fetch_url(&self, _url: &str) -> Result<Vec<u8>, anyhow::Error> {
+                Ok(br#"<?xml version="1.0"?><rss><channel>
+                    <item><title>Test</title><link>https://example.com/1.nzb</link></item>
+                </channel></rss>"#
+                    .to_vec())
+            }
+        }
+
+        let feed = FeedConfig {
+            id: 1,
+            name: "Test".to_string(),
+            url: "https://example.com/rss".to_string(),
+            filter: String::new(),
+            interval_min: 15,
+            backlog: false,
+            pause_nzb: false,
+            category: "TV".to_string(),
+            priority: 0,
+            extensions: vec![],
+        };
+        let history = FeedHistoryDb::new(30);
+        let coordinator = FeedCoordinator::new(vec![feed], history, Box::new(MockFetcher));
+        let (feed_tx, feed_rx) = tokio::sync::mpsc::channel(4);
+        let feed_handle = FeedHandle::new(feed_tx);
+        tokio::spawn(coordinator.run_actor(feed_rx));
+
+        let (mut queue_coord, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1);
+        tokio::spawn(async move { queue_coord.run().await });
+
+        let deps = CommandDeps {
+            feed_handle: Some(feed_handle),
+            ..Default::default()
+        };
+        let executor = CommandExecutor::new(handle.clone()).with_deps(deps);
+        let result = executor.execute(&SchedulerCommand::FetchFeed, "1").await;
+        assert!(result.is_ok());
         handle.shutdown().await.expect("shutdown");
     }
 
