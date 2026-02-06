@@ -107,15 +107,15 @@ downloader at all.
 
 ---
 
-## Phase 5 — Server & Auth Hardening
+## Phase 5 — Server & Auth Hardening ✅
 
-| # | Gap | Detail | Crates |
-|---|-----|--------|--------|
-| 33 | **HTTPS/TLS control server** | `secure_control` config is mapped but `secure_cert`/`secure_key` are set to `None`. Server always binds plain TCP. | `nzbg`, `nzbg-server` |
-| 34 | **Authorized IP enforcement** | `authorized_ips` config is read but `auth_middleware` never checks client IP. | `nzbg-server` |
-| 35 | **XML-RPC endpoint** | `/xmlrpc` returns "not implemented" error. Many NZBGet clients use XML-RPC. | `nzbg-server` |
-| 36 | **AppState live updates** | `download_rate` and `remaining_bytes` in `AppState` are always 0. Need periodic update from queue status. | `nzbg-server`, `nzbg` |
-| 37 | **Form-based auth** | `form_auth` config exists but no form login endpoint. | `nzbg-server` |
+| # | Gap | Status |
+|---|-----|--------|
+| 33 | **HTTPS/TLS control server** | ✅ axum-server with rustls, config mapping for SecureCert/SecureKey, validation on startup |
+| 34 | **Authorized IP enforcement** | ✅ is_ip_allowed with exact/wildcard/CIDR matching, ConnectInfo plumbing, localhost always allowed |
+| 35 | **XML-RPC endpoint** | ✅ Full XML-RPC request parsing and response generation, maps to existing dispatch_rpc |
+| 36 | **AppState live updates** | ✅ AtomicU64 for download_rate/remaining_bytes, periodic 1s updater from queue status |
+| 37 | **Form-based auth** | ✅ HMAC-signed session cookies, login/logout endpoints, cookie auth integrated into middleware |
 
 ---
 
