@@ -201,6 +201,24 @@ impl QueueHandle {
         reply_rx.await.map_err(|_| QueueError::Shutdown)?
     }
 
+    pub async fn update_post_status(
+        &self,
+        nzb_id: u32,
+        par_status: Option<nzbg_core::models::ParStatus>,
+        unpack_status: Option<nzbg_core::models::UnpackStatus>,
+        move_status: Option<nzbg_core::models::MoveStatus>,
+    ) -> Result<(), QueueError> {
+        self.command_tx
+            .send(QueueCommand::UpdatePostStatus {
+                nzb_id,
+                par_status,
+                unpack_status,
+                move_status,
+            })
+            .await
+            .map_err(|_| QueueError::Shutdown)
+    }
+
     pub async fn set_strategy(
         &self,
         strategy: nzbg_core::models::PostStrategy,
@@ -540,6 +558,14 @@ impl QueueCoordinator {
                 let result = self.history_delete(history_id);
                 let _ = reply.send(result);
             }
+            QueueCommand::UpdatePostStatus {
+                nzb_id,
+                par_status,
+                unpack_status,
+                move_status,
+            } => {
+                self.update_post_status(nzb_id, par_status, unpack_status, move_status);
+            }
             QueueCommand::SetStrategy { strategy } => {
                 self.strategy = strategy;
             }
@@ -614,9 +640,10 @@ impl QueueCoordinator {
         if let Some(nzb) = self.queue.queue.iter_mut().find(|n| n.id == nzb_id)
             && let Some(file) = nzb.files.get_mut(file_idx)
             && !file.completed
-            && file.articles.iter().all(|a| {
-                a.status == ArticleStatus::Finished || a.status == ArticleStatus::Failed
-            })
+            && file
+                .articles
+                .iter()
+                .all(|a| a.status == ArticleStatus::Finished || a.status == ArticleStatus::Failed)
         {
             file.completed = true;
             nzb.remaining_file_count = nzb.remaining_file_count.saturating_sub(1);
@@ -632,9 +659,7 @@ impl QueueCoordinator {
             .find(|n| n.id == nzb_id)
             .is_some_and(|nzb| nzb.files.iter().all(|f| f.completed));
 
-        if all_complete
-            && let Some(idx) = self.queue.queue.iter().position(|n| n.id == nzb_id)
-        {
+        if all_complete && let Some(idx) = self.queue.queue.iter().position(|n| n.id == nzb_id) {
             let nzb = self.queue.queue.remove(idx);
             tracing::info!("NZB {} completed, moving to history", nzb.name);
             self.add_to_history(nzb, HistoryKind::Nzb);
@@ -926,8 +951,8 @@ impl QueueCoordinator {
     ) -> Result<u32, QueueError> {
         let data = std::fs::read(path)
             .map_err(|e| QueueError::IoError(format!("{}: {e}", path.display())))?;
-        let parsed = nzbg_nzb::parse_nzb_auto(&data)
-            .map_err(|e| QueueError::NzbParse(format!("{e}")))?;
+        let parsed =
+            nzbg_nzb::parse_nzb_auto(&data).map_err(|e| QueueError::NzbParse(format!("{e}")))?;
 
         let id = self.queue.next_nzb_id;
         self.queue.next_nzb_id += 1;
@@ -938,8 +963,7 @@ impl QueueCoordinator {
             .unwrap_or_else(|| "nzb".to_string());
         let dup_key = name.strip_suffix(".nzb").unwrap_or(&name).to_string();
 
-        if let Some(existing_id) =
-            self.check_duplicate(&dup_key, nzbg_core::models::DupMode::Score)
+        if let Some(existing_id) = self.check_duplicate(&dup_key, nzbg_core::models::DupMode::Score)
         {
             tracing::info!(
                 "duplicate NZB detected: {} matches existing id {}",
@@ -1087,16 +1111,45 @@ impl QueueCoordinator {
         Ok(id)
     }
 
-    pub fn seed_state(
-        &mut self,
-        queue: DownloadQueue,
-        paused: bool,
-        rate: u64,
-    ) {
+    pub fn seed_state(&mut self, queue: DownloadQueue, paused: bool, rate: u64) {
         self.queue = queue;
         self.paused = paused;
         self.download_rate = rate;
         let _ = self.rate_watch_tx.send(rate);
+    }
+
+    fn update_post_status(
+        &mut self,
+        nzb_id: u32,
+        par_status: Option<nzbg_core::models::ParStatus>,
+        unpack_status: Option<nzbg_core::models::UnpackStatus>,
+        move_status: Option<nzbg_core::models::MoveStatus>,
+    ) {
+        let nzb = self
+            .queue
+            .queue
+            .iter_mut()
+            .find(|n| n.id == nzb_id)
+            .map(|n| n as &mut NzbInfo)
+            .or_else(|| {
+                self.queue
+                    .history
+                    .iter_mut()
+                    .find(|h| h.id == nzb_id)
+                    .map(|h| &mut h.nzb_info)
+            });
+
+        if let Some(nzb) = nzb {
+            if let Some(status) = par_status {
+                nzb.par_status = status;
+            }
+            if let Some(status) = unpack_status {
+                nzb.unpack_status = status;
+            }
+            if let Some(status) = move_status {
+                nzb.move_status = status;
+            }
+        }
     }
 
     pub fn add_to_history(&mut self, nzb: NzbInfo, kind: HistoryKind) {
@@ -1310,11 +1363,7 @@ mod tests {
         tokio::spawn(async move { coordinator.run().await });
 
         handle
-            .add_nzb(
-                _nzb_file.path().to_path_buf(),
-                None,
-                Priority::Normal,
-            )
+            .add_nzb(_nzb_file.path().to_path_buf(), None, Priority::Normal)
             .await
             .expect("add");
 
@@ -1334,11 +1383,7 @@ mod tests {
         });
 
         let id = handle
-            .add_nzb(
-                _nzb_file.path().to_path_buf(),
-                None,
-                Priority::Normal,
-            )
+            .add_nzb(_nzb_file.path().to_path_buf(), None, Priority::Normal)
             .await
             .expect("add nzb");
         assert_eq!(id, 1);
@@ -1680,19 +1725,11 @@ mod tests {
         tokio::spawn(async move { coordinator.run().await });
 
         handle
-            .add_nzb(
-                _nzb_file1.path().to_path_buf(),
-                None,
-                Priority::Normal,
-            )
+            .add_nzb(_nzb_file1.path().to_path_buf(), None, Priority::Normal)
             .await
             .expect("add");
         handle
-            .add_nzb(
-                _nzb_file2.path().to_path_buf(),
-                None,
-                Priority::High,
-            )
+            .add_nzb(_nzb_file2.path().to_path_buf(), None, Priority::High)
             .await
             .expect("add");
 
@@ -1711,11 +1748,7 @@ mod tests {
         tokio::spawn(async move { coordinator.run().await });
 
         let id = handle
-            .add_nzb(
-                _nzb_file.path().to_path_buf(),
-                None,
-                Priority::Normal,
-            )
+            .add_nzb(_nzb_file.path().to_path_buf(), None, Priority::Normal)
             .await
             .expect("add");
 
@@ -1854,11 +1887,7 @@ mod tests {
         tokio::spawn(async move { coordinator.run().await });
 
         handle
-            .add_nzb(
-                _nzb_file.path().to_path_buf(),
-                None,
-                Priority::Normal,
-            )
+            .add_nzb(_nzb_file.path().to_path_buf(), None, Priority::Normal)
             .await
             .expect("add");
 
@@ -2256,10 +2285,7 @@ mod tests {
         assert_eq!(nzb.remaining_file_count, 2);
         assert_eq!(nzb.par_size, 200);
         assert_eq!(nzb.remaining_par_count, 1);
-        assert_eq!(
-            nzb.critical_health,
-            calculate_critical_health(3, true)
-        );
+        assert_eq!(nzb.critical_health, calculate_critical_health(3, true));
     }
 
     #[test]
@@ -2280,7 +2306,7 @@ mod tests {
 
     #[test]
     fn next_assignment_includes_output_filename() {
-        let (mut coordinator, _handle, _rx, _rate_rx) = ingested_coordinator();
+        let (coordinator, _handle, _rx, _rate_rx) = ingested_coordinator();
         let (_article_id, assignment) = coordinator.next_assignment().unwrap();
         assert_eq!(assignment.output_filename, "data.part01.rar");
     }
@@ -2296,7 +2322,12 @@ mod tests {
         assert!(result.is_err());
     }
 
-    fn ingested_coordinator() -> (QueueCoordinator, QueueHandle, mpsc::Receiver<ArticleAssignment>, watch::Receiver<u64>) {
+    fn ingested_coordinator() -> (
+        QueueCoordinator,
+        QueueHandle,
+        mpsc::Receiver<ArticleAssignment>,
+        watch::Receiver<u64>,
+    ) {
         let (mut coordinator, handle, rx, rate_rx) = QueueCoordinator::new(4, 2);
         let nzb_file = write_sample_nzb();
         coordinator
@@ -2308,12 +2339,25 @@ mod tests {
     #[test]
     fn download_success_updates_file_and_nzb_sizes() {
         let (mut coordinator, _handle, _rx, _rate_rx) = ingested_coordinator();
-        let article_id = ArticleId { nzb_id: 1, file_idx: 0, seg_idx: 0 };
-        coordinator.active_downloads.insert(article_id, ActiveDownload { _started: Instant::now() });
+        let article_id = ArticleId {
+            nzb_id: 1,
+            file_idx: 0,
+            seg_idx: 0,
+        };
+        coordinator.active_downloads.insert(
+            article_id,
+            ActiveDownload {
+                _started: Instant::now(),
+            },
+        );
 
         coordinator.handle_download_complete(DownloadResult {
             article_id,
-            outcome: DownloadOutcome::Success { data: vec![0; 500], offset: 0, crc: 0x1234 },
+            outcome: DownloadOutcome::Success {
+                data: vec![0; 500],
+                offset: 0,
+                crc: 0x1234,
+            },
         });
 
         let nzb = &coordinator.queue.queue[0];
@@ -2328,12 +2372,23 @@ mod tests {
     #[test]
     fn download_failure_updates_file_and_nzb_sizes() {
         let (mut coordinator, _handle, _rx, _rate_rx) = ingested_coordinator();
-        let article_id = ArticleId { nzb_id: 1, file_idx: 0, seg_idx: 0 };
-        coordinator.active_downloads.insert(article_id, ActiveDownload { _started: Instant::now() });
+        let article_id = ArticleId {
+            nzb_id: 1,
+            file_idx: 0,
+            seg_idx: 0,
+        };
+        coordinator.active_downloads.insert(
+            article_id,
+            ActiveDownload {
+                _started: Instant::now(),
+            },
+        );
 
         coordinator.handle_download_complete(DownloadResult {
             article_id,
-            outcome: DownloadOutcome::Failure { message: "test".to_string() },
+            outcome: DownloadOutcome::Failure {
+                message: "test".to_string(),
+            },
         });
 
         let nzb = &coordinator.queue.queue[0];
@@ -2345,12 +2400,30 @@ mod tests {
         assert_eq!(nzb.remaining_size, 500);
     }
 
-    fn complete_article(coordinator: &mut QueueCoordinator, nzb_id: u32, file_idx: u32, seg_idx: u32) {
-        let article_id = ArticleId { nzb_id, file_idx, seg_idx };
-        coordinator.active_downloads.insert(article_id, ActiveDownload { _started: Instant::now() });
+    fn complete_article(
+        coordinator: &mut QueueCoordinator,
+        nzb_id: u32,
+        file_idx: u32,
+        seg_idx: u32,
+    ) {
+        let article_id = ArticleId {
+            nzb_id,
+            file_idx,
+            seg_idx,
+        };
+        coordinator.active_downloads.insert(
+            article_id,
+            ActiveDownload {
+                _started: Instant::now(),
+            },
+        );
         coordinator.handle_download_complete(DownloadResult {
             article_id,
-            outcome: DownloadOutcome::Success { data: vec![], offset: 0, crc: 0 },
+            outcome: DownloadOutcome::Success {
+                data: vec![],
+                offset: 0,
+                crc: 0,
+            },
         });
     }
 
@@ -2376,7 +2449,7 @@ mod tests {
         complete_article(&mut coordinator, 1, 1, 0);
         assert!(coordinator.queue.queue.is_empty());
         assert_eq!(coordinator.queue.history.len(), 1);
-        assert_eq!(coordinator.queue.history[0].nzb_info.name.ends_with(".nzb"), true);
+        assert!(coordinator.queue.history[0].nzb_info.name.ends_with(".nzb"));
     }
 
     #[test]
@@ -2386,6 +2459,66 @@ mod tests {
         complete_article(&mut coordinator, 1, 0, 0);
         complete_article(&mut coordinator, 1, 0, 1);
         assert_eq!(coordinator.queue.queue[0].remaining_file_count, 1);
+    }
+
+    #[test]
+    fn update_post_status_updates_queued_nzb() {
+        let (mut coordinator, _handle, _rx, _rate_rx) = QueueCoordinator::new(2, 1);
+        let nzb = sample_nzb(1, "test");
+        coordinator.queue.queue.push(nzb);
+
+        coordinator.update_post_status(
+            1,
+            Some(nzbg_core::models::ParStatus::Success),
+            Some(nzbg_core::models::UnpackStatus::Success),
+            None,
+        );
+
+        assert_eq!(
+            coordinator.queue.queue[0].par_status,
+            nzbg_core::models::ParStatus::Success
+        );
+        assert_eq!(
+            coordinator.queue.queue[0].unpack_status,
+            nzbg_core::models::UnpackStatus::Success
+        );
+        assert_eq!(
+            coordinator.queue.queue[0].move_status,
+            nzbg_core::models::MoveStatus::None
+        );
+    }
+
+    #[test]
+    fn update_post_status_updates_history_nzb() {
+        let (mut coordinator, _handle, _rx, _rate_rx) = QueueCoordinator::new(2, 1);
+        let nzb = sample_nzb(1, "test");
+        push_to_history(&mut coordinator, nzb);
+
+        coordinator.update_post_status(1, None, None, Some(nzbg_core::models::MoveStatus::Success));
+
+        assert_eq!(
+            coordinator.queue.history[0].nzb_info.move_status,
+            nzbg_core::models::MoveStatus::Success
+        );
+    }
+
+    #[tokio::test]
+    async fn update_post_status_via_handle() {
+        let _nzb_file = write_sample_nzb();
+        let (mut coordinator, handle, _rx, _rate_rx) = QueueCoordinator::new(2, 1);
+        tokio::spawn(async move { coordinator.run().await });
+
+        let id = handle
+            .add_nzb(_nzb_file.path().to_path_buf(), None, Priority::Normal)
+            .await
+            .expect("add");
+
+        handle
+            .update_post_status(id, Some(nzbg_core::models::ParStatus::Failure), None, None)
+            .await
+            .expect("update");
+
+        handle.shutdown().await.expect("shutdown");
     }
 
     #[test]

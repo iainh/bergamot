@@ -100,6 +100,12 @@ pub enum QueueCommand {
         history_id: u32,
         reply: oneshot::Sender<Result<(), QueueError>>,
     },
+    UpdatePostStatus {
+        nzb_id: u32,
+        par_status: Option<nzbg_core::models::ParStatus>,
+        unpack_status: Option<nzbg_core::models::UnpackStatus>,
+        move_status: Option<nzbg_core::models::MoveStatus>,
+    },
     SetStrategy {
         strategy: nzbg_core::models::PostStrategy,
     },
