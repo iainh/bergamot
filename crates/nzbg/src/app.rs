@@ -6,7 +6,7 @@ use tracing_subscriber::EnvFilter;
 
 use nzbg_config::{Config, parse_config};
 use nzbg_diskstate::{DiskState, JsonFormat, StateLock};
-use nzbg_server::{AppState, ServerConfig as WebServerConfig, WebServer};
+use nzbg_server::{AppState, ServerConfig as WebServerConfig, ShutdownHandle, WebServer};
 
 pub fn load_config(path: &Path) -> Result<Config> {
     let content = std::fs::read_to_string(path)
@@ -41,7 +41,6 @@ pub fn web_server_config(config: &Config) -> WebServerConfig {
 
 pub async fn run(config: Config, fetcher: Arc<dyn crate::download::ArticleFetcher>) -> Result<()> {
     let web_config = Arc::new(web_server_config(&config));
-    let app_state = Arc::new(AppState::default());
     let inter_dir = config.inter_dir.clone();
 
     let state_dir = config.queue_dir.clone();
@@ -53,6 +52,13 @@ pub async fn run(config: Config, fetcher: Arc<dyn crate::download::ArticleFetche
     }
 
     let (mut coordinator, queue_handle, assignment_rx) = nzbg_queue::QueueCoordinator::new(4, 2);
+
+    let (shutdown_handle, mut shutdown_rx) = ShutdownHandle::new();
+    let app_state = Arc::new(
+        AppState::default()
+            .with_queue(queue_handle.clone())
+            .with_shutdown(shutdown_handle),
+    );
 
     let coordinator_handle = tokio::spawn(async move {
         coordinator.run().await;
@@ -78,7 +84,20 @@ pub async fn run(config: Config, fetcher: Arc<dyn crate::download::ArticleFetche
         }
     });
 
-    tokio::signal::ctrl_c().await.context("awaiting ctrl-c")?;
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => {
+            tracing::info!("ctrl-c received");
+        }
+        _ = async {
+            while shutdown_rx.changed().await.is_ok() {
+                if *shutdown_rx.borrow() {
+                    break;
+                }
+            }
+        } => {
+            tracing::info!("RPC shutdown received");
+        }
+    }
     tracing::info!("shutdown signal received");
 
     nzbg_scheduler::shutdown_services(scheduler_tx, scheduler_handles).await;

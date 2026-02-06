@@ -104,6 +104,28 @@ impl QueueHandle {
         reply_rx.await.map_err(|_| QueueError::Shutdown)
     }
 
+    pub async fn get_nzb_list(&self) -> Result<Vec<NzbListEntry>, QueueError> {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        self.command_tx
+            .send(QueueCommand::GetNzbList { reply: reply_tx })
+            .await
+            .map_err(|_| QueueError::Shutdown)?;
+        reply_rx.await.map_err(|_| QueueError::Shutdown)
+    }
+
+    pub async fn edit_queue(&self, action: EditAction, ids: Vec<u32>) -> Result<(), QueueError> {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        self.command_tx
+            .send(QueueCommand::EditQueue {
+                action,
+                ids,
+                reply: reply_tx,
+            })
+            .await
+            .map_err(|_| QueueError::Shutdown)?;
+        reply_rx.await.map_err(|_| QueueError::Shutdown)?
+    }
+
     pub async fn shutdown(&self) -> Result<(), QueueError> {
         self.command_tx
             .send(QueueCommand::Shutdown)
@@ -1034,5 +1056,61 @@ mod tests {
         assert_eq!(seg.status, ArticleStatus::Finished);
         assert_eq!(seg.crc, 0xDEADBEEF);
         assert_eq!(coordinator.queue.queue[0].success_article_count, 1);
+    }
+
+    #[tokio::test]
+    async fn get_nzb_list_returns_entries() {
+        let (mut coordinator, handle, _rx) = QueueCoordinator::new(2, 1);
+        tokio::spawn(async move { coordinator.run().await });
+
+        handle
+            .add_nzb(
+                std::path::PathBuf::from("/tmp/first.nzb"),
+                None,
+                Priority::Normal,
+            )
+            .await
+            .expect("add");
+        handle
+            .add_nzb(
+                std::path::PathBuf::from("/tmp/second.nzb"),
+                None,
+                Priority::High,
+            )
+            .await
+            .expect("add");
+
+        let list = handle.get_nzb_list().await.expect("list");
+        assert_eq!(list.len(), 2);
+        assert_eq!(list[0].name, "first.nzb");
+        assert_eq!(list[1].name, "second.nzb");
+        assert_eq!(list[1].priority, Priority::High);
+
+        handle.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn edit_queue_pauses_nzb() {
+        let (mut coordinator, handle, _rx) = QueueCoordinator::new(2, 1);
+        tokio::spawn(async move { coordinator.run().await });
+
+        let id = handle
+            .add_nzb(
+                std::path::PathBuf::from("/tmp/test.nzb"),
+                None,
+                Priority::Normal,
+            )
+            .await
+            .expect("add");
+
+        handle
+            .edit_queue(EditAction::Pause, vec![id])
+            .await
+            .expect("edit");
+
+        let list = handle.get_nzb_list().await.expect("list");
+        assert_eq!(list.len(), 1);
+
+        handle.shutdown().await.expect("shutdown");
     }
 }

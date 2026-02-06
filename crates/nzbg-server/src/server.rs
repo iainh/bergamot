@@ -11,6 +11,7 @@ use crate::auth::{AccessLevel, AuthState, auth_middleware, required_access};
 use crate::config::ServerConfig;
 use crate::error::{JsonRpcError, JsonRpcErrorBody};
 use crate::rpc::{JsonRpcRequest, JsonRpcResponse, dispatch_rpc};
+use crate::shutdown::ShutdownHandle;
 use crate::status::StatusResponse;
 
 #[derive(Debug, Clone)]
@@ -18,6 +19,8 @@ pub struct AppState {
     version: String,
     download_rate: u64,
     remaining_bytes: u64,
+    queue: Option<nzbg_queue::QueueHandle>,
+    shutdown: Option<ShutdownHandle>,
 }
 
 impl Default for AppState {
@@ -26,13 +29,33 @@ impl Default for AppState {
             version: "0.1.0".to_string(),
             download_rate: 0,
             remaining_bytes: 0,
+            queue: None,
+            shutdown: None,
         }
     }
 }
 
 impl AppState {
+    pub fn with_queue(mut self, queue: nzbg_queue::QueueHandle) -> Self {
+        self.queue = Some(queue);
+        self
+    }
+
+    pub fn with_shutdown(mut self, shutdown: ShutdownHandle) -> Self {
+        self.shutdown = Some(shutdown);
+        self
+    }
+
     pub fn version(&self) -> &str {
         &self.version
+    }
+
+    pub fn queue_handle(&self) -> Option<&nzbg_queue::QueueHandle> {
+        self.queue.as_ref()
+    }
+
+    pub fn shutdown_handle(&self) -> Option<&ShutdownHandle> {
+        self.shutdown.as_ref()
     }
 
     pub fn status(&self) -> StatusResponse {
