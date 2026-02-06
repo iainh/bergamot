@@ -46,6 +46,7 @@ pub async fn dispatch_rpc(
         "loadlog" => rpc_loadlog(params, state),
         "log" => rpc_loadlog(params, state),
         "servervolumes" => rpc_servervolumes(state),
+        "resetservervolume" => Ok(serde_json::json!(true)),
         "config" | "loadconfig" => rpc_loadconfig(state),
         "saveconfig" => rpc_saveconfig(params, state),
         "configtemplates" => rpc_configtemplates(),
