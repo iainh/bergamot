@@ -4,3 +4,17 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+anyhow = "1.0"
+clap = { version = "4", features = ["derive"] }
+nzbg-config = { path = "../nzbg-config" }
+nzbg-logging = { path = "../nzbg-logging" }
+nzbg-queue = { path = "../nzbg-queue" }
+nzbg-scheduler = { path = "../nzbg-scheduler" }
+nzbg-server = { path = "../nzbg-server" }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+dirs = "5.0"
+
+[dev-dependencies]
+tempfile = "3.11"
