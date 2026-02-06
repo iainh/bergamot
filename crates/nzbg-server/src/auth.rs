@@ -1,4 +1,6 @@
-use axum::extract::{Request, State};
+use std::net::SocketAddr;
+
+use axum::extract::{ConnectInfo, Request, State};
 use axum::http::StatusCode;
 use axum::middleware::Next;
 use axum::response::Response;
@@ -21,10 +23,20 @@ pub struct AuthState {
 
 pub async fn auth_middleware(
     State(state): State<AuthState>,
+    connect_info: Option<ConnectInfo<SocketAddr>>,
     request: Request,
     next: Next,
 ) -> Result<Response, StatusCode> {
     let config = &state.config;
+
+    if !config.authorized_ips.is_empty() {
+        let client_ip = connect_info
+            .map(|ci| ci.0.ip().to_string())
+            .unwrap_or_default();
+        if !is_ip_allowed(&client_ip, &config.authorized_ips) {
+            return Err(StatusCode::FORBIDDEN);
+        }
+    }
 
     let access = extract_url_credentials(&request)
         .and_then(|(user, pass)| authenticate(&user, &pass, config))
@@ -65,6 +77,77 @@ pub fn required_access(method: &str) -> AccessLevel {
         }
         _ => AccessLevel::Control,
     }
+}
+
+pub fn is_ip_allowed(client_ip: &str, allowed: &[String]) -> bool {
+    if client_ip == "127.0.0.1" || client_ip == "::1" {
+        return true;
+    }
+    if allowed.is_empty() {
+        return true;
+    }
+    for pattern in allowed {
+        if pattern.contains('/') {
+            if cidr_matches(client_ip, pattern) {
+                return true;
+            }
+        } else if pattern.contains('*') {
+            if wildcard_matches(client_ip, pattern) {
+                return true;
+            }
+        } else if client_ip == pattern {
+            return true;
+        }
+    }
+    false
+}
+
+fn wildcard_matches(ip: &str, pattern: &str) -> bool {
+    let ip_parts: Vec<&str> = ip.split('.').collect();
+    let pattern_parts: Vec<&str> = pattern.split('.').collect();
+    if ip_parts.len() != pattern_parts.len() {
+        return false;
+    }
+    ip_parts
+        .iter()
+        .zip(pattern_parts.iter())
+        .all(|(ip_part, pat_part)| *pat_part == "*" || ip_part == pat_part)
+}
+
+fn cidr_matches(ip: &str, cidr: &str) -> bool {
+    let Some((network, prefix_str)) = cidr.split_once('/') else {
+        return false;
+    };
+    let Ok(prefix_len) = prefix_str.parse::<u32>() else {
+        return false;
+    };
+    let Some(ip_addr) = parse_ipv4(ip) else {
+        return false;
+    };
+    let Some(net_addr) = parse_ipv4(network) else {
+        return false;
+    };
+    if prefix_len > 32 {
+        return false;
+    }
+    let mask = if prefix_len == 0 {
+        0
+    } else {
+        !0u32 << (32 - prefix_len)
+    };
+    (ip_addr & mask) == (net_addr & mask)
+}
+
+fn parse_ipv4(ip: &str) -> Option<u32> {
+    let parts: Vec<&str> = ip.split('.').collect();
+    if parts.len() != 4 {
+        return None;
+    }
+    let a: u32 = parts[0].parse().ok()?;
+    let b: u32 = parts[1].parse().ok()?;
+    let c: u32 = parts[2].parse().ok()?;
+    let d: u32 = parts[3].parse().ok()?;
+    Some((a << 24) | (b << 16) | (c << 8) | d)
 }
 
 fn extract_basic_auth(request: &Request) -> Option<(String, String)> {
@@ -132,5 +215,45 @@ mod tests {
         assert_eq!(required_access("shutdown"), AccessLevel::Control);
         assert_eq!(required_access("append"), AccessLevel::Add);
         assert_eq!(required_access("status"), AccessLevel::Restricted);
+    }
+
+    #[test]
+    fn ip_allowed_when_allowlist_empty() {
+        let allowed: Vec<String> = vec![];
+        assert!(is_ip_allowed("192.168.1.5", &allowed));
+    }
+
+    #[test]
+    fn ip_allowed_when_in_list() {
+        let allowed = vec!["192.168.1.5".to_string(), "10.0.0.1".to_string()];
+        assert!(is_ip_allowed("192.168.1.5", &allowed));
+        assert!(is_ip_allowed("10.0.0.1", &allowed));
+    }
+
+    #[test]
+    fn ip_denied_when_not_in_list() {
+        let allowed = vec!["192.168.1.5".to_string()];
+        assert!(!is_ip_allowed("10.0.0.1", &allowed));
+    }
+
+    #[test]
+    fn ip_allowed_with_wildcard() {
+        let allowed = vec!["192.168.1.*".to_string()];
+        assert!(is_ip_allowed("192.168.1.99", &allowed));
+        assert!(!is_ip_allowed("192.168.2.1", &allowed));
+    }
+
+    #[test]
+    fn ip_allowed_with_cidr_subnet() {
+        let allowed = vec!["192.168.1.0/24".to_string()];
+        assert!(is_ip_allowed("192.168.1.55", &allowed));
+        assert!(!is_ip_allowed("192.168.2.1", &allowed));
+    }
+
+    #[test]
+    fn localhost_always_allowed() {
+        let allowed = vec!["10.0.0.1".to_string()];
+        assert!(is_ip_allowed("127.0.0.1", &allowed));
+        assert!(is_ip_allowed("::1", &allowed));
     }
 }
