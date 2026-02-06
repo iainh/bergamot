@@ -168,11 +168,23 @@ impl WebServer {
         Self { config, state }
     }
 
-    pub async fn run(&self) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn validate_tls_config(config: &ServerConfig) -> Result<(), Box<dyn std::error::Error>> {
+        if config.secure_control {
+            if config.secure_cert.is_none() {
+                return Err("SecureCert is required when SecureControl is enabled".into());
+            }
+            if config.secure_key.is_none() {
+                return Err("SecureKey is required when SecureControl is enabled".into());
+            }
+        }
+        Ok(())
+    }
+
+    fn build_router(&self) -> Router<()> {
         let auth_state = AuthState {
             config: (*self.config).clone(),
         };
-        let app = Router::new()
+        Router::new()
             .route("/jsonrpc", post(handle_jsonrpc))
             .route("/jsonprpc", get(handle_jsonprpc))
             .route("/xmlrpc", post(handle_xmlrpc))
@@ -184,15 +196,33 @@ impl WebServer {
                 auth_state.clone(),
                 auth_middleware,
             ))
-            .with_state(self.state.clone());
+            .with_state(self.state.clone())
+    }
 
-        let bind_addr = format!("{}:{}", self.config.control_ip, self.config.control_port);
-        let listener = TcpListener::bind(&bind_addr).await?;
-        axum::serve(
-            listener,
-            app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
-        )
-        .await?;
+    pub async fn run(&self) -> Result<(), Box<dyn std::error::Error>> {
+        Self::validate_tls_config(&self.config)?;
+        let app = self.build_router();
+
+        if self.config.secure_control {
+            let cert_path = self.config.secure_cert.as_ref().unwrap();
+            let key_path = self.config.secure_key.as_ref().unwrap();
+            let tls_config =
+                axum_server::tls_rustls::RustlsConfig::from_pem_file(cert_path, key_path).await?;
+
+            let bind_addr: std::net::SocketAddr =
+                format!("{}:{}", self.config.control_ip, self.config.control_port).parse()?;
+            axum_server::bind_rustls(bind_addr, tls_config)
+                .serve(app.into_make_service_with_connect_info::<std::net::SocketAddr>())
+                .await?;
+        } else {
+            let bind_addr = format!("{}:{}", self.config.control_ip, self.config.control_port);
+            let listener = TcpListener::bind(&bind_addr).await?;
+            axum::serve(
+                listener,
+                app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+            )
+            .await?;
+        }
         Ok(())
     }
 }
@@ -331,6 +361,34 @@ mod tests {
             add_username: "add".to_string(),
             add_password: "addsecret".to_string(),
         }
+    }
+
+    #[test]
+    fn validate_tls_config_requires_cert_and_key() {
+        let mut cfg = server_config();
+        cfg.secure_control = true;
+        cfg.secure_cert = None;
+        cfg.secure_key = None;
+        assert!(WebServer::validate_tls_config(&cfg).is_err());
+
+        cfg.secure_cert = Some(std::path::PathBuf::from("/tmp/cert.pem"));
+        cfg.secure_key = None;
+        assert!(WebServer::validate_tls_config(&cfg).is_err());
+
+        cfg.secure_cert = None;
+        cfg.secure_key = Some(std::path::PathBuf::from("/tmp/key.pem"));
+        assert!(WebServer::validate_tls_config(&cfg).is_err());
+
+        cfg.secure_cert = Some(std::path::PathBuf::from("/tmp/cert.pem"));
+        cfg.secure_key = Some(std::path::PathBuf::from("/tmp/key.pem"));
+        assert!(WebServer::validate_tls_config(&cfg).is_ok());
+    }
+
+    #[test]
+    fn validate_tls_config_ok_when_not_secure() {
+        let cfg = server_config();
+        assert!(!cfg.secure_control);
+        assert!(WebServer::validate_tls_config(&cfg).is_ok());
     }
 
     #[tokio::test]

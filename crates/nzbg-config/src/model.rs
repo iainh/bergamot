@@ -21,7 +21,14 @@ pub struct Config {
     pub control_password: String,
     pub secure_control: bool,
     pub secure_port: u16,
+    pub secure_cert: Option<PathBuf>,
+    pub secure_key: Option<PathBuf>,
+    pub form_auth: bool,
     pub authorized_ip: Vec<String>,
+    pub restricted_username: String,
+    pub restricted_password: String,
+    pub add_username: String,
+    pub add_password: String,
     pub servers: Vec<ServerConfig>,
     pub categories: Vec<CategoryConfig>,
     pub download_rate: u32,
@@ -110,10 +117,20 @@ impl Config {
             .get("SecurePort")
             .and_then(|value| value.parse().ok())
             .unwrap_or(6791);
+        let secure_cert = raw.get("SecureCert").map(PathBuf::from);
+        let secure_key = raw.get("SecureKey").map(PathBuf::from);
+        let form_auth = raw
+            .get("FormAuth")
+            .map(|v| matches!(v.as_str(), "yes" | "true" | "1"))
+            .unwrap_or(false);
         let authorized_ip = raw
             .get("AuthorizedIP")
             .map(|value| value.split(',').map(|p| p.trim().to_string()).collect())
             .unwrap_or_default();
+        let restricted_username = raw.get("RestrictedUsername").cloned().unwrap_or_default();
+        let restricted_password = raw.get("RestrictedPassword").cloned().unwrap_or_default();
+        let add_username = raw.get("AddUsername").cloned().unwrap_or_default();
+        let add_password = raw.get("AddPassword").cloned().unwrap_or_default();
 
         let servers = crate::parse::extract_servers(&raw);
         let categories = crate::parse::extract_categories(&raw);
@@ -177,7 +194,14 @@ impl Config {
             control_password,
             secure_control,
             secure_port,
+            secure_cert,
+            secure_key,
+            form_auth,
             authorized_ip,
+            restricted_username,
+            restricted_password,
+            add_username,
+            add_password,
             servers,
             categories,
             download_rate,
