@@ -38,9 +38,24 @@ pub fn web_server_config(config: &Config) -> WebServerConfig {
     }
 }
 
-pub async fn run(config: Config) -> Result<()> {
+pub async fn run(config: Config, fetcher: Arc<dyn crate::download::ArticleFetcher>) -> Result<()> {
     let web_config = Arc::new(web_server_config(&config));
     let app_state = Arc::new(AppState::default());
+    let inter_dir = config.inter_dir.clone();
+
+    let (mut coordinator, _queue_handle, assignment_rx) = nzbg_queue::QueueCoordinator::new(4, 2);
+
+    let coordinator_handle = tokio::spawn(async move {
+        coordinator.run().await;
+    });
+
+    let queue_handle_for_worker = _queue_handle.clone();
+    let worker_handle = tokio::spawn(crate::download::download_worker(
+        assignment_rx,
+        queue_handle_for_worker,
+        fetcher,
+        inter_dir,
+    ));
 
     let (scheduler_tx, scheduler_handles) = nzbg_scheduler::start_services(&config).await?;
 
@@ -54,8 +69,11 @@ pub async fn run(config: Config) -> Result<()> {
     tokio::signal::ctrl_c().await.context("awaiting ctrl-c")?;
     tracing::info!("shutdown signal received");
 
+    let _ = _queue_handle.shutdown().await;
     nzbg_scheduler::shutdown_services(scheduler_tx, scheduler_handles).await;
     server_handle.abort();
+    worker_handle.abort();
+    let _ = coordinator_handle.await;
 
     tracing::info!("shutdown complete");
     Ok(())

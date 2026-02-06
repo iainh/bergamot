@@ -2,8 +2,27 @@ use tokio::sync::oneshot;
 
 use nzbg_core::models::{DupMode, Priority};
 
+use crate::coordinator::ArticleId;
 use crate::error::QueueError;
 use crate::status::{NzbListEntry, QueueStatus};
+
+#[derive(Debug)]
+pub struct DownloadResult {
+    pub article_id: ArticleId,
+    pub outcome: DownloadOutcome,
+}
+
+#[derive(Debug)]
+pub enum DownloadOutcome {
+    Success {
+        data: Vec<u8>,
+        offset: u64,
+        crc: u32,
+    },
+    Failure {
+        message: String,
+    },
+}
 
 #[derive(Debug)]
 pub enum QueueCommand {
@@ -52,6 +71,7 @@ pub enum QueueCommand {
     GetNzbList {
         reply: oneshot::Sender<Vec<NzbListEntry>>,
     },
+    DownloadComplete(DownloadResult),
     Shutdown,
 }
 

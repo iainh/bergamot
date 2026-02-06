@@ -763,13 +763,17 @@ name = "nzbg"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "clap",
+ "crc32fast",
  "dirs",
  "nzbg-config",
  "nzbg-logging",
+ "nzbg-nntp",
  "nzbg-queue",
  "nzbg-scheduler",
  "nzbg-server",
+ "nzbg-yenc",
  "tempfile",
  "tokio",
  "tracing",

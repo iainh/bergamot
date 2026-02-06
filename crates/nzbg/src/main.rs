@@ -1,10 +1,22 @@
 mod app;
 mod cli;
+mod download;
+
+use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use clap::Parser;
 
 use crate::cli::Cli;
+
+struct StubFetcher;
+
+#[async_trait::async_trait]
+impl download::ArticleFetcher for StubFetcher {
+    async fn fetch_body(&self, message_id: &str) -> Result<Vec<Vec<u8>>> {
+        anyhow::bail!("no NNTP connection configured for article {message_id}")
+    }
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -20,5 +32,6 @@ async fn main() -> Result<()> {
     app::init_tracing(&cli.log_level);
 
     tracing::info!("nzbg starting");
-    app::run(config).await
+    let fetcher: Arc<dyn download::ArticleFetcher> = Arc::new(StubFetcher);
+    app::run(config, fetcher).await
 }

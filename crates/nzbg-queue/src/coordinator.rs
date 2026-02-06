@@ -16,6 +16,13 @@ pub struct ArticleId {
     pub seg_idx: u32,
 }
 
+#[derive(Debug, Clone)]
+pub struct ArticleAssignment {
+    pub article_id: ArticleId,
+    pub message_id: String,
+    pub groups: Vec<String>,
+}
+
 #[derive(Debug)]
 struct ActiveDownload {
     _started: Instant,
@@ -57,6 +64,16 @@ impl QueueHandle {
         reply_rx.await.map_err(|_| QueueError::Shutdown)
     }
 
+    pub async fn report_download(
+        &self,
+        result: crate::command::DownloadResult,
+    ) -> Result<(), QueueError> {
+        self.command_tx
+            .send(QueueCommand::DownloadComplete(result))
+            .await
+            .map_err(|_| QueueError::Shutdown)
+    }
+
     pub async fn shutdown(&self) -> Result<(), QueueError> {
         self.command_tx
             .send(QueueCommand::Shutdown)
@@ -73,11 +90,16 @@ pub struct QueueCoordinator {
     paused: bool,
     shutdown: bool,
     command_rx: mpsc::Receiver<QueueCommand>,
+    assignment_tx: mpsc::Sender<ArticleAssignment>,
 }
 
 impl QueueCoordinator {
-    pub fn new(max_connections: usize, max_articles_per_file: usize) -> (Self, QueueHandle) {
+    pub fn new(
+        max_connections: usize,
+        max_articles_per_file: usize,
+    ) -> (Self, QueueHandle, mpsc::Receiver<ArticleAssignment>) {
         let (command_tx, command_rx) = mpsc::channel(64);
+        let (assignment_tx, assignment_rx) = mpsc::channel(64);
         let handle = QueueHandle { command_tx };
         let coordinator = Self {
             queue: DownloadQueue {
@@ -92,8 +114,9 @@ impl QueueCoordinator {
             paused: false,
             shutdown: false,
             command_rx,
+            assignment_tx,
         };
-        (coordinator, handle)
+        (coordinator, handle, assignment_rx)
     }
 
     pub async fn run(&mut self) {
@@ -105,7 +128,11 @@ impl QueueCoordinator {
                     self.handle_command(cmd).await;
                 }
                 _ = slot_timer.tick() => {
-                    self.fill_download_slots();
+                    for assignment in self.fill_download_slots() {
+                        if self.assignment_tx.send(assignment).await.is_err() {
+                            break;
+                        }
+                    }
                 }
             }
 
@@ -115,13 +142,14 @@ impl QueueCoordinator {
         }
     }
 
-    fn fill_download_slots(&mut self) {
+    fn fill_download_slots(&mut self) -> Vec<ArticleAssignment> {
+        let mut assignments = Vec::new();
         if self.paused {
-            return;
+            return assignments;
         }
 
         while self.active_downloads.len() < self.max_connections {
-            let Some(article_id) = self.next_article() else {
+            let Some((article_id, assignment)) = self.next_assignment() else {
                 break;
             };
 
@@ -132,7 +160,28 @@ impl QueueCoordinator {
                     _started: Instant::now(),
                 },
             );
+            assignments.push(assignment);
         }
+        assignments
+    }
+
+    fn next_assignment(&self) -> Option<(ArticleId, ArticleAssignment)> {
+        let article_id = self.next_article()?;
+        let nzb = self
+            .queue
+            .queue
+            .iter()
+            .find(|n| n.id == article_id.nzb_id)?;
+        let file = nzb.files.get(article_id.file_idx as usize)?;
+        let segment = file.articles.get(article_id.seg_idx as usize)?;
+        Some((
+            article_id,
+            ArticleAssignment {
+                article_id,
+                message_id: segment.message_id.clone(),
+                groups: file.groups.clone(),
+            },
+        ))
     }
 
     fn next_article(&self) -> Option<ArticleId> {
@@ -332,8 +381,46 @@ impl QueueCoordinator {
                     .collect();
                 let _ = reply.send(list);
             }
+            QueueCommand::DownloadComplete(result) => {
+                self.handle_download_complete(result);
+            }
             QueueCommand::Shutdown => {
                 self.shutdown = true;
+            }
+        }
+    }
+
+    fn handle_download_complete(&mut self, result: crate::command::DownloadResult) {
+        self.active_downloads.remove(&result.article_id);
+        match result.outcome {
+            crate::command::DownloadOutcome::Success { crc, .. } => {
+                self.mark_segment_status(result.article_id, SegmentStatus::Completed);
+                if let Some(nzb) = self
+                    .queue
+                    .queue
+                    .iter_mut()
+                    .find(|n| n.id == result.article_id.nzb_id)
+                {
+                    if let Some(seg) = nzb
+                        .files
+                        .get_mut(result.article_id.file_idx as usize)
+                        .and_then(|f| f.articles.get_mut(result.article_id.seg_idx as usize))
+                    {
+                        seg.crc = crc;
+                    }
+                    nzb.success_article_count += 1;
+                }
+            }
+            crate::command::DownloadOutcome::Failure { .. } => {
+                self.mark_segment_status(result.article_id, SegmentStatus::Failed);
+                if let Some(nzb) = self
+                    .queue
+                    .queue
+                    .iter_mut()
+                    .find(|n| n.id == result.article_id.nzb_id)
+                {
+                    nzb.failed_article_count += 1;
+                }
             }
         }
     }
@@ -478,7 +565,7 @@ mod tests {
 
     #[tokio::test]
     async fn add_nzb_updates_queue() {
-        let (mut coordinator, handle) = QueueCoordinator::new(2, 1);
+        let (mut coordinator, handle, _assignments_rx) = QueueCoordinator::new(2, 1);
 
         tokio::spawn(async move {
             coordinator.run().await;
@@ -502,7 +589,7 @@ mod tests {
 
     #[test]
     fn move_nzb_reorders_queue() {
-        let (mut coordinator, _handle) = QueueCoordinator::new(2, 1);
+        let (mut coordinator, _handle, _rx) = QueueCoordinator::new(2, 1);
 
         let nzb = NzbInfo {
             id: 1,
@@ -580,7 +667,7 @@ mod tests {
 
     #[test]
     fn next_article_respects_pause_and_priority() {
-        let (mut coordinator, _handle) = QueueCoordinator::new(2, 1);
+        let (mut coordinator, _handle, _rx) = QueueCoordinator::new(2, 1);
         let nzb = NzbInfo {
             id: 1,
             kind: nzbg_core::models::NzbKind::Nzb,
@@ -654,5 +741,169 @@ mod tests {
 
         let next = coordinator.next_article();
         assert_eq!(next.unwrap().nzb_id, 2);
+    }
+
+    #[test]
+    fn fill_download_slots_returns_assignments() {
+        let (mut coordinator, _handle, _rx) = QueueCoordinator::new(2, 1);
+        let mut nzb = NzbInfo {
+            id: 1,
+            kind: nzbg_core::models::NzbKind::Nzb,
+            name: "test".to_string(),
+            filename: "test".to_string(),
+            url: String::new(),
+            dest_dir: std::path::PathBuf::new(),
+            final_dir: std::path::PathBuf::new(),
+            temp_dir: std::path::PathBuf::new(),
+            queue_dir: std::path::PathBuf::new(),
+            category: String::new(),
+            priority: Priority::Normal,
+            dup_key: String::new(),
+            dup_mode: nzbg_core::models::DupMode::Score,
+            dup_score: 0,
+            size: 0,
+            remaining_size: 0,
+            paused_size: 0,
+            failed_size: 0,
+            success_size: 0,
+            current_downloaded_size: 0,
+            par_size: 0,
+            par_remaining_size: 0,
+            par_current_success_size: 0,
+            par_failed_size: 0,
+            file_count: 0,
+            remaining_file_count: 0,
+            remaining_par_count: 0,
+            total_article_count: 0,
+            success_article_count: 0,
+            failed_article_count: 0,
+            added_time: std::time::SystemTime::UNIX_EPOCH,
+            min_time: None,
+            max_time: None,
+            download_start_time: None,
+            download_sec: 0,
+            post_total_sec: 0,
+            par_sec: 0,
+            repair_sec: 0,
+            unpack_sec: 0,
+            paused: false,
+            deleted: false,
+            direct_rename: false,
+            force_priority: false,
+            reprocess: false,
+            par_manual: false,
+            clean_up_disk: false,
+            par_status: nzbg_core::models::ParStatus::None,
+            unpack_status: nzbg_core::models::UnpackStatus::None,
+            move_status: nzbg_core::models::MoveStatus::None,
+            delete_status: nzbg_core::models::DeleteStatus::None,
+            mark_status: nzbg_core::models::MarkStatus::None,
+            url_status: nzbg_core::models::UrlStatus::None,
+            health: 1000,
+            critical_health: 1000,
+            files: vec![sample_file()],
+            completed_files: vec![],
+            server_stats: vec![],
+            parameters: vec![],
+            post_info: None,
+            message_count: 0,
+            cached_message_count: 0,
+        };
+        nzb.files[0].articles[0].message_id = "abc@example".to_string();
+        coordinator.queue.queue.push(nzb);
+
+        let assignments = coordinator.fill_download_slots();
+        assert_eq!(assignments.len(), 1);
+        assert_eq!(assignments[0].message_id, "abc@example");
+        assert_eq!(assignments[0].article_id.nzb_id, 1);
+    }
+
+    #[test]
+    fn download_complete_updates_status() {
+        let (mut coordinator, _handle, _rx) = QueueCoordinator::new(2, 1);
+        let mut nzb = NzbInfo {
+            id: 1,
+            kind: nzbg_core::models::NzbKind::Nzb,
+            name: "test".to_string(),
+            filename: "test".to_string(),
+            url: String::new(),
+            dest_dir: std::path::PathBuf::new(),
+            final_dir: std::path::PathBuf::new(),
+            temp_dir: std::path::PathBuf::new(),
+            queue_dir: std::path::PathBuf::new(),
+            category: String::new(),
+            priority: Priority::Normal,
+            dup_key: String::new(),
+            dup_mode: nzbg_core::models::DupMode::Score,
+            dup_score: 0,
+            size: 0,
+            remaining_size: 0,
+            paused_size: 0,
+            failed_size: 0,
+            success_size: 0,
+            current_downloaded_size: 0,
+            par_size: 0,
+            par_remaining_size: 0,
+            par_current_success_size: 0,
+            par_failed_size: 0,
+            file_count: 0,
+            remaining_file_count: 0,
+            remaining_par_count: 0,
+            total_article_count: 0,
+            success_article_count: 0,
+            failed_article_count: 0,
+            added_time: std::time::SystemTime::UNIX_EPOCH,
+            min_time: None,
+            max_time: None,
+            download_start_time: None,
+            download_sec: 0,
+            post_total_sec: 0,
+            par_sec: 0,
+            repair_sec: 0,
+            unpack_sec: 0,
+            paused: false,
+            deleted: false,
+            direct_rename: false,
+            force_priority: false,
+            reprocess: false,
+            par_manual: false,
+            clean_up_disk: false,
+            par_status: nzbg_core::models::ParStatus::None,
+            unpack_status: nzbg_core::models::UnpackStatus::None,
+            move_status: nzbg_core::models::MoveStatus::None,
+            delete_status: nzbg_core::models::DeleteStatus::None,
+            mark_status: nzbg_core::models::MarkStatus::None,
+            url_status: nzbg_core::models::UrlStatus::None,
+            health: 1000,
+            critical_health: 1000,
+            files: vec![sample_file()],
+            completed_files: vec![],
+            server_stats: vec![],
+            parameters: vec![],
+            post_info: None,
+            message_count: 0,
+            cached_message_count: 0,
+        };
+        nzb.files[0].articles[0].message_id = "abc@example".to_string();
+        coordinator.queue.queue.push(nzb);
+
+        let assignments = coordinator.fill_download_slots();
+        assert_eq!(assignments.len(), 1);
+        let article_id = assignments[0].article_id;
+
+        coordinator.handle_download_complete(crate::command::DownloadResult {
+            article_id,
+            outcome: crate::command::DownloadOutcome::Success {
+                data: vec![1, 2, 3],
+                offset: 0,
+                crc: 0xDEADBEEF,
+            },
+        });
+
+        assert!(coordinator.active_downloads.is_empty());
+        let seg = &coordinator.queue.queue[0].files[0].articles[0];
+        assert_eq!(seg.status, ArticleStatus::Finished);
+        assert_eq!(seg.crc, 0xDEADBEEF);
+        assert_eq!(coordinator.queue.queue[0].success_article_count, 1);
     }
 }
