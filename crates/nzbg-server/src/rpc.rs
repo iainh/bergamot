@@ -42,8 +42,9 @@ pub async fn dispatch_rpc(
         "shutdown" => rpc_shutdown(state).await,
         "listfiles" => rpc_listfiles(params, state).await,
         "postqueue" => Ok(serde_json::json!([])),
-        "writelog" => Ok(serde_json::json!(true)),
-        "loadlog" => Ok(serde_json::json!([])),
+        "writelog" => rpc_writelog(params, state),
+        "loadlog" => rpc_loadlog(params, state),
+        "log" => rpc_loadlog(params, state),
         "servervolumes" => Ok(serde_json::json!([])),
         "config" => Ok(serde_json::json!([])),
         "loadconfig" => Ok(serde_json::json!([])),
@@ -293,6 +294,79 @@ async fn rpc_listfiles(
                 "SuccessArticles": f.success_articles,
                 "FailedArticles": f.failed_articles,
                 "ActiveDownloads": f.active_downloads,
+            })
+        })
+        .collect();
+    Ok(serde_json::json!(entries))
+}
+
+fn rpc_writelog(
+    params: &serde_json::Value,
+    state: &AppState,
+) -> Result<serde_json::Value, JsonRpcError> {
+    let buffer = state
+        .log_buffer()
+        .ok_or_else(|| rpc_error("Log buffer not available"))?;
+
+    let arr = params
+        .as_array()
+        .ok_or_else(|| rpc_error("params must be an array"))?;
+
+    let kind_str = arr.first().and_then(|v| v.as_str()).unwrap_or("info");
+    let text = arr
+        .get(1)
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    let kind = match kind_str.to_lowercase().as_str() {
+        "error" => nzbg_logging::LogLevel::Error,
+        "warning" => nzbg_logging::LogLevel::Warning,
+        "detail" => nzbg_logging::LogLevel::Detail,
+        "debug" => nzbg_logging::LogLevel::Debug,
+        _ => nzbg_logging::LogLevel::Info,
+    };
+
+    buffer.push(nzbg_logging::LogMessage {
+        id: 0,
+        kind,
+        time: chrono::Utc::now(),
+        text,
+        nzb_id: None,
+    });
+
+    Ok(serde_json::json!(true))
+}
+
+fn rpc_loadlog(
+    params: &serde_json::Value,
+    state: &AppState,
+) -> Result<serde_json::Value, JsonRpcError> {
+    let buffer = state
+        .log_buffer()
+        .ok_or_else(|| rpc_error("Log buffer not available"))?;
+
+    let arr = params.as_array();
+    let since_id = arr
+        .and_then(|a| a.first())
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0) as u32;
+
+    let messages = buffer.messages_since(since_id);
+    let entries: Vec<serde_json::Value> = messages
+        .into_iter()
+        .map(|m| {
+            serde_json::json!({
+                "ID": m.id,
+                "Kind": match m.kind {
+                    nzbg_logging::LogLevel::Debug => "debug",
+                    nzbg_logging::LogLevel::Detail => "detail",
+                    nzbg_logging::LogLevel::Info => "info",
+                    nzbg_logging::LogLevel::Warning => "warning",
+                    nzbg_logging::LogLevel::Error => "error",
+                },
+                "Time": m.time.timestamp(),
+                "Text": m.text,
             })
         })
         .collect();
@@ -582,9 +656,14 @@ mod tests {
         assert_eq!(result, serde_json::json!([]));
     }
 
+    fn state_with_log() -> AppState {
+        let buffer = std::sync::Arc::new(nzbg_logging::LogBuffer::new(100));
+        AppState::default().with_log_buffer(buffer)
+    }
+
     #[tokio::test]
-    async fn dispatch_writelog_returns_true() {
-        let state = AppState::default();
+    async fn dispatch_writelog_adds_to_buffer() {
+        let state = state_with_log();
         let result = dispatch_rpc(
             "writelog",
             &serde_json::json!(["info", "test message"]),
@@ -593,15 +672,45 @@ mod tests {
         .await
         .expect("writelog");
         assert_eq!(result, serde_json::json!(true));
+
+        let messages = state.log_buffer().unwrap().messages_since(0);
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].text, "test message");
     }
 
     #[tokio::test]
-    async fn dispatch_loadlog_returns_empty_array() {
-        let state = AppState::default();
-        let result = dispatch_rpc("loadlog", &serde_json::json!([1, 0, 100]), &state)
+    async fn dispatch_loadlog_returns_written_messages() {
+        let state = state_with_log();
+        dispatch_rpc("writelog", &serde_json::json!(["warning", "hello"]), &state)
+            .await
+            .expect("writelog");
+
+        let result = dispatch_rpc("loadlog", &serde_json::json!([0]), &state)
             .await
             .expect("loadlog");
-        assert_eq!(result, serde_json::json!([]));
+        let entries = result.as_array().expect("array");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0]["Text"], "hello");
+        assert_eq!(entries[0]["Kind"], "warning");
+    }
+
+    #[tokio::test]
+    async fn dispatch_log_returns_same_as_loadlog() {
+        let state = state_with_log();
+        dispatch_rpc(
+            "writelog",
+            &serde_json::json!(["info", "log entry"]),
+            &state,
+        )
+        .await
+        .expect("writelog");
+
+        let result = dispatch_rpc("log", &serde_json::json!([0]), &state)
+            .await
+            .expect("log");
+        let entries = result.as_array().expect("array");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0]["Text"], "log entry");
     }
 
     #[tokio::test]

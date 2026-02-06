@@ -1114,8 +1114,10 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "base64",
+ "chrono",
  "nzbg-core",
  "nzbg-diskstate",
+ "nzbg-logging",
  "nzbg-queue",
  "serde",
  "serde_json",

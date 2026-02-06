@@ -22,6 +22,7 @@ pub struct AppState {
     queue: Option<nzbg_queue::QueueHandle>,
     shutdown: Option<ShutdownHandle>,
     disk: Option<std::sync::Arc<nzbg_diskstate::DiskState<nzbg_diskstate::JsonFormat>>>,
+    log_buffer: Option<std::sync::Arc<nzbg_logging::LogBuffer>>,
 }
 
 impl Default for AppState {
@@ -33,6 +34,7 @@ impl Default for AppState {
             queue: None,
             shutdown: None,
             disk: None,
+            log_buffer: None,
         }
     }
 }
@@ -54,6 +56,15 @@ impl AppState {
     ) -> Self {
         self.disk = Some(disk);
         self
+    }
+
+    pub fn with_log_buffer(mut self, log_buffer: std::sync::Arc<nzbg_logging::LogBuffer>) -> Self {
+        self.log_buffer = Some(log_buffer);
+        self
+    }
+
+    pub fn log_buffer(&self) -> Option<&std::sync::Arc<nzbg_logging::LogBuffer>> {
+        self.log_buffer.as_ref()
     }
 
     pub fn version(&self) -> &str {
