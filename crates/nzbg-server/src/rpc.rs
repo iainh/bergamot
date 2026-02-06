@@ -880,7 +880,7 @@ mod tests {
         let result = dispatch_rpc("version", &serde_json::json!([]), &state)
             .await
             .expect("version");
-        assert_eq!(result, serde_json::json!("0.1.0"));
+        assert_eq!(result, serde_json::json!("26.0"));
     }
 
     #[tokio::test]
@@ -1294,7 +1294,7 @@ mod tests {
         let result = dispatch_rpc("sysinfo", &serde_json::json!([]), &state)
             .await
             .expect("sysinfo");
-        assert_eq!(result["Version"], "0.1.0");
+        assert_eq!(result["Version"], "26.0");
         assert!(result["OS"]["Name"].as_str().is_some());
         assert!(result["CPU"]["Arch"].as_str().is_some());
         assert!(result["UptimeSec"].as_u64().is_some());

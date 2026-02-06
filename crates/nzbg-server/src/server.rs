@@ -45,7 +45,7 @@ pub struct AppState {
 impl Default for AppState {
     fn default() -> Self {
         Self {
-            version: "0.1.0".to_string(),
+            version: "26.0".to_string(),
             download_rate: Arc::new(AtomicU64::new(0)),
             remaining_bytes: Arc::new(AtomicU64::new(0)),
             start_time: std::time::Instant::now(),
