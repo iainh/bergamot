@@ -346,7 +346,7 @@ impl QueueCoordinator {
 
     fn fill_download_slots(&mut self) -> Vec<ArticleAssignment> {
         let mut assignments = Vec::new();
-        if self.paused {
+        if self.paused || self.shutdown {
             return assignments;
         }
 
@@ -618,6 +618,7 @@ impl QueueCoordinator {
             }
             QueueCommand::Shutdown => {
                 self.shutdown = true;
+                self.active_downloads.clear();
             }
         }
     }
