@@ -39,6 +39,9 @@ pub struct FeedItemInfo {
     pub rageid: Option<u32>,
     pub tvdbid: Option<u32>,
     pub tvmazeid: Option<u32>,
+    pub rating: Option<i64>,
+    pub genres: Vec<String>,
+    pub tags: Vec<String>,
     pub dupe_key: String,
     pub dupe_score: i32,
     pub dupe_mode: DupMode,
@@ -227,7 +230,10 @@ impl FilterCondition {
             FilterField::Title => match_regex(&self.pattern, &item.title),
             FilterField::Category => match_wildcard(&self.pattern, &item.category),
             FilterField::Size => match_number_comparison(&self.pattern, item.size as i64),
-            FilterField::Age => false,
+            FilterField::Age => {
+                let age_days = (Utc::now() - item.time).num_days();
+                match_number_comparison(&self.pattern, age_days)
+            }
             FilterField::Imdb => item
                 .imdb_id
                 .as_deref()
@@ -240,9 +246,11 @@ impl FilterCondition {
                 .episode
                 .as_deref()
                 .is_some_and(|episode| match_regex(&self.pattern, episode)),
-            FilterField::Rating => false,
-            FilterField::Genre => false,
-            FilterField::Tag => false,
+            FilterField::Rating => item
+                .rating
+                .is_some_and(|r| match_number_comparison(&self.pattern, r)),
+            FilterField::Genre => item.genres.iter().any(|g| match_wildcard(&self.pattern, g)),
+            FilterField::Tag => item.tags.iter().any(|t| match_wildcard(&self.pattern, t)),
             FilterField::Priority => true,
             FilterField::Pause => true,
             FilterField::CategoryOverride => true,
@@ -475,12 +483,79 @@ mod tests {
             rageid: None,
             tvdbid: None,
             tvmazeid: None,
+            rating: Some(75),
+            genres: vec!["Drama".to_string(), "Sci-Fi".to_string()],
+            tags: vec!["hd".to_string(), "x264".to_string()],
             dupe_key: String::new(),
             dupe_score: 0,
             dupe_mode: DupMode::Score,
             status: FeedItemStatus::Unknown,
             added_nzb_id: None,
         }
+    }
+
+    #[test]
+    fn filter_age_matches_recent_item() {
+        let filter = FeedFilter::parse("A: age(<30)").expect("filter");
+        let item = sample_item();
+        let result = filter.evaluate(&item);
+        assert_eq!(result.action, FilterAction::Accept);
+    }
+
+    #[test]
+    fn filter_age_rejects_old_item() {
+        let filter = FeedFilter::parse("A: age(<0)").expect("filter");
+        let item = sample_item();
+        let result = filter.evaluate(&item);
+        assert_eq!(result.action, FilterAction::Reject);
+    }
+
+    #[test]
+    fn filter_rating_matches_above_threshold() {
+        let filter = FeedFilter::parse("A: rating(>=50)").expect("filter");
+        let item = sample_item();
+        let result = filter.evaluate(&item);
+        assert_eq!(result.action, FilterAction::Accept);
+    }
+
+    #[test]
+    fn filter_rating_rejects_below_threshold() {
+        let filter = FeedFilter::parse("A: rating(>=90)").expect("filter");
+        let item = sample_item();
+        let result = filter.evaluate(&item);
+        assert_eq!(result.action, FilterAction::Reject);
+    }
+
+    #[test]
+    fn filter_genre_matches_wildcard() {
+        let filter = FeedFilter::parse("A: genre(Drama)").expect("filter");
+        let item = sample_item();
+        let result = filter.evaluate(&item);
+        assert_eq!(result.action, FilterAction::Accept);
+    }
+
+    #[test]
+    fn filter_genre_rejects_no_match() {
+        let filter = FeedFilter::parse("A: genre(Comedy)").expect("filter");
+        let item = sample_item();
+        let result = filter.evaluate(&item);
+        assert_eq!(result.action, FilterAction::Reject);
+    }
+
+    #[test]
+    fn filter_tag_matches_wildcard() {
+        let filter = FeedFilter::parse("A: tag(hd)").expect("filter");
+        let item = sample_item();
+        let result = filter.evaluate(&item);
+        assert_eq!(result.action, FilterAction::Accept);
+    }
+
+    #[test]
+    fn filter_tag_rejects_no_match() {
+        let filter = FeedFilter::parse("A: tag(hevc)").expect("filter");
+        let item = sample_item();
+        let result = filter.evaluate(&item);
+        assert_eq!(result.action, FilterAction::Reject);
     }
 
     #[test]
