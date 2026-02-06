@@ -562,13 +562,15 @@ fn rpc_saveconfig(
 fn rpc_configtemplates() -> Result<serde_json::Value, JsonRpcError> {
     let template = include_str!("nzbget.conf.template");
     let templates = vec![serde_json::json!({
-        "Name": "nzbg",
-        "DisplayName": "nzbg",
+        "Name": "",
+        "DisplayName": "",
         "PostScript": false,
         "ScanScript": false,
         "QueueScript": false,
         "SchedulerScript": false,
         "FeedScript": false,
+        "QueueEvents": "",
+        "TaskTime": "",
         "Template": template,
     })];
     Ok(serde_json::json!(templates))
@@ -1162,7 +1164,7 @@ mod tests {
             .await
             .expect("configtemplates");
         let entries = result.as_array().expect("array");
-        assert!(entries.iter().any(|e| e["Name"] == "nzbg"));
+        assert!(entries.iter().any(|e| e["Name"] == ""));
         let template = entries[0]["Template"].as_str().expect("template string");
         assert!(template.contains("MainDir"));
         assert!(template.contains("ControlPort"));
