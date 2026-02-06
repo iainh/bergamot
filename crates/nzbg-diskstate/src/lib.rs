@@ -1,0 +1,512 @@
+use std::collections::{HashMap, HashSet};
+use std::fs;
+use std::io::Write;
+use std::path::{Path, PathBuf};
+
+use chrono::{DateTime, NaiveDate, Utc};
+use fs2::FileExt;
+use serde::{Deserialize, Serialize};
+
+use nzbg_core::models::DupMode;
+use nzbg_feed::FeedItemStatus;
+
+pub trait StateFormat: Send + Sync {
+    fn serialize<T: Serialize>(&self, value: &T) -> anyhow::Result<Vec<u8>>;
+    fn deserialize<T: for<'de> Deserialize<'de>>(&self, data: &[u8]) -> anyhow::Result<T>;
+    fn file_extension(&self) -> &str;
+}
+
+pub struct JsonFormat;
+
+impl StateFormat for JsonFormat {
+    fn serialize<T: Serialize>(&self, value: &T) -> anyhow::Result<Vec<u8>> {
+        Ok(serde_json::to_vec_pretty(value)?)
+    }
+
+    fn deserialize<T: for<'de> Deserialize<'de>>(&self, data: &[u8]) -> anyhow::Result<T> {
+        Ok(serde_json::from_slice(data)?)
+    }
+
+    fn file_extension(&self) -> &str {
+        "json"
+    }
+}
+
+pub struct DiskState<F: StateFormat> {
+    state_dir: PathBuf,
+    format: F,
+}
+
+impl<F: StateFormat> DiskState<F> {
+    pub fn new(state_dir: PathBuf, format: F) -> anyhow::Result<Self> {
+        fs::create_dir_all(&state_dir)?;
+        fs::create_dir_all(state_dir.join("nzb"))?;
+        fs::create_dir_all(state_dir.join("file"))?;
+        Ok(Self { state_dir, format })
+    }
+
+    pub fn state_dir(&self) -> &Path {
+        &self.state_dir
+    }
+
+    pub fn save_queue(&self, queue: &QueueState) -> anyhow::Result<()> {
+        let data = self.format.serialize(queue)?;
+        let path = self
+            .state_dir
+            .join(format!("queue.{}", self.format.file_extension()));
+        atomic_write(&path, &data)
+    }
+
+    pub fn load_queue(&self) -> anyhow::Result<QueueState> {
+        let path = self
+            .state_dir
+            .join(format!("queue.{}", self.format.file_extension()));
+        let data = fs::read(&path)?;
+        let state: QueueState = self.format.deserialize(&data)?;
+        state.migrate()
+    }
+
+    pub fn save_file_state(&self, file_id: u32, state: &FileArticleState) -> anyhow::Result<()> {
+        let data = self.format.serialize(state)?;
+        let path = self.state_dir.join(format!("file/{file_id:08}.state"));
+        atomic_write(&path, &data)
+    }
+
+    pub fn load_file_state(&self, file_id: u32) -> anyhow::Result<FileArticleState> {
+        let path = self.state_dir.join(format!("file/{file_id:08}.state"));
+        let data = fs::read(&path)?;
+        self.format.deserialize(&data)
+    }
+
+    pub fn delete_file_state(&self, file_id: u32) -> anyhow::Result<()> {
+        let path = self.state_dir.join(format!("file/{file_id:08}.state"));
+        match fs::remove_file(&path) {
+            Ok(()) => Ok(()),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(err) => Err(err.into()),
+        }
+    }
+
+    pub fn save_history(&self, history: &HistoryState) -> anyhow::Result<()> {
+        let data = self.format.serialize(history)?;
+        let path = self
+            .state_dir
+            .join(format!("history.{}", self.format.file_extension()));
+        atomic_write(&path, &data)
+    }
+
+    pub fn load_history(&self) -> anyhow::Result<HistoryState> {
+        let path = self
+            .state_dir
+            .join(format!("history.{}", self.format.file_extension()));
+        let data = fs::read(&path)?;
+        self.format.deserialize(&data)
+    }
+
+    pub fn save_stats(&self, stats: &ServerStats) -> anyhow::Result<()> {
+        let data = self.format.serialize(stats)?;
+        let path = self
+            .state_dir
+            .join(format!("stats.{}", self.format.file_extension()));
+        atomic_write(&path, &data)
+    }
+
+    pub fn load_stats(&self) -> anyhow::Result<ServerStats> {
+        let path = self
+            .state_dir
+            .join(format!("stats.{}", self.format.file_extension()));
+        let data = fs::read(&path)?;
+        self.format.deserialize(&data)
+    }
+
+    pub fn save_feeds(&self, feeds: &FeedHistoryState) -> anyhow::Result<()> {
+        let data = self.format.serialize(feeds)?;
+        let path = self
+            .state_dir
+            .join(format!("feeds.{}", self.format.file_extension()));
+        atomic_write(&path, &data)
+    }
+
+    pub fn load_feeds(&self) -> anyhow::Result<FeedHistoryState> {
+        let path = self
+            .state_dir
+            .join(format!("feeds.{}", self.format.file_extension()));
+        let data = fs::read(&path)?;
+        self.format.deserialize(&data)
+    }
+
+    pub fn save_nzb_file(&self, id: u32, content: &[u8]) -> anyhow::Result<()> {
+        let path = self.state_dir.join(format!("nzb/{id:08}.nzb"));
+        atomic_write(&path, content)
+    }
+
+    pub fn load_nzb_file(&self, id: u32) -> anyhow::Result<Vec<u8>> {
+        let path = self.state_dir.join(format!("nzb/{id:08}.nzb"));
+        Ok(fs::read(&path)?)
+    }
+
+    pub fn delete_nzb_file(&self, id: u32) -> anyhow::Result<()> {
+        let path = self.state_dir.join(format!("nzb/{id:08}.nzb"));
+        match fs::remove_file(&path) {
+            Ok(()) => Ok(()),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(err) => Err(err.into()),
+        }
+    }
+
+    pub fn recover(&self) -> anyhow::Result<RecoveryReport> {
+        let mut report = RecoveryReport::default();
+        let cleanup_dirs = [
+            self.state_dir.clone(),
+            self.state_dir.join("file"),
+            self.state_dir.join("nzb"),
+        ];
+        for dir in &cleanup_dirs {
+            if let Ok(entries) = fs::read_dir(dir) {
+                for entry in entries.flatten() {
+                    if entry.path().extension() == Some("tmp".as_ref()) {
+                        fs::remove_file(entry.path())?;
+                        report.tmp_files_cleaned += 1;
+                    }
+                }
+            }
+        }
+        Ok(report)
+    }
+
+    pub fn validate_consistency(
+        &self,
+        queue: &QueueState,
+    ) -> anyhow::Result<Vec<ConsistencyWarning>> {
+        let mut warnings = Vec::new();
+
+        for nzb in &queue.nzbs {
+            let nzb_path = self.state_dir.join(format!("nzb/{:08}.nzb", nzb.id));
+            if !nzb_path.exists() {
+                warnings.push(ConsistencyWarning::MissingNzbFile { nzb_id: nzb.id });
+            }
+
+            for &file_id in &nzb.file_ids {
+                let state_path = self.state_dir.join(format!("file/{file_id:08}.state"));
+                if !state_path.exists() {
+                    warnings.push(ConsistencyWarning::MissingFileState { file_id });
+                }
+            }
+        }
+
+        let file_dir = self.state_dir.join("file");
+        if let Ok(entries) = fs::read_dir(&file_dir) {
+            let known_ids: HashSet<u32> = queue
+                .nzbs
+                .iter()
+                .flat_map(|nzb| nzb.file_ids.iter().copied())
+                .collect();
+
+            for entry in entries.flatten() {
+                if let Some(id) = parse_file_id(&entry.path())
+                    && !known_ids.contains(&id)
+                {
+                    warnings.push(ConsistencyWarning::OrphanedFileState { file_id: id });
+                }
+            }
+        }
+
+        Ok(warnings)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QueueState {
+    pub version: u32,
+    pub nzbs: Vec<NzbState>,
+    pub next_nzb_id: u32,
+    pub next_file_id: u32,
+    pub download_paused: bool,
+    pub speed_limit: u64,
+}
+
+impl QueueState {
+    pub fn migrate(mut self) -> anyhow::Result<Self> {
+        loop {
+            match self.version {
+                1 => {
+                    for nzb in &mut self.nzbs {
+                        nzb.dupe_mode = DupMode::Score;
+                    }
+                    self.version = 2;
+                }
+                2 => {
+                    for nzb in &mut self.nzbs {
+                        if nzb.health == 0 && nzb.total_article_count > 0 {
+                            nzb.health = 1000;
+                        }
+                    }
+                    self.version = 3;
+                }
+                3 => return Ok(self),
+                version => anyhow::bail!("unsupported state version: {version}"),
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NzbState {
+    pub id: u32,
+    pub name: String,
+    pub filename: String,
+    pub category: String,
+    pub dest_dir: PathBuf,
+    pub final_dir: Option<PathBuf>,
+    pub priority: i32,
+    pub paused: bool,
+    pub url: Option<String>,
+    pub dupe_key: String,
+    pub dupe_score: i32,
+    pub dupe_mode: DupMode,
+    pub added_time: DateTime<Utc>,
+    pub total_size: u64,
+    pub downloaded_size: u64,
+    pub failed_size: u64,
+    pub file_ids: Vec<u32>,
+    pub post_process_parameters: HashMap<String, String>,
+    pub health: u32,
+    pub critical_health: u32,
+    pub total_article_count: u32,
+    pub success_article_count: u32,
+    pub failed_article_count: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HistoryState {
+    pub version: u32,
+    pub entries: Vec<HistoryEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HistoryEntry {
+    pub id: u32,
+    pub name: String,
+    pub status: String,
+    pub completed_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServerStats {
+    pub version: u32,
+    pub servers: Vec<ServerVolumeStat>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServerVolumeStat {
+    pub server_id: u32,
+    pub server_name: String,
+    pub daily_bytes: HashMap<NaiveDate, u64>,
+    pub monthly_bytes: HashMap<String, u64>,
+    pub total_bytes: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FeedHistoryState {
+    pub version: u32,
+    pub feeds: HashMap<u32, Vec<FeedHistoryItem>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FeedHistoryItem {
+    pub url: String,
+    pub status: FeedItemStatus,
+    pub first_seen: DateTime<Utc>,
+    pub last_seen: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileArticleState {
+    pub file_id: u32,
+    pub total_articles: u32,
+    pub completed: Vec<u8>,
+    pub article_crcs: HashMap<u32, u32>,
+}
+
+impl FileArticleState {
+    pub fn new(file_id: u32, total_articles: u32) -> Self {
+        let byte_count = (total_articles.div_ceil(8)) as usize;
+        Self {
+            file_id,
+            total_articles,
+            completed: vec![0u8; byte_count],
+            article_crcs: HashMap::new(),
+        }
+    }
+
+    pub fn is_article_done(&self, index: u32) -> bool {
+        let byte = (index / 8) as usize;
+        let bit = index % 8;
+        self.completed
+            .get(byte)
+            .is_some_and(|value| value & (1 << bit) != 0)
+    }
+
+    pub fn mark_article_done(&mut self, index: u32, crc: u32) {
+        let byte = (index / 8) as usize;
+        let bit = index % 8;
+        if byte >= self.completed.len() {
+            self.completed.resize(byte + 1, 0);
+        }
+        self.completed[byte] |= 1 << bit;
+        self.article_crcs.insert(index, crc);
+    }
+
+    pub fn completed_count(&self) -> u32 {
+        self.completed.iter().map(|value| value.count_ones()).sum()
+    }
+
+    pub fn remaining_count(&self) -> u32 {
+        self.total_articles - self.completed_count()
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct RecoveryReport {
+    pub tmp_files_cleaned: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConsistencyWarning {
+    MissingNzbFile { nzb_id: u32 },
+    MissingFileState { file_id: u32 },
+    OrphanedFileState { file_id: u32 },
+}
+
+pub struct StateLock {
+    _lock_file: fs::File,
+}
+
+impl StateLock {
+    pub fn acquire(state_dir: &Path) -> anyhow::Result<Self> {
+        let lock_path = state_dir.join("diskstate.lock");
+        let lock_file = fs::File::create(&lock_path)?;
+        lock_file.try_lock_exclusive().map_err(|_| {
+            anyhow::anyhow!(
+                "another nzbg instance is already running (lock held on {})",
+                lock_path.display()
+            )
+        })?;
+        Ok(Self {
+            _lock_file: lock_file,
+        })
+    }
+}
+
+pub fn atomic_write(path: &Path, data: &[u8]) -> anyhow::Result<()> {
+    let tmp_path = path.with_extension("tmp");
+
+    let mut file = fs::File::create(&tmp_path)?;
+    file.write_all(data)?;
+    file.sync_all()?;
+
+    fs::rename(&tmp_path, path)?;
+
+    if let Some(parent) = path.parent() {
+        let dir = fs::File::open(parent)?;
+        dir.sync_all()?;
+    }
+
+    Ok(())
+}
+
+fn parse_file_id(path: &Path) -> Option<u32> {
+    let stem = path.file_stem()?.to_string_lossy();
+    stem.parse().ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::TimeZone;
+    use tempfile::TempDir;
+
+    fn sample_queue_state() -> QueueState {
+        QueueState {
+            version: 3,
+            nzbs: vec![NzbState {
+                id: 1,
+                name: "sample".to_string(),
+                filename: "sample.nzb".to_string(),
+                category: "tv".to_string(),
+                dest_dir: PathBuf::from("/dest"),
+                final_dir: None,
+                priority: 0,
+                paused: false,
+                url: None,
+                dupe_key: String::new(),
+                dupe_score: 0,
+                dupe_mode: DupMode::Score,
+                added_time: Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap(),
+                total_size: 0,
+                downloaded_size: 0,
+                failed_size: 0,
+                file_ids: vec![10, 11],
+                post_process_parameters: HashMap::new(),
+                health: 1000,
+                critical_health: 1000,
+                total_article_count: 0,
+                success_article_count: 0,
+                failed_article_count: 0,
+            }],
+            next_nzb_id: 2,
+            next_file_id: 12,
+            download_paused: false,
+            speed_limit: 0,
+        }
+    }
+
+    #[test]
+    fn file_article_state_tracks_bits() {
+        let mut state = FileArticleState::new(1, 10);
+        assert!(!state.is_article_done(3));
+        state.mark_article_done(3, 1234);
+        assert!(state.is_article_done(3));
+        assert_eq!(state.completed_count(), 1);
+        assert_eq!(state.remaining_count(), 9);
+    }
+
+    #[test]
+    fn disk_state_roundtrip_queue() {
+        let temp = TempDir::new().expect("temp dir");
+        let disk_state = DiskState::new(temp.path().to_path_buf(), JsonFormat).expect("disk state");
+        let queue = sample_queue_state();
+        disk_state.save_queue(&queue).expect("save");
+        let loaded = disk_state.load_queue().expect("load");
+        assert_eq!(loaded.nzbs[0].name, "sample");
+    }
+
+    #[test]
+    fn disk_state_recovers_tmp_files() {
+        let temp = TempDir::new().expect("temp dir");
+        let disk_state = DiskState::new(temp.path().to_path_buf(), JsonFormat).expect("disk state");
+        let tmp_path = disk_state.state_dir.join("queue.tmp");
+        fs::write(&tmp_path, b"data").expect("tmp write");
+        let report = disk_state.recover().expect("recover");
+        assert_eq!(report.tmp_files_cleaned, 1);
+        assert!(!tmp_path.exists());
+    }
+
+    #[test]
+    fn disk_state_detects_orphaned_file_states() {
+        let temp = TempDir::new().expect("temp dir");
+        let disk_state = DiskState::new(temp.path().to_path_buf(), JsonFormat).expect("disk state");
+        let queue = sample_queue_state();
+        let file_dir = disk_state.state_dir.join("file");
+        fs::create_dir_all(&file_dir).expect("file dir");
+        fs::write(file_dir.join("00000099.state"), b"{}").expect("write");
+
+        let warnings = disk_state.validate_consistency(&queue).expect("warnings");
+        assert!(warnings.iter().any(|warning| {
+            matches!(
+                warning,
+                ConsistencyWarning::OrphanedFileState { file_id: 99 }
+            )
+        }));
+    }
+}

@@ -649,6 +649,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "nzbg-diskstate"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "fs2",
+ "nzbg-core",
+ "nzbg-feed",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "nzbg-extension"
 version = "0.1.0"
 dependencies = [

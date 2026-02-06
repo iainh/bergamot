@@ -5,6 +5,7 @@ members = [
   "crates/nzbg-scheduler",
   "crates/nzbg-feed",
   "crates/nzbg-extension",
+  "crates/nzbg-diskstate",
   "crates/nzbg-core",
   "crates/nzbg-nzb",
   "crates/nzbg-nntp",
