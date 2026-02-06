@@ -71,7 +71,9 @@ pub async fn shutdown_services(
 
 fn build_services(config: &Config, deps: ServiceDeps) -> anyhow::Result<Vec<Box<dyn Service>>> {
     let scheduler = Scheduler::from_config(config, deps.queue.clone())?;
-    let scanner = NzbDirScanner::from_config(config).with_queue(deps.queue.clone());
+    let scanner = NzbDirScanner::from_config(config)
+        .with_queue(deps.queue.clone())
+        .with_disk(deps.disk.clone());
     let disk_space = DiskSpaceMonitor::from_config(config);
     let history = HistoryCleanup::from_config(config);
     let stats = StatsTracker::from_config(config);
@@ -261,6 +263,7 @@ pub struct NzbDirScanner {
     file_age: Duration,
     interval: Duration,
     queue: Option<nzbg_queue::QueueHandle>,
+    disk: Option<std::sync::Arc<nzbg_diskstate::DiskState<nzbg_diskstate::JsonFormat>>>,
 }
 
 impl NzbDirScanner {
@@ -272,6 +275,7 @@ impl NzbDirScanner {
             file_age: Duration::from_secs(file_age),
             interval: Duration::from_secs(interval),
             queue: None,
+            disk: None,
         }
     }
 
@@ -280,8 +284,18 @@ impl NzbDirScanner {
         self
     }
 
+    pub fn with_disk(
+        mut self,
+        disk: std::sync::Arc<nzbg_diskstate::DiskState<nzbg_diskstate::JsonFormat>>,
+    ) -> Self {
+        self.disk = Some(disk);
+        self
+    }
+
     async fn process_nzb(&self, path: &Path) -> anyhow::Result<()> {
         if let Some(queue) = &self.queue {
+            let nzb_bytes = tokio::fs::read(path).await?;
+
             let category = path.parent().and_then(|p| {
                 if p == self.nzb_dir {
                     None
@@ -297,6 +311,12 @@ impl NzbDirScanner {
                 )
                 .await?;
             tracing::info!("added NZB {} as id {}", path.display(), id);
+
+            if let Some(disk) = &self.disk
+                && let Err(err) = disk.save_nzb_file(id, &nzb_bytes)
+            {
+                tracing::warn!("failed to save NZB file for id {id}: {err}");
+            }
 
             let processed_path = path.with_extension("nzb.queued");
             if let Err(err) = tokio::fs::rename(path, &processed_path).await {
@@ -1066,6 +1086,7 @@ mod tests {
             file_age: Duration::from_secs(0),
             interval: Duration::from_secs(5),
             queue: Some(handle.clone()),
+            disk: None,
         };
 
         scanner.tick().await.expect("tick");
@@ -1093,6 +1114,7 @@ mod tests {
             file_age: Duration::from_secs(0),
             interval: Duration::from_secs(5),
             queue: Some(handle.clone()),
+            disk: None,
         };
 
         scanner.tick().await.expect("tick");
@@ -1116,6 +1138,7 @@ mod tests {
             file_age: Duration::from_secs(0),
             interval: Duration::from_secs(5),
             queue: Some(handle.clone()),
+            disk: None,
         };
 
         scanner.tick().await.expect("tick1");

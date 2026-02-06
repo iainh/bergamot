@@ -261,8 +261,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fac4744fb15ae8337dc853fee7fb3f4e48c0fbaa23d0afe49c447b4fab126118"
 dependencies = [
  "iana-time-zone",
+ "js-sys",
  "num-traits",
  "serde",
+ "wasm-bindgen",
  "windows-link",
 ]
 
@@ -942,14 +944,17 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "chrono",
  "clap",
  "crc32fast",
  "dirs",
  "libc",
  "nzbg-config",
+ "nzbg-core",
  "nzbg-diskstate",
  "nzbg-logging",
  "nzbg-nntp",
+ "nzbg-nzb",
  "nzbg-queue",
  "nzbg-scheduler",
  "nzbg-server",
@@ -1106,6 +1111,7 @@ dependencies = [
  "axum",
  "base64",
  "nzbg-core",
+ "nzbg-diskstate",
  "nzbg-queue",
  "serde",
  "serde_json",

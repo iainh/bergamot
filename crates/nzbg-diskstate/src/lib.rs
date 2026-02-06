@@ -16,6 +16,7 @@ pub trait StateFormat: Send + Sync {
     fn file_extension(&self) -> &str;
 }
 
+#[derive(Debug)]
 pub struct JsonFormat;
 
 impl StateFormat for JsonFormat {
@@ -32,6 +33,7 @@ impl StateFormat for JsonFormat {
     }
 }
 
+#[derive(Debug)]
 pub struct DiskState<F: StateFormat> {
     state_dir: PathBuf,
     format: F,

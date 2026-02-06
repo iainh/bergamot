@@ -26,6 +26,7 @@ pub struct ArticleAssignment {
     pub article_id: ArticleId,
     pub message_id: String,
     pub groups: Vec<String>,
+    pub output_filename: String,
 }
 
 #[derive(Debug)]
@@ -328,6 +329,7 @@ impl QueueCoordinator {
                 article_id,
                 message_id: segment.message_id.clone(),
                 groups: file.groups.clone(),
+                output_filename: file.output_filename.clone(),
             },
         ))
     }
@@ -1083,6 +1085,18 @@ impl QueueCoordinator {
 
         self.queue.queue.push(nzb);
         Ok(id)
+    }
+
+    pub fn seed_state(
+        &mut self,
+        queue: DownloadQueue,
+        paused: bool,
+        rate: u64,
+    ) {
+        self.queue = queue;
+        self.paused = paused;
+        self.download_rate = rate;
+        let _ = self.rate_watch_tx.send(rate);
     }
 
     pub fn add_to_history(&mut self, nzb: NzbInfo, kind: HistoryKind) {
@@ -2265,6 +2279,13 @@ mod tests {
     }
 
     #[test]
+    fn next_assignment_includes_output_filename() {
+        let (mut coordinator, _handle, _rx, _rate_rx) = ingested_coordinator();
+        let (_article_id, assignment) = coordinator.next_assignment().unwrap();
+        assert_eq!(assignment.output_filename, "data.part01.rar");
+    }
+
+    #[test]
     fn ingest_nzb_returns_error_for_missing_file() {
         let (mut coordinator, _handle, _rx, _rate_rx) = QueueCoordinator::new(2, 1);
         let result = coordinator.ingest_nzb(
@@ -2365,5 +2386,27 @@ mod tests {
         complete_article(&mut coordinator, 1, 0, 0);
         complete_article(&mut coordinator, 1, 0, 1);
         assert_eq!(coordinator.queue.queue[0].remaining_file_count, 1);
+    }
+
+    #[test]
+    fn seed_state_restores_queue() {
+        let (mut coordinator, _handle, _rx, rate_rx) = QueueCoordinator::new(4, 2);
+
+        let queue = DownloadQueue {
+            queue: vec![sample_nzb(5, "restored")],
+            history: vec![],
+            next_nzb_id: 10,
+            next_file_id: 20,
+        };
+        coordinator.seed_state(queue, true, 12345);
+
+        assert_eq!(coordinator.queue.queue.len(), 1);
+        assert_eq!(coordinator.queue.queue[0].id, 5);
+        assert_eq!(coordinator.queue.queue[0].name, "restored");
+        assert_eq!(coordinator.queue.next_nzb_id, 10);
+        assert_eq!(coordinator.queue.next_file_id, 20);
+        assert!(coordinator.paused);
+        assert_eq!(coordinator.download_rate, 12345);
+        assert_eq!(*rate_rx.borrow(), 12345);
     }
 }

@@ -115,10 +115,16 @@ async fn rpc_append(
     let priority_val = arr.get(2).and_then(|v| v.as_i64()).unwrap_or(0) as i32;
     let priority = priority_from_i32(priority_val);
 
+    let nzb_bytes = std::fs::read(path).map_err(|e| rpc_error(format!("reading NZB: {e}")))?;
+
     let id = queue
         .add_nzb(PathBuf::from(path), category, priority)
         .await
         .map_err(rpc_error)?;
+
+    if let Some(disk) = state.disk() {
+        let _ = disk.save_nzb_file(id, &nzb_bytes);
+    }
 
     Ok(serde_json::json!(id))
 }
@@ -415,6 +421,35 @@ mod tests {
             .expect("append");
         assert_eq!(result, serde_json::json!(1));
         handle.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn dispatch_append_saves_nzb_to_disk_state() {
+        use nzbg_diskstate::{DiskState, JsonFormat};
+
+        let tmp_disk = tempfile::tempdir().expect("tempdir");
+        let disk = std::sync::Arc::new(
+            DiskState::new(tmp_disk.path().to_path_buf(), JsonFormat).expect("disk"),
+        );
+
+        let (mut coordinator, handle, _rx, _rate_rx) = QueueCoordinator::new(2, 1);
+        let coordinator_handle = tokio::spawn(async move { coordinator.run().await });
+        let state = AppState::default()
+            .with_queue(handle.clone())
+            .with_disk(disk.clone());
+
+        let nzb_file = nzb_tempfile();
+        let params = serde_json::json!([nzb_file.path().to_str().unwrap(), "", 0]);
+        let result = dispatch_rpc("append", &params, &state)
+            .await
+            .expect("append");
+        let id = result.as_u64().expect("id") as u32;
+
+        let saved = disk.load_nzb_file(id).expect("load saved nzb");
+        assert_eq!(saved, VALID_NZB.as_bytes());
+
+        handle.shutdown().await.expect("shutdown");
+        let _ = coordinator_handle.await;
     }
 
     #[tokio::test]

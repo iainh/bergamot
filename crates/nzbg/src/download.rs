@@ -120,7 +120,7 @@ async fn fetch_and_decode(
     let offset = segment.begin.saturating_sub(1);
 
     let out_dir = inter_dir.join(format!("nzb-{}", assignment.article_id.nzb_id));
-    let file_path = out_dir.join(format!("file-{}", assignment.article_id.file_idx));
+    let file_path = out_dir.join(&assignment.output_filename);
     writer_pool
         .write_segment(&file_path, offset, &segment.data)
         .await
@@ -169,6 +169,7 @@ mod tests {
             },
             message_id: "test@example".to_string(),
             groups: vec!["alt.test".to_string()],
+            output_filename: "data.rar".to_string(),
         };
 
         let cache = NoopCache;
@@ -196,6 +197,7 @@ mod tests {
             },
             message_id: "test@example".to_string(),
             groups: vec![],
+            output_filename: "data.rar".to_string(),
         };
 
         let cache = NoopCache;
@@ -205,7 +207,7 @@ mod tests {
             .expect("decode");
         writer_pool.flush_all().await.expect("flush");
 
-        let file_path = tmp.path().join("nzb-1").join("file-0");
+        let file_path = tmp.path().join("nzb-1").join("data.rar");
         let content = tokio::fs::read(&file_path).await.expect("read file");
         assert_eq!(content, b"abc");
     }
@@ -227,6 +229,7 @@ mod tests {
             },
             message_id: "test@example".to_string(),
             groups: vec![],
+            output_filename: "data.rar".to_string(),
         };
 
         let (tx, rx) = tokio::sync::mpsc::channel(1);

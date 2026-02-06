@@ -21,6 +21,7 @@ pub struct AppState {
     remaining_bytes: u64,
     queue: Option<nzbg_queue::QueueHandle>,
     shutdown: Option<ShutdownHandle>,
+    disk: Option<std::sync::Arc<nzbg_diskstate::DiskState<nzbg_diskstate::JsonFormat>>>,
 }
 
 impl Default for AppState {
@@ -31,6 +32,7 @@ impl Default for AppState {
             remaining_bytes: 0,
             queue: None,
             shutdown: None,
+            disk: None,
         }
     }
 }
@@ -46,6 +48,14 @@ impl AppState {
         self
     }
 
+    pub fn with_disk(
+        mut self,
+        disk: std::sync::Arc<nzbg_diskstate::DiskState<nzbg_diskstate::JsonFormat>>,
+    ) -> Self {
+        self.disk = Some(disk);
+        self
+    }
+
     pub fn version(&self) -> &str {
         &self.version
     }
@@ -56,6 +66,12 @@ impl AppState {
 
     pub fn shutdown_handle(&self) -> Option<&ShutdownHandle> {
         self.shutdown.as_ref()
+    }
+
+    pub fn disk(
+        &self,
+    ) -> Option<&std::sync::Arc<nzbg_diskstate::DiskState<nzbg_diskstate::JsonFormat>>> {
+        self.disk.as_ref()
     }
 
     pub fn status(&self) -> StatusResponse {
