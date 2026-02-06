@@ -527,10 +527,13 @@ impl QueueCoordinator {
                 let _ = reply.send(result);
             }
             QueueCommand::GetStatus { reply } => {
+                let remaining_size: u64 =
+                    self.queue.queue.iter().map(|nzb| nzb.remaining_size).sum();
                 let status = QueueStatus {
                     queued: self.queue.queue.len(),
                     paused: self.paused,
                     download_rate: self.download_rate,
+                    remaining_size,
                 };
                 let _ = reply.send(status);
             }

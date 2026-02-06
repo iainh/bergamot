@@ -12,7 +12,9 @@ use nzbg_diskstate::{DiskState, JsonFormat, StateLock};
 use nzbg_logging::{BufferLayer, LogBuffer};
 use nzbg_postproc::{PostProcessRequest, PostProcessor};
 use nzbg_queue::NzbCompletionNotice;
-use nzbg_server::{AppState, ServerConfig as WebServerConfig, ShutdownHandle, WebServer};
+use nzbg_server::{
+    AppState, ServerConfig as WebServerConfig, ShutdownHandle, WebServer, spawn_stats_updater,
+};
 
 pub fn load_config(path: &Path) -> Result<Config> {
     let content = std::fs::read_to_string(path)
@@ -392,6 +394,8 @@ pub async fn run(config: Config, fetcher: Arc<dyn crate::download::ArticleFetche
     };
     let (scheduler_tx, scheduler_handles) = nzbg_scheduler::start_services(&config, deps).await?;
 
+    let stats_handle = spawn_stats_updater(app_state.clone(), queue_handle.clone());
+
     let server = WebServer::new(web_config, app_state);
     let server_handle = tokio::spawn(async move {
         if let Err(err) = server.run().await {
@@ -416,6 +420,7 @@ pub async fn run(config: Config, fetcher: Arc<dyn crate::download::ArticleFetche
     tracing::info!("shutdown signal received");
 
     nzbg_scheduler::shutdown_services(scheduler_tx, scheduler_handles).await;
+    stats_handle.abort();
     server_handle.abort();
     worker_handle.abort();
 

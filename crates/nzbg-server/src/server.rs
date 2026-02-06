@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use axum::routing::{get, post};
 use axum::{Json, Router, middleware};
@@ -17,8 +18,8 @@ use crate::status::StatusResponse;
 #[derive(Debug, Clone)]
 pub struct AppState {
     version: String,
-    download_rate: u64,
-    remaining_bytes: u64,
+    download_rate: Arc<AtomicU64>,
+    remaining_bytes: Arc<AtomicU64>,
     start_time: std::time::Instant,
     queue: Option<nzbg_queue::QueueHandle>,
     shutdown: Option<ShutdownHandle>,
@@ -36,8 +37,8 @@ impl Default for AppState {
     fn default() -> Self {
         Self {
             version: "0.1.0".to_string(),
-            download_rate: 0,
-            remaining_bytes: 0,
+            download_rate: Arc::new(AtomicU64::new(0)),
+            remaining_bytes: Arc::new(AtomicU64::new(0)),
             start_time: std::time::Instant::now(),
             queue: None,
             shutdown: None,
@@ -147,15 +148,47 @@ impl AppState {
         self.disk.as_ref()
     }
 
+    pub fn download_rate_ref(&self) -> &Arc<AtomicU64> {
+        &self.download_rate
+    }
+
+    pub fn remaining_bytes_ref(&self) -> &Arc<AtomicU64> {
+        &self.remaining_bytes
+    }
+
     pub fn status(&self) -> StatusResponse {
-        let fields = crate::status::SizeFields::from(self.remaining_bytes);
+        let remaining = self.remaining_bytes.load(Ordering::Relaxed);
+        let fields = crate::status::SizeFields::from(remaining);
         StatusResponse {
             remaining_size_lo: fields.lo,
             remaining_size_hi: fields.hi,
             remaining_size_mb: fields.mb,
-            download_rate: self.download_rate,
+            download_rate: self.download_rate.load(Ordering::Relaxed),
         }
     }
+}
+
+pub fn spawn_stats_updater(
+    state: Arc<AppState>,
+    queue: nzbg_queue::QueueHandle,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(1));
+        loop {
+            interval.tick().await;
+            match queue.get_status().await {
+                Ok(status) => {
+                    state
+                        .download_rate_ref()
+                        .store(status.download_rate, Ordering::Relaxed);
+                    state
+                        .remaining_bytes_ref()
+                        .store(status.remaining_size, Ordering::Relaxed);
+                }
+                Err(_) => break,
+            }
+        }
+    })
 }
 
 pub struct WebServer {
@@ -389,6 +422,22 @@ mod tests {
         let cfg = server_config();
         assert!(!cfg.secure_control);
         assert!(WebServer::validate_tls_config(&cfg).is_ok());
+    }
+
+    #[test]
+    fn status_reflects_atomic_updates() {
+        let state = AppState::default();
+        assert_eq!(state.status().download_rate, 0);
+        assert_eq!(state.status().remaining_size_mb, 0);
+
+        state.download_rate_ref().store(512_000, Ordering::Relaxed);
+        state
+            .remaining_bytes_ref()
+            .store(1024 * 1024 * 100, Ordering::Relaxed);
+
+        let status = state.status();
+        assert_eq!(status.download_rate, 512_000);
+        assert_eq!(status.remaining_size_mb, 100);
     }
 
     #[tokio::test]
