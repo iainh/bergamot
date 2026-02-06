@@ -19,6 +19,7 @@ pub struct AppState {
     version: String,
     download_rate: u64,
     remaining_bytes: u64,
+    start_time: std::time::Instant,
     queue: Option<nzbg_queue::QueueHandle>,
     shutdown: Option<ShutdownHandle>,
     disk: Option<std::sync::Arc<nzbg_diskstate::DiskState<nzbg_diskstate::JsonFormat>>>,
@@ -31,6 +32,7 @@ impl Default for AppState {
             version: "0.1.0".to_string(),
             download_rate: 0,
             remaining_bytes: 0,
+            start_time: std::time::Instant::now(),
             queue: None,
             shutdown: None,
             disk: None,
@@ -69,6 +71,10 @@ impl AppState {
 
     pub fn version(&self) -> &str {
         &self.version
+    }
+
+    pub fn start_time(&self) -> std::time::Instant {
+        self.start_time
     }
 
     pub fn queue_handle(&self) -> Option<&nzbg_queue::QueueHandle> {

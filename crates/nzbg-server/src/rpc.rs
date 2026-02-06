@@ -60,6 +60,8 @@ pub async fn dispatch_rpc(
         "resumescan" => Ok(serde_json::json!(true)),
         "scan" => Ok(serde_json::json!(true)),
         "feeds" => Ok(serde_json::json!([])),
+        "sysinfo" => rpc_sysinfo(state),
+        "systemhealth" => rpc_systemhealth(state),
         _ => Err(JsonRpcError {
             code: -32601,
             message: format!("Method not found: {method}"),
@@ -298,6 +300,24 @@ async fn rpc_listfiles(
         })
         .collect();
     Ok(serde_json::json!(entries))
+}
+
+fn rpc_sysinfo(state: &AppState) -> Result<serde_json::Value, JsonRpcError> {
+    let uptime_sec = state.start_time().elapsed().as_secs();
+    Ok(serde_json::json!({
+        "Version": state.version(),
+        "OS": std::env::consts::OS,
+        "Arch": std::env::consts::ARCH,
+        "UptimeSec": uptime_sec,
+    }))
+}
+
+fn rpc_systemhealth(state: &AppState) -> Result<serde_json::Value, JsonRpcError> {
+    let queue_available = state.queue_handle().is_some();
+    Ok(serde_json::json!({
+        "Healthy": queue_available,
+        "QueueAvailable": queue_available,
+    }))
 }
 
 fn rpc_writelog(
@@ -841,6 +861,35 @@ mod tests {
             .await
             .expect("scan");
         assert_eq!(result, serde_json::json!(true));
+    }
+
+    #[tokio::test]
+    async fn dispatch_sysinfo_returns_version_and_os() {
+        let state = AppState::default();
+        let result = dispatch_rpc("sysinfo", &serde_json::json!([]), &state)
+            .await
+            .expect("sysinfo");
+        assert_eq!(result["Version"], "0.1.0");
+        assert!(result["OS"].as_str().is_some());
+        assert!(result["Arch"].as_str().is_some());
+        assert!(result["UptimeSec"].as_u64().is_some());
+    }
+
+    #[tokio::test]
+    async fn dispatch_systemhealth_reports_queue_status() {
+        let state = AppState::default();
+        let result = dispatch_rpc("systemhealth", &serde_json::json!([]), &state)
+            .await
+            .expect("systemhealth");
+        assert_eq!(result["QueueAvailable"], false);
+
+        let (state, handle, _coord) = state_with_queue();
+        let result = dispatch_rpc("systemhealth", &serde_json::json!([]), &state)
+            .await
+            .expect("systemhealth");
+        assert_eq!(result["QueueAvailable"], true);
+        assert_eq!(result["Healthy"], true);
+        handle.shutdown().await.expect("shutdown");
     }
 
     #[tokio::test]
