@@ -140,37 +140,54 @@ async fn rpc_append(
     params: &serde_json::Value,
     state: &AppState,
 ) -> Result<serde_json::Value, JsonRpcError> {
+    use base64::Engine;
+
     let queue = require_queue(state)?;
     let arr = params
         .as_array()
         .ok_or_else(|| rpc_error("params must be an array"))?;
 
-    let input = arr
+    let nzb_filename = arr
         .first()
         .and_then(|v| v.as_str())
-        .ok_or_else(|| rpc_error("missing NZB path or URL"))?;
+        .unwrap_or("");
 
-    let category = arr.get(1).and_then(|v| v.as_str()).unwrap_or("");
+    let content = arr.get(1).and_then(|v| v.as_str()).unwrap_or("");
+
+    let category = arr.get(2).and_then(|v| v.as_str()).unwrap_or("");
     let category = if category.is_empty() {
         None
     } else {
         Some(category.to_string())
     };
 
-    let priority_val = arr.get(2).and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+    let priority_val = arr.get(3).and_then(|v| v.as_i64()).unwrap_or(0) as i32;
     let priority = priority_from_i32(priority_val);
 
-    let (nzb_path, nzb_bytes) = if is_url(input) {
-        let (filename, bytes) = fetch_nzb_url(input).await?;
-        let temp_dir = std::env::temp_dir().join("nzbg-url-downloads");
-        std::fs::create_dir_all(&temp_dir)
-            .map_err(|e| rpc_error(format!("creating temp dir: {e}")))?;
-        let path = temp_dir.join(&filename);
+    let temp_dir = std::env::temp_dir().join("nzbg-downloads");
+    std::fs::create_dir_all(&temp_dir)
+        .map_err(|e| rpc_error(format!("creating temp dir: {e}")))?;
+
+    let (nzb_path, nzb_bytes) = if is_url(content) {
+        let (filename, bytes) = fetch_nzb_url(content).await?;
+        let name = if nzb_filename.is_empty() { &filename } else { nzb_filename };
+        let path = temp_dir.join(name);
         std::fs::write(&path, &bytes).map_err(|e| rpc_error(format!("writing temp NZB: {e}")))?;
         (path, bytes)
+    } else if !content.is_empty() {
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(content)
+            .map_err(|e| rpc_error(format!("decoding base64 NZB content: {e}")))?;
+        let name = if nzb_filename.is_empty() { "download.nzb" } else { nzb_filename };
+        let path = temp_dir.join(name);
+        std::fs::write(&path, &bytes).map_err(|e| rpc_error(format!("writing temp NZB: {e}")))?;
+        (path, bytes)
+    } else if !nzb_filename.is_empty() {
+        let bytes = std::fs::read(nzb_filename)
+            .map_err(|e| rpc_error(format!("reading NZB: {e}")))?;
+        (PathBuf::from(nzb_filename), bytes)
     } else {
-        let bytes = std::fs::read(input).map_err(|e| rpc_error(format!("reading NZB: {e}")))?;
-        (PathBuf::from(input), bytes)
+        return Err(rpc_error("missing NZB content or filename"));
     };
 
     let id = queue
@@ -838,6 +855,7 @@ async fn rpc_resumedownload(state: &AppState) -> Result<serde_json::Value, JsonR
 #[cfg(test)]
 mod tests {
     use super::*;
+    use base64::Engine;
     use nzbg_core::models::Priority;
     use nzbg_queue::QueueCoordinator;
     use std::io::Write;
@@ -852,6 +870,10 @@ mod tests {
     </segments>
   </file>
 </nzb>"#;
+
+    fn nzb_base64() -> String {
+        base64::engine::general_purpose::STANDARD.encode(VALID_NZB.as_bytes())
+    }
 
     fn nzb_tempfile() -> tempfile::NamedTempFile {
         let mut f = tempfile::Builder::new()
@@ -886,8 +908,7 @@ mod tests {
     #[tokio::test]
     async fn dispatch_append_adds_nzb_and_returns_id() {
         let (state, handle, _coord) = state_with_queue();
-        let _nzb_file = nzb_tempfile();
-        let params = serde_json::json!([_nzb_file.path().to_str().unwrap(), "", 0]);
+        let params = serde_json::json!(["test.nzb", nzb_base64(), "", 0]);
         let result = dispatch_rpc("append", &params, &state)
             .await
             .expect("append");
@@ -910,8 +931,7 @@ mod tests {
             .with_queue(handle.clone())
             .with_disk(disk.clone());
 
-        let nzb_file = nzb_tempfile();
-        let params = serde_json::json!([nzb_file.path().to_str().unwrap(), "", 0]);
+        let params = serde_json::json!(["test.nzb", nzb_base64(), "", 0]);
         let result = dispatch_rpc("append", &params, &state)
             .await
             .expect("append");
@@ -927,8 +947,7 @@ mod tests {
     #[tokio::test]
     async fn dispatch_append_with_category_and_priority() {
         let (state, handle, _coord) = state_with_queue();
-        let _nzb_file = nzb_tempfile();
-        let params = serde_json::json!([_nzb_file.path().to_str().unwrap(), "movies", 50]);
+        let params = serde_json::json!(["test.nzb", nzb_base64(), "movies", 50]);
         let result = dispatch_rpc("append", &params, &state)
             .await
             .expect("append");
@@ -950,7 +969,7 @@ mod tests {
     #[tokio::test]
     async fn dispatch_append_url_returns_error_for_unreachable_host() {
         let (state, handle, _coord) = state_with_queue();
-        let params = serde_json::json!(["http://127.0.0.1:1/nonexistent.nzb", "", 0]);
+        let params = serde_json::json!(["", "http://127.0.0.1:1/nonexistent.nzb", "", 0]);
         let result = dispatch_rpc("append", &params, &state).await;
         assert!(result.is_err());
         handle.shutdown().await.expect("shutdown");
