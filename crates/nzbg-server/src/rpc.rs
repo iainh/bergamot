@@ -662,23 +662,33 @@ fn rpc_loadlog(
         .ok_or_else(|| rpc_error("Log buffer not available"))?;
 
     let arr = params.as_array();
-    let since_id = arr
+    let id_from = arr
         .and_then(|a| a.first())
         .and_then(|v| v.as_u64())
         .unwrap_or(0) as u32;
+    let number_of_entries = arr
+        .and_then(|a| a.get(1))
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0) as usize;
 
-    let messages = buffer.messages_since(since_id);
+    let mut messages = buffer.messages_since(id_from.saturating_sub(1));
+    if number_of_entries > 0 && id_from == 0 {
+        let len = messages.len();
+        if len > number_of_entries {
+            messages = messages.split_off(len - number_of_entries);
+        }
+    }
     let entries: Vec<serde_json::Value> = messages
         .into_iter()
         .map(|m| {
             serde_json::json!({
                 "ID": m.id,
                 "Kind": match m.kind {
-                    nzbg_logging::LogLevel::Debug => "debug",
-                    nzbg_logging::LogLevel::Detail => "detail",
-                    nzbg_logging::LogLevel::Info => "info",
-                    nzbg_logging::LogLevel::Warning => "warning",
-                    nzbg_logging::LogLevel::Error => "error",
+                    nzbg_logging::LogLevel::Debug => "DEBUG",
+                    nzbg_logging::LogLevel::Detail => "DETAIL",
+                    nzbg_logging::LogLevel::Info => "INFO",
+                    nzbg_logging::LogLevel::Warning => "WARNING",
+                    nzbg_logging::LogLevel::Error => "ERROR",
                 },
                 "Time": m.time.timestamp(),
                 "Text": m.text,
@@ -1061,7 +1071,7 @@ mod tests {
         let entries = result.as_array().expect("array");
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0]["Text"], "hello");
-        assert_eq!(entries[0]["Kind"], "warning");
+        assert_eq!(entries[0]["Kind"], "WARNING");
     }
 
     #[tokio::test]

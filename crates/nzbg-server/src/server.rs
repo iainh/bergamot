@@ -611,7 +611,14 @@ fn parse_query_params(query: Option<&str>) -> serde_json::Value {
                     }
                     let decoded =
                         percent_encoding::percent_decode_str(val).decode_utf8_lossy();
-                    Some(serde_json::Value::String(decoded.into_owned()))
+                    let decoded = decoded.into_owned();
+                    if let Ok(n) = decoded.parse::<u64>() {
+                        Some(serde_json::Value::Number(n.into()))
+                    } else if let Ok(n) = decoded.parse::<f64>() {
+                        Some(serde_json::json!(n))
+                    } else {
+                        Some(serde_json::Value::String(decoded))
+                    }
                 })
                 .collect();
             serde_json::Value::Array(values)
