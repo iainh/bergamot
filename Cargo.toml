@@ -9,4 +9,5 @@ members = [
   "crates/nzbg-queue",
   "crates/nzbg-postproc",
   "crates/nzbg-server",
+  "crates/nzbg-config",
 ]

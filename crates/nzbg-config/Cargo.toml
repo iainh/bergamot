@@ -1,0 +1,11 @@
+[package]
+name = "nzbg-config"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+dirs = "5.0"
+thiserror = "2.0"
+
+[dev-dependencies]
+tempfile = "3.11"
