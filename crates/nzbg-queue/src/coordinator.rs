@@ -604,6 +604,39 @@ impl QueueCoordinator {
             }
         }
         self.update_health(nzb_id);
+        self.check_file_completion(nzb_id, file_idx);
+        self.check_nzb_completion(nzb_id);
+    }
+
+    fn check_file_completion(&mut self, nzb_id: u32, file_idx: usize) {
+        if let Some(nzb) = self.queue.queue.iter_mut().find(|n| n.id == nzb_id)
+            && let Some(file) = nzb.files.get_mut(file_idx)
+            && !file.completed
+            && file.articles.iter().all(|a| {
+                a.status == ArticleStatus::Finished || a.status == ArticleStatus::Failed
+            })
+        {
+            file.completed = true;
+            nzb.remaining_file_count = nzb.remaining_file_count.saturating_sub(1);
+            tracing::info!("file {} completed for NZB {}", file.filename, nzb.name);
+        }
+    }
+
+    fn check_nzb_completion(&mut self, nzb_id: u32) {
+        let all_complete = self
+            .queue
+            .queue
+            .iter()
+            .find(|n| n.id == nzb_id)
+            .is_some_and(|nzb| nzb.files.iter().all(|f| f.completed));
+
+        if all_complete
+            && let Some(idx) = self.queue.queue.iter().position(|n| n.id == nzb_id)
+        {
+            let nzb = self.queue.queue.remove(idx);
+            tracing::info!("NZB {} completed, moving to history", nzb.name);
+            self.add_to_history(nzb, HistoryKind::Nzb);
+        }
     }
 
     fn update_health(&mut self, nzb_id: u32) {
@@ -1616,10 +1649,13 @@ mod tests {
         });
 
         assert!(coordinator.active_downloads.is_empty());
-        let seg = &coordinator.queue.queue[0].files[0].articles[0];
+        assert!(coordinator.queue.queue.is_empty());
+        assert_eq!(coordinator.queue.history.len(), 1);
+        let nzb = &coordinator.queue.history[0].nzb_info;
+        let seg = &nzb.files[0].articles[0];
         assert_eq!(seg.status, ArticleStatus::Finished);
         assert_eq!(seg.crc, 0xDEADBEEF);
-        assert_eq!(coordinator.queue.queue[0].success_article_count, 1);
+        assert_eq!(nzb.success_article_count, 1);
     }
 
     #[tokio::test]
@@ -2286,5 +2322,48 @@ mod tests {
         assert_eq!(file.failed_articles, 1);
         assert_eq!(nzb.failed_size, 500);
         assert_eq!(nzb.remaining_size, 500);
+    }
+
+    fn complete_article(coordinator: &mut QueueCoordinator, nzb_id: u32, file_idx: u32, seg_idx: u32) {
+        let article_id = ArticleId { nzb_id, file_idx, seg_idx };
+        coordinator.active_downloads.insert(article_id, ActiveDownload { _started: Instant::now() });
+        coordinator.handle_download_complete(DownloadResult {
+            article_id,
+            outcome: DownloadOutcome::Success { data: vec![], offset: 0, crc: 0 },
+        });
+    }
+
+    #[test]
+    fn file_marked_completed_when_all_articles_terminal() {
+        let (mut coordinator, _handle, _rx, _rate_rx) = ingested_coordinator();
+
+        complete_article(&mut coordinator, 1, 0, 0);
+        assert!(!coordinator.queue.queue[0].files[0].completed);
+
+        complete_article(&mut coordinator, 1, 0, 1);
+        assert!(coordinator.queue.queue[0].files[0].completed);
+    }
+
+    #[test]
+    fn nzb_moved_to_history_when_all_files_completed() {
+        let (mut coordinator, _handle, _rx, _rate_rx) = ingested_coordinator();
+
+        complete_article(&mut coordinator, 1, 0, 0);
+        complete_article(&mut coordinator, 1, 0, 1);
+        assert_eq!(coordinator.queue.queue.len(), 1);
+
+        complete_article(&mut coordinator, 1, 1, 0);
+        assert!(coordinator.queue.queue.is_empty());
+        assert_eq!(coordinator.queue.history.len(), 1);
+        assert_eq!(coordinator.queue.history[0].nzb_info.name.ends_with(".nzb"), true);
+    }
+
+    #[test]
+    fn remaining_file_count_decrements_on_file_completion() {
+        let (mut coordinator, _handle, _rx, _rate_rx) = ingested_coordinator();
+
+        complete_article(&mut coordinator, 1, 0, 0);
+        complete_article(&mut coordinator, 1, 0, 1);
+        assert_eq!(coordinator.queue.queue[0].remaining_file_count, 1);
     }
 }
