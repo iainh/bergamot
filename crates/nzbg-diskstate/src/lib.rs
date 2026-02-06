@@ -495,6 +495,38 @@ mod tests {
     }
 
     #[test]
+    fn disk_state_roundtrip_feeds() {
+        let temp = TempDir::new().expect("temp dir");
+        let disk_state = DiskState::new(temp.path().to_path_buf(), JsonFormat).expect("disk state");
+
+        let now = Utc::now();
+        let feed_state = FeedHistoryState {
+            version: 1,
+            feeds: {
+                let mut m = HashMap::new();
+                m.insert(
+                    1,
+                    vec![FeedHistoryItem {
+                        url: "https://example.com/1.nzb".to_string(),
+                        status: FeedItemStatus::Fetched,
+                        first_seen: now,
+                        last_seen: now,
+                    }],
+                );
+                m
+            },
+        };
+        disk_state.save_feeds(&feed_state).expect("save feeds");
+        let loaded = disk_state.load_feeds().expect("load feeds");
+        assert_eq!(loaded.version, 1);
+        assert_eq!(loaded.feeds.get(&1).unwrap().len(), 1);
+        assert_eq!(
+            loaded.feeds.get(&1).unwrap()[0].url,
+            "https://example.com/1.nzb"
+        );
+    }
+
+    #[test]
     fn disk_state_detects_orphaned_file_states() {
         let temp = TempDir::new().expect("temp dir");
         let disk_state = DiskState::new(temp.path().to_path_buf(), JsonFormat).expect("disk state");

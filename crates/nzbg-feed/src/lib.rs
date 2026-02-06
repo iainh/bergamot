@@ -462,6 +462,19 @@ impl FeedHistoryDb {
         let cutoff = now - chrono::Duration::days(self.retention_days as i64);
         self.entries.retain(|_, entry| entry.last_seen > cutoff);
     }
+
+    pub fn to_serializable(&self) -> Vec<(u32, String, FeedHistoryEntry)> {
+        self.entries
+            .iter()
+            .map(|((feed_id, url), entry)| (*feed_id, url.clone(), entry.clone()))
+            .collect()
+    }
+
+    pub fn load_entries(&mut self, entries: Vec<(u32, String, FeedHistoryEntry)>) {
+        for (feed_id, url, entry) in entries {
+            self.entries.insert((feed_id, url), entry);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -618,6 +631,32 @@ mod tests {
             parse_size("1.5GB"),
             Some((1.5 * 1024.0 * 1024.0 * 1024.0) as i64)
         );
+    }
+
+    #[test]
+    fn history_serialization_roundtrip() {
+        let mut history = FeedHistoryDb::new(30);
+        let feed = FeedConfig {
+            id: 1,
+            name: "feed".to_string(),
+            url: "http://example.com".to_string(),
+            filter: String::new(),
+            interval_min: 15,
+            backlog: false,
+            pause_nzb: false,
+            category: "TV".to_string(),
+            priority: 0,
+            extensions: vec![],
+        };
+        let item = sample_item();
+        history.mark(&feed, &item, FeedItemStatus::Fetched);
+
+        let entries = history.to_serializable();
+        assert_eq!(entries.len(), 1);
+
+        let mut restored = FeedHistoryDb::new(30);
+        restored.load_entries(entries);
+        assert!(restored.already_processed(&feed, &item));
     }
 
     #[test]
