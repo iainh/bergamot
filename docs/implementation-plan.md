@@ -93,17 +93,17 @@ downloader at all.
 
 ---
 
-## Phase 4 — Feed & Scheduler Integration
+## Phase 4 — Feed & Scheduler Integration ✅
 
-| # | Gap | Detail | Crates |
-|---|-----|--------|--------|
-| 26 | **Wire FeedCoordinator into app** | Start feed coordinator, connect to scheduler and queue. Accepted feed items should trigger NZB URL fetch + enqueue. | `nzbg`, `nzbg-feed` |
-| 27 | **Implement scheduler FetchFeed command** | Currently logs "not yet implemented". Should trigger `FeedCoordinator::process_feed()`. | `nzbg-scheduler` |
-| 28 | **Implement ActivateServer/DeactivateServer** | Currently logs "not yet implemented". Should toggle server active state in the pool. | `nzbg-scheduler`, `nzbg-nntp` |
-| 29 | **Implement remaining scheduler commands** | `PausePostProcess`, `UnpausePostProcess`, `Extensions`, `Process`, `PauseScan`, `UnpauseScan` all log warnings. | `nzbg-scheduler` |
-| 30 | **Feed filter Age/Rating/Genre/Tag** | `FilterCondition::matches()` returns `false` for these fields. | `nzbg-feed` |
-| 31 | **Feed persistence** | `DiskState::save_feeds/load_feeds` exist but are never called. Wire feed history to disk state. | `nzbg-feed`, `nzbg-diskstate` |
-| 32 | **URL-based NZB downloads** | `fetch_nzb_url()` exists in scheduler but nothing calls it. RPC `append` only accepts file paths. | `nzbg-scheduler`, `nzbg-server` |
+| # | Gap | Status |
+|---|-----|--------|
+| 26 | **Wire FeedCoordinator into app** | ✅ FeedCoordinator actor spawned in app.rs with FeedHandle, config extraction, HttpFeedFetcher |
+| 27 | **Implement scheduler FetchFeed command** | ✅ CommandExecutor calls FeedHandle::process_feed() via CommandDeps |
+| 28 | **Implement ActivateServer/DeactivateServer** | ✅ ServerPoolManager with RwLock-based pool rebuild, wired into CommandDeps |
+| 29 | **Implement remaining scheduler commands** | ✅ PausePostProcess/UnpausePostProcess via AtomicBool, PauseScan/UnpauseScan via AtomicBool, Process via scan trigger, Extensions as info-log |
+| 30 | **Feed filter Age/Rating/Genre/Tag** | ✅ Age (days comparison), Rating (numeric), Genre/Tag (wildcard match against lists) |
+| 31 | **Feed persistence** | ✅ to_serializable()/load_entries() conversion helpers, DiskState roundtrip test, feed history wiring ready |
+| 32 | **URL-based NZB downloads** | ✅ RPC append detects http/https URLs, fetches via reqwest, writes temp file, enqueues normally |
 
 ---
 
