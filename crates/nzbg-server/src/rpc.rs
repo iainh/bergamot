@@ -93,6 +93,25 @@ fn priority_from_i32(val: i32) -> Priority {
     }
 }
 
+fn is_url(input: &str) -> bool {
+    input.starts_with("http://") || input.starts_with("https://")
+}
+
+async fn fetch_nzb_url(url: &str) -> Result<(String, Vec<u8>), JsonRpcError> {
+    let resp = reqwest::get(url)
+        .await
+        .map_err(|e| rpc_error(format!("fetching URL: {e}")))?;
+    if !resp.status().is_success() {
+        return Err(rpc_error(format!("HTTP {} for {url}", resp.status())));
+    }
+    let filename = url.rsplit('/').next().unwrap_or("download.nzb").to_string();
+    let bytes = resp
+        .bytes()
+        .await
+        .map_err(|e| rpc_error(format!("reading response: {e}")))?;
+    Ok((filename, bytes.to_vec()))
+}
+
 async fn rpc_append(
     params: &serde_json::Value,
     state: &AppState,
@@ -102,10 +121,10 @@ async fn rpc_append(
         .as_array()
         .ok_or_else(|| rpc_error("params must be an array"))?;
 
-    let path = arr
+    let input = arr
         .first()
         .and_then(|v| v.as_str())
-        .ok_or_else(|| rpc_error("missing NZB path"))?;
+        .ok_or_else(|| rpc_error("missing NZB path or URL"))?;
 
     let category = arr.get(1).and_then(|v| v.as_str()).unwrap_or("");
     let category = if category.is_empty() {
@@ -117,10 +136,21 @@ async fn rpc_append(
     let priority_val = arr.get(2).and_then(|v| v.as_i64()).unwrap_or(0) as i32;
     let priority = priority_from_i32(priority_val);
 
-    let nzb_bytes = std::fs::read(path).map_err(|e| rpc_error(format!("reading NZB: {e}")))?;
+    let (nzb_path, nzb_bytes) = if is_url(input) {
+        let (filename, bytes) = fetch_nzb_url(input).await?;
+        let temp_dir = std::env::temp_dir().join("nzbg-url-downloads");
+        std::fs::create_dir_all(&temp_dir)
+            .map_err(|e| rpc_error(format!("creating temp dir: {e}")))?;
+        let path = temp_dir.join(&filename);
+        std::fs::write(&path, &bytes).map_err(|e| rpc_error(format!("writing temp NZB: {e}")))?;
+        (path, bytes)
+    } else {
+        let bytes = std::fs::read(input).map_err(|e| rpc_error(format!("reading NZB: {e}")))?;
+        (PathBuf::from(input), bytes)
+    };
 
     let id = queue
-        .add_nzb(PathBuf::from(path), category, priority)
+        .add_nzb(nzb_path, category, priority)
         .await
         .map_err(rpc_error)?;
 
@@ -699,6 +729,23 @@ mod tests {
 
         let list = handle.get_nzb_list().await.expect("list");
         assert_eq!(list.len(), 1);
+        handle.shutdown().await.expect("shutdown");
+    }
+
+    #[test]
+    fn is_url_detects_http_and_https() {
+        assert!(is_url("http://example.com/file.nzb"));
+        assert!(is_url("https://example.com/file.nzb"));
+        assert!(!is_url("/path/to/file.nzb"));
+        assert!(!is_url("relative/path.nzb"));
+    }
+
+    #[tokio::test]
+    async fn dispatch_append_url_returns_error_for_unreachable_host() {
+        let (state, handle, _coord) = state_with_queue();
+        let params = serde_json::json!(["http://127.0.0.1:1/nonexistent.nzb", "", 0]);
+        let result = dispatch_rpc("append", &params, &state).await;
+        assert!(result.is_err());
         handle.shutdown().await.expect("shutdown");
     }
 
