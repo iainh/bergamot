@@ -1050,11 +1050,7 @@ mod tests {
         tokio::spawn(async move { coordinator.run().await });
 
         handle
-            .add_nzb(
-                nzb_path,
-                None,
-                Priority::Normal,
-            )
+            .add_nzb(nzb_path, None, Priority::Normal)
             .await
             .expect("add");
 

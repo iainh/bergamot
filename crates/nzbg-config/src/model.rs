@@ -28,6 +28,9 @@ pub struct Config {
     pub article_cache: u32,
     pub disk_space: u32,
     pub keep_history: u32,
+    pub append_category_dir: bool,
+    pub unpack_cleanup_disk: bool,
+    pub ext_cleanup_disk: String,
     pub post_strategy: nzbg_core::models::PostStrategy,
     raw: HashMap<String, String>,
 }
@@ -132,6 +135,19 @@ impl Config {
             .and_then(|value| value.parse().ok())
             .unwrap_or(30);
 
+        let append_category_dir = raw
+            .get("AppendCategoryDir")
+            .map(|v| matches!(v.as_str(), "yes" | "true" | "1"))
+            .unwrap_or(true);
+        let unpack_cleanup_disk = raw
+            .get("UnpackCleanupDisk")
+            .map(|v| matches!(v.as_str(), "yes" | "true" | "1"))
+            .unwrap_or(true);
+        let ext_cleanup_disk = raw
+            .get("ExtCleanupDisk")
+            .cloned()
+            .unwrap_or_else(|| ".par2, .sfv".to_string());
+
         let post_strategy = raw
             .get("PostStrategy")
             .map(|value| match value.to_lowercase().as_str() {
@@ -168,6 +184,9 @@ impl Config {
             article_cache,
             disk_space,
             keep_history,
+            append_category_dir,
+            unpack_cleanup_disk,
+            ext_cleanup_disk,
             post_strategy,
             raw,
         }

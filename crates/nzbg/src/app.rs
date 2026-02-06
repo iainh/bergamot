@@ -7,11 +7,11 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
 use nzbg_config::{Config, parse_config};
-use nzbg_core::models::{
-    ArticleInfo, ArticleStatus, DownloadQueue, FileInfo, NzbInfo, Priority,
-};
+use nzbg_core::models::{ArticleInfo, ArticleStatus, DownloadQueue, FileInfo, NzbInfo, Priority};
 use nzbg_diskstate::{DiskState, JsonFormat, StateLock};
 use nzbg_logging::{BufferLayer, LogBuffer};
+use nzbg_postproc::{PostProcessRequest, PostProcessor};
+use nzbg_queue::NzbCompletionNotice;
 use nzbg_server::{AppState, ServerConfig as WebServerConfig, ShutdownHandle, WebServer};
 
 pub fn load_config(path: &Path) -> Result<Config> {
@@ -63,9 +63,7 @@ fn priority_from_i32(val: i32) -> Priority {
     }
 }
 
-pub fn restore_queue(
-    disk: &DiskState<JsonFormat>,
-) -> Result<Option<(DownloadQueue, bool, u64)>> {
+pub fn restore_queue(disk: &DiskState<JsonFormat>) -> Result<Option<(DownloadQueue, bool, u64)>> {
     let state = match disk.load_queue() {
         Ok(s) => s,
         Err(err) => {
@@ -86,7 +84,10 @@ pub fn restore_queue(
         let nzb_bytes = match disk.load_nzb_file(nzb_state.id) {
             Ok(b) => b,
             Err(err) => {
-                tracing::warn!("skipping NZB {}: failed to load NZB file: {err}", nzb_state.id);
+                tracing::warn!(
+                    "skipping NZB {}: failed to load NZB file: {err}",
+                    nzb_state.id
+                );
                 continue;
             }
         };
@@ -239,6 +240,38 @@ pub fn restore_queue(
     Ok(Some((queue, state.download_paused, state.speed_limit)))
 }
 
+fn postproc_config(config: &Config) -> nzbg_postproc::Config {
+    nzbg_postproc::Config {
+        par2_path: std::path::PathBuf::from("par2"),
+        dest_dir: config.dest_dir.clone(),
+        append_category_dir: config.append_category_dir,
+        password_file: None,
+        unpack_cleanup_disk: config.unpack_cleanup_disk,
+        ext_cleanup_disk: config.ext_cleanup_disk.clone(),
+    }
+}
+
+pub fn forward_completions(
+    mut completion_rx: tokio::sync::mpsc::Receiver<NzbCompletionNotice>,
+    postproc_tx: tokio::sync::mpsc::Sender<PostProcessRequest>,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        while let Some(notice) = completion_rx.recv().await {
+            let req = PostProcessRequest {
+                nzb_id: notice.nzb_id as i64,
+                nzb_name: notice.nzb_name,
+                working_dir: notice.working_dir,
+                category: notice.category,
+                parameters: notice.parameters,
+            };
+            if postproc_tx.send(req).await.is_err() {
+                tracing::warn!("postproc channel closed");
+                break;
+            }
+        }
+    })
+}
+
 pub async fn run(config: Config, fetcher: Arc<dyn crate::download::ArticleFetcher>) -> Result<()> {
     let web_config = Arc::new(web_server_config(&config));
     let inter_dir = config.inter_dir.clone();
@@ -260,8 +293,24 @@ pub async fn run(config: Config, fetcher: Arc<dyn crate::download::ArticleFetche
         tracing::warn!("disk state recovery: {err}");
     }
 
-    let (mut coordinator, queue_handle, assignment_rx, rate_rx) =
+    let (completion_tx, completion_rx) = tokio::sync::mpsc::channel::<NzbCompletionNotice>(16);
+    let (postproc_tx, postproc_rx) = tokio::sync::mpsc::channel::<PostProcessRequest>(16);
+
+    let pp_config = Arc::new(postproc_config(&config));
+    let par2 = Arc::new(nzbg_postproc::Par2CommandLine {
+        par2_path: pp_config.par2_path.clone(),
+    });
+    let unpacker = Arc::new(nzbg_postproc::CommandLineUnpacker);
+    let history = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let mut postprocessor = PostProcessor::new(postproc_rx, pp_config, history, par2, unpacker);
+    let postproc_handle = tokio::spawn(async move {
+        postprocessor.run().await;
+    });
+    let forward_handle = forward_completions(completion_rx, postproc_tx.clone());
+
+    let (coordinator, queue_handle, assignment_rx, rate_rx) =
         nzbg_queue::QueueCoordinator::new(4, 2);
+    let mut coordinator = coordinator.with_completion_tx(completion_tx);
 
     match restore_queue(&disk) {
         Ok(Some((queue, paused, rate))) => {
@@ -344,6 +393,10 @@ pub async fn run(config: Config, fetcher: Arc<dyn crate::download::ArticleFetche
 
     let _ = queue_handle.shutdown().await;
     let _ = coordinator_handle.await;
+
+    drop(postproc_tx);
+    forward_handle.abort();
+    let _ = postproc_handle.await;
 
     tracing::info!("shutdown complete");
     Ok(())
@@ -453,11 +506,10 @@ mod tests {
             speed_limit: 5000,
         };
         disk.save_queue(&queue_state).expect("save queue");
-        disk.save_nzb_file(5, TEST_NZB.as_bytes()).expect("save nzb");
+        disk.save_nzb_file(5, TEST_NZB.as_bytes())
+            .expect("save nzb");
 
-        let (queue, paused, rate) = restore_queue(&disk)
-            .expect("restore")
-            .expect("some queue");
+        let (queue, paused, rate) = restore_queue(&disk).expect("restore").expect("some queue");
 
         assert_eq!(queue.queue.len(), 1);
         assert_eq!(queue.queue[0].id, 5);
@@ -479,5 +531,53 @@ mod tests {
 
         let result = restore_queue(&disk).expect("restore");
         assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn forward_completions_maps_notice_to_request() {
+        let (notice_tx, notice_rx) = tokio::sync::mpsc::channel(4);
+        let (postproc_tx, mut postproc_rx) = tokio::sync::mpsc::channel(4);
+
+        let handle = forward_completions(notice_rx, postproc_tx);
+
+        notice_tx
+            .send(NzbCompletionNotice {
+                nzb_id: 42,
+                nzb_name: "test-nzb".to_string(),
+                working_dir: std::path::PathBuf::from("/tmp/work"),
+                category: Some("movies".to_string()),
+                parameters: vec![("key".to_string(), "val".to_string())],
+            })
+            .await
+            .expect("send");
+        drop(notice_tx);
+
+        let req = postproc_rx.recv().await.expect("recv");
+        assert_eq!(req.nzb_id, 42);
+        assert_eq!(req.nzb_name, "test-nzb");
+        assert_eq!(req.working_dir, std::path::PathBuf::from("/tmp/work"));
+        assert_eq!(req.category, Some("movies".to_string()));
+        assert_eq!(req.parameters, vec![("key".to_string(), "val".to_string())]);
+
+        handle.await.expect("join");
+    }
+
+    #[test]
+    fn postproc_config_maps_fields() {
+        let config = Config::from_raw(
+            [
+                ("DestDir".to_string(), "/dest".to_string()),
+                ("AppendCategoryDir".to_string(), "yes".to_string()),
+                ("UnpackCleanupDisk".to_string(), "no".to_string()),
+                ("ExtCleanupDisk".to_string(), ".par2".to_string()),
+            ]
+            .into_iter()
+            .collect(),
+        );
+        let pp = postproc_config(&config);
+        assert_eq!(pp.dest_dir, std::path::PathBuf::from("/dest"));
+        assert!(pp.append_category_dir);
+        assert!(!pp.unpack_cleanup_disk);
+        assert_eq!(pp.ext_cleanup_disk, ".par2");
     }
 }

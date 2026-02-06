@@ -472,11 +472,7 @@ mod tests {
         let (state, handle, _coord) = state_with_queue();
         let _nzb_file = nzb_tempfile();
         handle
-            .add_nzb(
-                _nzb_file.path().to_path_buf(),
-                None,
-                Priority::Normal,
-            )
+            .add_nzb(_nzb_file.path().to_path_buf(), None, Priority::Normal)
             .await
             .expect("add");
 
@@ -495,11 +491,7 @@ mod tests {
         let (state, handle, _coord) = state_with_queue();
         let _nzb_file = nzb_tempfile();
         let id = handle
-            .add_nzb(
-                _nzb_file.path().to_path_buf(),
-                None,
-                Priority::Normal,
-            )
+            .add_nzb(_nzb_file.path().to_path_buf(), None, Priority::Normal)
             .await
             .expect("add");
 
