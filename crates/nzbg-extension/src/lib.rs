@@ -1,7 +1,14 @@
+mod runner;
+
 use std::collections::HashMap;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
+
+pub use runner::{
+    ExtensionRunner, NzbppContext, ProcessOutput, ProcessRunner, RealProcessRunner,
+    build_nzbpp_env, interpret_post_result,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ExtensionKind {
