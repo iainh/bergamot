@@ -7,4 +7,5 @@ members = [
   "crates/nzbg-nntp",
   "crates/nzbg-yenc",
   "crates/nzbg-queue",
+  "crates/nzbg-postproc",
 ]
