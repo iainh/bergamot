@@ -550,23 +550,55 @@ impl QueueCoordinator {
     fn handle_download_complete(&mut self, result: crate::command::DownloadResult) {
         self.active_downloads.remove(&result.article_id);
         let nzb_id = result.article_id.nzb_id;
-        match result.outcome {
-            crate::command::DownloadOutcome::Success { crc, .. } => {
-                self.mark_segment_status(result.article_id, SegmentStatus::Completed);
-                if let Some(nzb) = self.queue.queue.iter_mut().find(|n| n.id == nzb_id) {
-                    if let Some(seg) = nzb
-                        .files
-                        .get_mut(result.article_id.file_idx as usize)
-                        .and_then(|f| f.articles.get_mut(result.article_id.seg_idx as usize))
-                    {
-                        seg.crc = crc;
+        let file_idx = result.article_id.file_idx as usize;
+        let seg_idx = result.article_id.seg_idx as usize;
+
+        if let Some(nzb) = self.queue.queue.iter_mut().find(|n| n.id == nzb_id) {
+            let article_size = nzb
+                .files
+                .get(file_idx)
+                .and_then(|f| f.articles.get(seg_idx))
+                .map(|a| a.size)
+                .unwrap_or(0);
+
+            let already_terminal = nzb
+                .files
+                .get(file_idx)
+                .and_then(|f| f.articles.get(seg_idx))
+                .is_some_and(|a| {
+                    a.status == ArticleStatus::Finished || a.status == ArticleStatus::Failed
+                });
+
+            if already_terminal {
+                return;
+            }
+
+            match result.outcome {
+                crate::command::DownloadOutcome::Success { crc, .. } => {
+                    if let Some(file) = nzb.files.get_mut(file_idx) {
+                        if let Some(seg) = file.articles.get_mut(seg_idx) {
+                            seg.status = ArticleStatus::Finished;
+                            seg.crc = crc;
+                        }
+                        file.success_size += article_size;
+                        file.remaining_size = file.remaining_size.saturating_sub(article_size);
+                        file.success_articles += 1;
                     }
+                    nzb.success_size += article_size;
+                    nzb.remaining_size = nzb.remaining_size.saturating_sub(article_size);
                     nzb.success_article_count += 1;
                 }
-            }
-            crate::command::DownloadOutcome::Failure { .. } => {
-                self.mark_segment_status(result.article_id, SegmentStatus::Failed);
-                if let Some(nzb) = self.queue.queue.iter_mut().find(|n| n.id == nzb_id) {
+                crate::command::DownloadOutcome::Failure { .. } => {
+                    if let Some(file) = nzb.files.get_mut(file_idx) {
+                        if let Some(seg) = file.articles.get_mut(seg_idx) {
+                            seg.status = ArticleStatus::Failed;
+                        }
+                        file.failed_size += article_size;
+                        file.remaining_size = file.remaining_size.saturating_sub(article_size);
+                        file.failed_articles += 1;
+                    }
+                    nzb.failed_size += article_size;
+                    nzb.remaining_size = nzb.remaining_size.saturating_sub(article_size);
                     nzb.failed_article_count += 1;
                 }
             }
@@ -1060,6 +1092,7 @@ fn is_par_file(filename: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::command::{DownloadOutcome, DownloadResult};
     use nzbg_core::models::{ArticleInfo, ArticleStatus};
 
     fn sample_file() -> FileInfo {
@@ -2204,5 +2237,54 @@ mod tests {
             Priority::Normal,
         );
         assert!(result.is_err());
+    }
+
+    fn ingested_coordinator() -> (QueueCoordinator, QueueHandle, mpsc::Receiver<ArticleAssignment>, watch::Receiver<u64>) {
+        let (mut coordinator, handle, rx, rate_rx) = QueueCoordinator::new(4, 2);
+        let nzb_file = write_sample_nzb();
+        coordinator
+            .ingest_nzb(nzb_file.path(), None, Priority::Normal)
+            .expect("ingest");
+        (coordinator, handle, rx, rate_rx)
+    }
+
+    #[test]
+    fn download_success_updates_file_and_nzb_sizes() {
+        let (mut coordinator, _handle, _rx, _rate_rx) = ingested_coordinator();
+        let article_id = ArticleId { nzb_id: 1, file_idx: 0, seg_idx: 0 };
+        coordinator.active_downloads.insert(article_id, ActiveDownload { _started: Instant::now() });
+
+        coordinator.handle_download_complete(DownloadResult {
+            article_id,
+            outcome: DownloadOutcome::Success { data: vec![0; 500], offset: 0, crc: 0x1234 },
+        });
+
+        let nzb = &coordinator.queue.queue[0];
+        let file = &nzb.files[0];
+        assert_eq!(file.success_size, 500);
+        assert_eq!(file.remaining_size, 300);
+        assert_eq!(file.success_articles, 1);
+        assert_eq!(nzb.success_size, 500);
+        assert_eq!(nzb.remaining_size, 500);
+    }
+
+    #[test]
+    fn download_failure_updates_file_and_nzb_sizes() {
+        let (mut coordinator, _handle, _rx, _rate_rx) = ingested_coordinator();
+        let article_id = ArticleId { nzb_id: 1, file_idx: 0, seg_idx: 0 };
+        coordinator.active_downloads.insert(article_id, ActiveDownload { _started: Instant::now() });
+
+        coordinator.handle_download_complete(DownloadResult {
+            article_id,
+            outcome: DownloadOutcome::Failure { message: "test".to_string() },
+        });
+
+        let nzb = &coordinator.queue.queue[0];
+        let file = &nzb.files[0];
+        assert_eq!(file.failed_size, 500);
+        assert_eq!(file.remaining_size, 300);
+        assert_eq!(file.failed_articles, 1);
+        assert_eq!(nzb.failed_size, 500);
+        assert_eq!(nzb.remaining_size, 500);
     }
 }
