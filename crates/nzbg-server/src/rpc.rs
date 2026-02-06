@@ -40,6 +40,25 @@ pub async fn dispatch_rpc(
         "listgroups" => rpc_listgroups(state).await,
         "editqueue" => rpc_editqueue(params, state).await,
         "shutdown" => rpc_shutdown(state).await,
+        "listfiles" => rpc_listfiles(params, state).await,
+        "postqueue" => Ok(serde_json::json!([])),
+        "writelog" => Ok(serde_json::json!(true)),
+        "loadlog" => Ok(serde_json::json!([])),
+        "servervolumes" => Ok(serde_json::json!([])),
+        "config" => Ok(serde_json::json!([])),
+        "loadconfig" => Ok(serde_json::json!([])),
+        "saveconfig" => Ok(serde_json::json!(true)),
+        "configtemplates" => Ok(serde_json::json!([])),
+        "history" => Ok(serde_json::json!([])),
+        "rate" => rpc_rate(params, state).await,
+        "pausedownload" => rpc_pausedownload(state).await,
+        "resumedownload" => rpc_resumedownload(state).await,
+        "pausepost" => Ok(serde_json::json!(true)),
+        "resumepost" => Ok(serde_json::json!(true)),
+        "pausescan" => Ok(serde_json::json!(true)),
+        "resumescan" => Ok(serde_json::json!(true)),
+        "scan" => Ok(serde_json::json!(true)),
+        "feeds" => Ok(serde_json::json!([])),
         _ => Err(JsonRpcError {
             code: -32601,
             message: format!("Method not found: {method}"),
@@ -178,6 +197,42 @@ async fn rpc_shutdown(state: &AppState) -> Result<serde_json::Value, JsonRpcErro
     Ok(serde_json::json!(true))
 }
 
+async fn rpc_listfiles(
+    _params: &serde_json::Value,
+    state: &AppState,
+) -> Result<serde_json::Value, JsonRpcError> {
+    let _queue = require_queue(state)?;
+    Ok(serde_json::json!([]))
+}
+
+async fn rpc_rate(
+    params: &serde_json::Value,
+    state: &AppState,
+) -> Result<serde_json::Value, JsonRpcError> {
+    let queue = require_queue(state)?;
+    let arr = params
+        .as_array()
+        .ok_or_else(|| rpc_error("params must be an array"))?;
+    let limit_kb = arr.first().and_then(|v| v.as_u64()).unwrap_or(0);
+    queue
+        .set_download_rate(limit_kb * 1024)
+        .await
+        .map_err(rpc_error)?;
+    Ok(serde_json::json!(true))
+}
+
+async fn rpc_pausedownload(state: &AppState) -> Result<serde_json::Value, JsonRpcError> {
+    let queue = require_queue(state)?;
+    queue.pause_all().await.map_err(rpc_error)?;
+    Ok(serde_json::json!(true))
+}
+
+async fn rpc_resumedownload(state: &AppState) -> Result<serde_json::Value, JsonRpcError> {
+    let queue = require_queue(state)?;
+    queue.resume_all().await.map_err(rpc_error)?;
+    Ok(serde_json::json!(true))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -292,5 +347,184 @@ mod tests {
         let state = AppState::default();
         let result = dispatch_rpc("listgroups", &serde_json::json!([]), &state).await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn dispatch_listfiles_returns_empty_array() {
+        let (state, handle, _coord) = state_with_queue();
+        let result = dispatch_rpc("listfiles", &serde_json::json!([1]), &state)
+            .await
+            .expect("listfiles");
+        assert_eq!(result, serde_json::json!([]));
+        handle.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn dispatch_postqueue_returns_empty_array() {
+        let state = AppState::default();
+        let result = dispatch_rpc("postqueue", &serde_json::json!([]), &state)
+            .await
+            .expect("postqueue");
+        assert_eq!(result, serde_json::json!([]));
+    }
+
+    #[tokio::test]
+    async fn dispatch_writelog_returns_true() {
+        let state = AppState::default();
+        let result = dispatch_rpc(
+            "writelog",
+            &serde_json::json!(["info", "test message"]),
+            &state,
+        )
+        .await
+        .expect("writelog");
+        assert_eq!(result, serde_json::json!(true));
+    }
+
+    #[tokio::test]
+    async fn dispatch_loadlog_returns_empty_array() {
+        let state = AppState::default();
+        let result = dispatch_rpc("loadlog", &serde_json::json!([1, 0, 100]), &state)
+            .await
+            .expect("loadlog");
+        assert_eq!(result, serde_json::json!([]));
+    }
+
+    #[tokio::test]
+    async fn dispatch_servervolumes_returns_empty_array() {
+        let state = AppState::default();
+        let result = dispatch_rpc("servervolumes", &serde_json::json!([]), &state)
+            .await
+            .expect("servervolumes");
+        assert_eq!(result, serde_json::json!([]));
+    }
+
+    #[tokio::test]
+    async fn dispatch_config_returns_empty_array() {
+        let state = AppState::default();
+        let result = dispatch_rpc("config", &serde_json::json!([]), &state)
+            .await
+            .expect("config");
+        assert_eq!(result, serde_json::json!([]));
+    }
+
+    #[tokio::test]
+    async fn dispatch_loadconfig_returns_empty_array() {
+        let state = AppState::default();
+        let result = dispatch_rpc("loadconfig", &serde_json::json!([]), &state)
+            .await
+            .expect("loadconfig");
+        assert_eq!(result, serde_json::json!([]));
+    }
+
+    #[tokio::test]
+    async fn dispatch_saveconfig_returns_true() {
+        let state = AppState::default();
+        let result = dispatch_rpc("saveconfig", &serde_json::json!([]), &state)
+            .await
+            .expect("saveconfig");
+        assert_eq!(result, serde_json::json!(true));
+    }
+
+    #[tokio::test]
+    async fn dispatch_configtemplates_returns_empty_array() {
+        let state = AppState::default();
+        let result = dispatch_rpc("configtemplates", &serde_json::json!([]), &state)
+            .await
+            .expect("configtemplates");
+        assert_eq!(result, serde_json::json!([]));
+    }
+
+    #[tokio::test]
+    async fn dispatch_history_returns_empty_array() {
+        let state = AppState::default();
+        let result = dispatch_rpc("history", &serde_json::json!([false]), &state)
+            .await
+            .expect("history");
+        assert_eq!(result, serde_json::json!([]));
+    }
+
+    #[tokio::test]
+    async fn dispatch_rate_sets_download_rate() {
+        let (state, handle, _coord) = state_with_queue();
+        let result = dispatch_rpc("rate", &serde_json::json!([500]), &state)
+            .await
+            .expect("rate");
+        assert_eq!(result, serde_json::json!(true));
+        handle.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn dispatch_pausedownload_returns_true() {
+        let (state, handle, _coord) = state_with_queue();
+        let result = dispatch_rpc("pausedownload", &serde_json::json!([]), &state)
+            .await
+            .expect("pausedownload");
+        assert_eq!(result, serde_json::json!(true));
+        handle.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn dispatch_resumedownload_returns_true() {
+        let (state, handle, _coord) = state_with_queue();
+        let result = dispatch_rpc("resumedownload", &serde_json::json!([]), &state)
+            .await
+            .expect("resumedownload");
+        assert_eq!(result, serde_json::json!(true));
+        handle.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn dispatch_pausepost_returns_true() {
+        let state = AppState::default();
+        let result = dispatch_rpc("pausepost", &serde_json::json!([]), &state)
+            .await
+            .expect("pausepost");
+        assert_eq!(result, serde_json::json!(true));
+    }
+
+    #[tokio::test]
+    async fn dispatch_resumepost_returns_true() {
+        let state = AppState::default();
+        let result = dispatch_rpc("resumepost", &serde_json::json!([]), &state)
+            .await
+            .expect("resumepost");
+        assert_eq!(result, serde_json::json!(true));
+    }
+
+    #[tokio::test]
+    async fn dispatch_pausescan_returns_true() {
+        let state = AppState::default();
+        let result = dispatch_rpc("pausescan", &serde_json::json!([]), &state)
+            .await
+            .expect("pausescan");
+        assert_eq!(result, serde_json::json!(true));
+    }
+
+    #[tokio::test]
+    async fn dispatch_resumescan_returns_true() {
+        let state = AppState::default();
+        let result = dispatch_rpc("resumescan", &serde_json::json!([]), &state)
+            .await
+            .expect("resumescan");
+        assert_eq!(result, serde_json::json!(true));
+    }
+
+    #[tokio::test]
+    async fn dispatch_scan_returns_true() {
+        let state = AppState::default();
+        let result = dispatch_rpc("scan", &serde_json::json!([]), &state)
+            .await
+            .expect("scan");
+        assert_eq!(result, serde_json::json!(true));
+    }
+
+    #[tokio::test]
+    async fn dispatch_feeds_returns_empty_array() {
+        let state = AppState::default();
+        let result = dispatch_rpc("feeds", &serde_json::json!([]), &state)
+            .await
+            .expect("feeds");
+        assert_eq!(result, serde_json::json!([]));
     }
 }
