@@ -33,7 +33,8 @@ impl SpeedLimiter {
 
     pub fn set_rate(&mut self, rate_bytes_per_sec: u64) {
         self.rate = rate_bytes_per_sec;
-        self.rate_atomic.store(rate_bytes_per_sec, Ordering::Relaxed);
+        self.rate_atomic
+            .store(rate_bytes_per_sec, Ordering::Relaxed);
     }
 
     pub fn is_unlimited(&self) -> bool {

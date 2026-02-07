@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use tokio::sync::{Mutex, Semaphore};
@@ -29,8 +30,9 @@ struct ServerState {
     server: NewsServer,
     semaphore: Arc<Semaphore>,
     idle_connections: Mutex<Vec<(NntpConnection, Instant)>>,
-    backoff_until: Mutex<Option<Instant>>,
-    fail_count: Mutex<u32>,
+    backoff_until_ms: AtomicU64,
+    fail_count: AtomicU32,
+    epoch: Instant,
 }
 
 pub struct ServerPool<F: ConnectionFactory = RealConnectionFactory> {
@@ -50,6 +52,7 @@ impl<F: ConnectionFactory> ServerPool<F> {
         let mut sorted = servers;
         sorted.sort_by_key(|s| (s.level, s.group));
 
+        let epoch = Instant::now();
         let server_states = sorted
             .into_iter()
             .filter(|s| s.active)
@@ -58,8 +61,9 @@ impl<F: ConnectionFactory> ServerPool<F> {
                 Arc::new(ServerState {
                     semaphore: Arc::new(Semaphore::new(max_conns)),
                     idle_connections: Mutex::new(Vec::new()),
-                    backoff_until: Mutex::new(None),
-                    fail_count: Mutex::new(0),
+                    backoff_until_ms: AtomicU64::new(0),
+                    fail_count: AtomicU32::new(0),
+                    epoch,
                     server,
                 })
             })
@@ -85,7 +89,7 @@ impl<F: ConnectionFactory> ServerPool<F> {
         let mut last_error = NntpError::ProtocolError("no servers available".into());
 
         for state in &self.servers {
-            if self.is_in_backoff(state).await {
+            if self.is_in_backoff(state) {
                 continue;
             }
 
@@ -96,7 +100,7 @@ impl<F: ConnectionFactory> ServerPool<F> {
 
             match self.try_fetch_from_server(state, message_id, groups).await {
                 Ok(data) => {
-                    self.reset_backoff(state).await;
+                    self.reset_backoff(state);
                     drop(permit);
                     return Ok(data);
                 }
@@ -106,7 +110,7 @@ impl<F: ConnectionFactory> ServerPool<F> {
                     continue;
                 }
                 Err(err) => {
-                    self.record_failure(state).await;
+                    self.record_failure(state);
                     drop(permit);
                     last_error = err;
                     continue;
@@ -210,24 +214,27 @@ impl<F: ConnectionFactory> ServerPool<F> {
         closed
     }
 
-    async fn is_in_backoff(&self, state: &ServerState) -> bool {
-        let backoff = state.backoff_until.lock().await;
-        backoff.is_some_and(|until| Instant::now() < until)
+    fn is_in_backoff(&self, state: &ServerState) -> bool {
+        let deadline_ms = state.backoff_until_ms.load(Ordering::Acquire);
+        if deadline_ms == 0 {
+            return false;
+        }
+        let now_ms = state.epoch.elapsed().as_millis() as u64;
+        now_ms < deadline_ms
     }
 
-    async fn record_failure(&self, state: &ServerState) {
-        let mut fail_count = state.fail_count.lock().await;
-        *fail_count = (*fail_count + 1).min(10);
-        let delay = Duration::from_secs(1 << (*fail_count).min(6));
-        let mut backoff = state.backoff_until.lock().await;
-        *backoff = Some(Instant::now() + delay);
+    fn record_failure(&self, state: &ServerState) {
+        let count = state.fail_count.fetch_add(1, Ordering::Relaxed).min(9) + 1;
+        let capped = count.min(10);
+        state.fail_count.store(capped, Ordering::Relaxed);
+        let delay = Duration::from_secs(1 << capped.min(6));
+        let deadline_ms = (state.epoch.elapsed() + delay).as_millis() as u64;
+        state.backoff_until_ms.store(deadline_ms, Ordering::Release);
     }
 
-    async fn reset_backoff(&self, state: &ServerState) {
-        let mut fail_count = state.fail_count.lock().await;
-        *fail_count = 0;
-        let mut backoff = state.backoff_until.lock().await;
-        *backoff = None;
+    fn reset_backoff(&self, state: &ServerState) {
+        state.fail_count.store(0, Ordering::Relaxed);
+        state.backoff_until_ms.store(0, Ordering::Release);
     }
 
     pub fn server_count(&self) -> usize {
@@ -522,8 +529,8 @@ mod tests {
             .fetch_article("test@example", &["alt.test".into()])
             .await;
 
-        let backoff = pool.servers[0].backoff_until.lock().await;
-        assert!(backoff.is_some());
+        let deadline = pool.servers[0].backoff_until_ms.load(Ordering::Acquire);
+        assert!(deadline > 0);
     }
 
     #[tokio::test]
@@ -532,20 +539,23 @@ mod tests {
         let factory = Arc::new(FakeFactory::new(b"data"));
         let pool = ServerPool::with_factory(vec![server], factory);
 
-        {
-            let mut fail_count = pool.servers[0].fail_count.lock().await;
-            *fail_count = 3;
-            let mut backoff = pool.servers[0].backoff_until.lock().await;
-            *backoff = Some(Instant::now() - Duration::from_secs(1));
-        }
+        pool.servers[0].fail_count.store(3, Ordering::Relaxed);
+        let past_ms = pool.servers[0]
+            .epoch
+            .elapsed()
+            .saturating_sub(Duration::from_secs(1))
+            .as_millis() as u64;
+        pool.servers[0]
+            .backoff_until_ms
+            .store(past_ms, Ordering::Release);
 
         let result = pool
             .fetch_article("test@example", &["alt.test".into()])
             .await;
         assert!(result.is_ok());
 
-        let fail_count = pool.servers[0].fail_count.lock().await;
-        assert_eq!(*fail_count, 0);
+        let fail_count = pool.servers[0].fail_count.load(Ordering::Relaxed);
+        assert_eq!(fail_count, 0);
     }
 
     #[tokio::test]
