@@ -60,6 +60,7 @@ pub struct NzbSnapshotEntry {
     pub success_article_count: u32,
     pub failed_article_count: u32,
     pub parameters: Vec<(String, String)>,
+    pub active_downloads: u32,
     pub file_ids: Vec<u32>,
 }
 

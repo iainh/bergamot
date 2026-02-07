@@ -929,6 +929,11 @@ impl QueueCoordinator {
                     } else {
                         Some(nzb.final_dir.clone())
                     };
+                    let active_downloads = self
+                        .active_downloads
+                        .keys()
+                        .filter(|id| id.nzb_id == nzb.id)
+                        .count() as u32;
                     NzbSnapshotEntry {
                         id: nzb.id,
                         name: nzb.name.clone(),
@@ -956,6 +961,7 @@ impl QueueCoordinator {
                             .iter()
                             .map(|p| (p.name.clone(), p.value.clone()))
                             .collect(),
+                        active_downloads,
                         file_ids: nzb.files.iter().map(|f| f.id).collect(),
                     }
                 })

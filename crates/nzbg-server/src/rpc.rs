@@ -218,8 +218,8 @@ async fn rpc_listgroups(state: &AppState) -> Result<serde_json::Value, JsonRpcEr
 
             let status = if entry.paused {
                 "PAUSED"
-            } else if remaining_size > 0 {
-                "QUEUED"
+            } else if entry.active_downloads > 0 {
+                "DOWNLOADING"
             } else {
                 "QUEUED"
             };
@@ -252,7 +252,7 @@ async fn rpc_listgroups(state: &AppState) -> Result<serde_json::Value, JsonRpcEr
                 "DupeScore": entry.dupe_score,
                 "DupeMode": entry.dupe_mode as u32,
                 "MinPostTime": 0,
-                "ActiveDownloads": 0,
+                "ActiveDownloads": entry.active_downloads,
                 "Health": entry.health,
                 "CriticalHealth": entry.critical_health,
                 "Kind": "NZB",
