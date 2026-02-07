@@ -32,6 +32,13 @@
 //! |-----------|-----------|-------------|-----------|---------|
 //! | Repair    |     5 MB  |       65 ms |     14 ms |  ~4.7x  |
 //! | Repair    |    50 MB  |      582 ms |    100 ms |  ~5.8x  |
+//!
+//! ## After #4: parallelize repair encoding loop with rayon
+//!
+//! | Operation | Data Size | par2cmdline | nzbg-par2 | Speedup |
+//! |-----------|-----------|-------------|-----------|---------|
+//! | Repair    |     5 MB  |       66 ms |     12 ms |  ~5.6x  |
+//! | Repair    |    50 MB  |      584 ms |     55 ms | ~10.7x  |
 
 use std::path::Path;
 use std::process::Command;

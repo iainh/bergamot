@@ -1,6 +1,8 @@
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
 
+use rayon::prelude::*;
+
 use crate::error::Par2RepairError;
 use crate::galois;
 use crate::model::{FileVerifyStatus, RecoverySet, VerifyResult};
@@ -136,10 +138,14 @@ pub fn repair_recovery_set(
                 f.read_exact(&mut slice_buf[..gs.write_len])?;
                 slice_buf[gs.write_len..].fill(0);
 
-                for (i, &exp) in exponents.iter().enumerate() {
-                    let coeff = galois::pow(bases[j], exp);
-                    galois::muladd(&mut recovery_data[i], &slice_buf, coeff);
-                }
+                let base_j = bases[j];
+                recovery_data
+                    .par_iter_mut()
+                    .zip(exponents.par_iter())
+                    .for_each(|(row, &exp)| {
+                        let coeff = galois::pow(base_j, exp);
+                        galois::muladd(row, &slice_buf, coeff);
+                    });
             }
             let _ = file_idx;
         }
