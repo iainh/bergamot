@@ -1,17 +1,14 @@
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use axum::extract::State as AxumState;
 use axum::http::{StatusCode, header};
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router, middleware};
+use rust_embed::Embed;
 use tokio::net::TcpListener;
-use tower::Service;
 use tower_http::compression::CompressionLayer;
 use tower_http::cors::CorsLayer;
-use tower_http::services::ServeDir;
 
 use crate::auth::{
     AccessLevel, AuthState, auth_middleware, authenticate, extract_access, required_access,
@@ -23,6 +20,10 @@ use crate::rpc::{JsonRpcRequest, JsonRpcResponse, dispatch_rpc};
 use crate::shutdown::ShutdownHandle;
 use crate::status::StatusResponse;
 use crate::xmlrpc;
+
+#[derive(Embed)]
+#[folder = "webui/"]
+struct WebUiAssets;
 
 #[derive(Debug, Clone)]
 pub struct AppState {
@@ -387,20 +388,16 @@ impl WebServer {
                 .route("/logout", post(handle_logout));
         }
 
-        let web_dir = self.config.web_dir.clone();
         let combined_routes = Router::new()
             .route("/combined.css", get(handle_combined_file))
-            .route("/combined.js", get(handle_combined_file))
-            .with_state(web_dir);
+            .route("/combined.js", get(handle_combined_file));
 
         let fallback_state = self.state.clone();
         let fallback_auth = auth_state;
-        let serve_dir = ServeDir::new(&self.config.web_dir);
         let fallback = axum::routing::any(
             move |req: axum::http::Request<axum::body::Body>| {
                 let state = fallback_state.clone();
                 let auth = fallback_auth.clone();
-                let serve_dir = serve_dir.clone();
                 async move {
                     let path = req.uri().path().to_string();
                     if let Some(method) = path.strip_prefix("/jsonrpc/")
@@ -432,11 +429,7 @@ impl WebServer {
                         };
                         return Json(response).into_response();
                     }
-                    let mut serve_dir = serve_dir;
-                    match serve_dir.call(req).await {
-                        Ok(r) => r.map(axum::body::Body::new).into_response(),
-                        Err(_) => StatusCode::NOT_FOUND.into_response(),
-                    }
+                    serve_embedded_file(&path)
                 }
             },
         );
@@ -586,10 +579,30 @@ async fn handle_xmlrpc(
     }
 }
 
-async fn handle_combined_file(
-    AxumState(web_dir): AxumState<PathBuf>,
-    uri: axum::http::Uri,
-) -> impl IntoResponse {
+fn serve_embedded_file(path: &str) -> axum::response::Response {
+    let file_path = path.trim_start_matches('/');
+    let file_path = if file_path.is_empty() {
+        "index.html"
+    } else {
+        file_path
+    };
+
+    match WebUiAssets::get(file_path) {
+        Some(content) => {
+            let mime = mime_guess::from_path(file_path)
+                .first_or_octet_stream()
+                .to_string();
+            (
+                [(header::CONTENT_TYPE, mime)],
+                content.data.to_vec(),
+            )
+                .into_response()
+        }
+        None => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
+async fn handle_combined_file(uri: axum::http::Uri) -> impl IntoResponse {
     let path = uri.path();
     let content_type = if path.ends_with(".css") {
         "text/css"
@@ -602,13 +615,14 @@ async fn handle_combined_file(
 
     let mut combined = String::new();
     for file in &files {
-        let file_path = web_dir.join(file);
-        match std::fs::read_to_string(&file_path) {
-            Ok(contents) => {
-                combined.push_str(&contents);
-                combined.push('\n');
+        match WebUiAssets::get(file) {
+            Some(content) => {
+                if let Ok(s) = std::str::from_utf8(&content.data) {
+                    combined.push_str(s);
+                    combined.push('\n');
+                }
             }
-            Err(_) => {
+            None => {
                 return (
                     StatusCode::NOT_FOUND,
                     format!("File not found: {file}"),
@@ -756,7 +770,6 @@ mod tests {
             secure_control: false,
             secure_cert: None,
             secure_key: None,
-            web_dir: std::path::PathBuf::from("/tmp"),
             form_auth: false,
             authorized_ips: vec![],
             control_username: "admin".to_string(),

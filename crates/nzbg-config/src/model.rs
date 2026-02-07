@@ -9,7 +9,6 @@ pub struct Config {
     pub nzb_dir: PathBuf,
     pub queue_dir: PathBuf,
     pub temp_dir: PathBuf,
-    pub web_dir: PathBuf,
     pub script_dir: PathBuf,
     pub log_file: PathBuf,
     pub config_template: PathBuf,
@@ -68,10 +67,6 @@ impl Config {
             .get("TempDir")
             .map(PathBuf::from)
             .unwrap_or_else(|| main_dir.join("tmp"));
-        let web_dir = raw
-            .get("WebDir")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| main_dir.join("webui"));
         let script_dir = raw
             .get("ScriptDir")
             .map(PathBuf::from)
@@ -182,7 +177,6 @@ impl Config {
             nzb_dir,
             queue_dir,
             temp_dir,
-            web_dir,
             script_dir,
             log_file,
             config_template,

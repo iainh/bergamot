@@ -42,7 +42,6 @@ pub fn web_server_config(config: &Config) -> WebServerConfig {
         secure_control: config.secure_control,
         secure_cert: config.secure_cert.clone(),
         secure_key: config.secure_key.clone(),
-        web_dir: config.web_dir.clone(),
         form_auth: config.form_auth,
         authorized_ips: config.authorized_ip.clone(),
         control_username: config.control_username.clone(),

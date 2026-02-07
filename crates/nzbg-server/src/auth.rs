@@ -252,7 +252,6 @@ mod tests {
             secure_control: false,
             secure_cert: None,
             secure_key: None,
-            web_dir: std::path::PathBuf::from("/tmp"),
             form_auth: false,
             authorized_ips: vec![],
             control_username: "admin".to_string(),
