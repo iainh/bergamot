@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use tokio::sync::{mpsc, oneshot, watch};
 
@@ -296,7 +296,8 @@ impl QueueCoordinator {
         watch::Receiver<u64>,
     ) {
         let (command_tx, command_rx) = mpsc::channel(64);
-        let (assignment_tx, assignment_rx) = mpsc::channel(64);
+        let channel_capacity = max_connections.max(64) * 4;
+        let (assignment_tx, assignment_rx) = mpsc::channel(channel_capacity);
         let (rate_watch_tx, rate_watch_rx) = watch::channel(0u64);
         let handle = QueueHandle { command_tx };
         let coordinator = Self {
@@ -330,17 +331,11 @@ impl QueueCoordinator {
     }
 
     pub async fn run(&mut self) {
-        let mut slot_timer = tokio::time::interval(Duration::from_millis(100));
+        self.try_fill_download_slots();
 
-        loop {
+        while let Some(cmd) = self.command_rx.recv().await {
+            self.handle_command(cmd).await;
             self.try_fill_download_slots();
-
-            tokio::select! {
-                Some(cmd) = self.command_rx.recv() => {
-                    self.handle_command(cmd).await;
-                }
-                _ = slot_timer.tick() => {}
-            }
 
             if self.shutdown && self.active_downloads.is_empty() {
                 break;
@@ -691,7 +686,12 @@ impl QueueCoordinator {
                 });
 
             if already_terminal {
-                tracing::debug!(nzb_id, file_idx, seg_idx, "segment already terminal, ignoring");
+                tracing::debug!(
+                    nzb_id,
+                    file_idx,
+                    seg_idx,
+                    "segment already terminal, ignoring"
+                );
                 return;
             }
 
@@ -1318,12 +1318,7 @@ impl QueueCoordinator {
         self.paused = paused;
         self.download_rate = rate;
         let _ = self.rate_watch_tx.send(rate);
-        tracing::info!(
-            nzb_count,
-            paused,
-            rate,
-            "restored queue state from disk"
-        );
+        tracing::info!(nzb_count, paused, rate, "restored queue state from disk");
     }
 
     fn update_post_status(
@@ -1511,7 +1506,12 @@ mod tests {
 
     #[tokio::test]
     async fn pause_all_sets_paused_flag() {
-        let (mut coordinator, handle, _rx, _rate_rx) = QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
+        let (mut coordinator, handle, _rx, _rate_rx) = QueueCoordinator::new(
+            2,
+            1,
+            std::path::PathBuf::from("/tmp/inter"),
+            std::path::PathBuf::from("/tmp/dest"),
+        );
         tokio::spawn(async move { coordinator.run().await });
 
         handle.pause_all().await.expect("pause");
@@ -1523,7 +1523,12 @@ mod tests {
 
     #[tokio::test]
     async fn resume_all_clears_paused_flag() {
-        let (mut coordinator, handle, _rx, _rate_rx) = QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
+        let (mut coordinator, handle, _rx, _rate_rx) = QueueCoordinator::new(
+            2,
+            1,
+            std::path::PathBuf::from("/tmp/inter"),
+            std::path::PathBuf::from("/tmp/dest"),
+        );
         tokio::spawn(async move { coordinator.run().await });
 
         handle.pause_all().await.expect("pause");
@@ -1536,7 +1541,12 @@ mod tests {
 
     #[tokio::test]
     async fn set_download_rate_updates_rate() {
-        let (mut coordinator, handle, _rx, _rate_rx) = QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
+        let (mut coordinator, handle, _rx, _rate_rx) = QueueCoordinator::new(
+            2,
+            1,
+            std::path::PathBuf::from("/tmp/inter"),
+            std::path::PathBuf::from("/tmp/dest"),
+        );
         tokio::spawn(async move { coordinator.run().await });
 
         handle.set_download_rate(500_000).await.expect("rate");
@@ -1548,7 +1558,12 @@ mod tests {
 
     #[tokio::test]
     async fn set_download_rate_updates_watch_receiver() {
-        let (mut coordinator, handle, _rx, mut rate_rx) = QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
+        let (mut coordinator, handle, _rx, mut rate_rx) = QueueCoordinator::new(
+            2,
+            1,
+            std::path::PathBuf::from("/tmp/inter"),
+            std::path::PathBuf::from("/tmp/dest"),
+        );
         tokio::spawn(async move { coordinator.run().await });
 
         assert_eq!(*rate_rx.borrow(), 0);
@@ -1567,7 +1582,12 @@ mod tests {
     #[tokio::test]
     async fn get_queue_snapshot_returns_state() {
         let _nzb_file = write_sample_nzb();
-        let (mut coordinator, handle, _rx, _rate_rx) = QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
+        let (mut coordinator, handle, _rx, _rate_rx) = QueueCoordinator::new(
+            2,
+            1,
+            std::path::PathBuf::from("/tmp/inter"),
+            std::path::PathBuf::from("/tmp/dest"),
+        );
         tokio::spawn(async move { coordinator.run().await });
 
         handle
@@ -1584,7 +1604,12 @@ mod tests {
     #[tokio::test]
     async fn add_nzb_updates_queue() {
         let _nzb_file = write_sample_nzb();
-        let (mut coordinator, handle, _assignments_rx, _rate_rx) = QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
+        let (mut coordinator, handle, _assignments_rx, _rate_rx) = QueueCoordinator::new(
+            2,
+            1,
+            std::path::PathBuf::from("/tmp/inter"),
+            std::path::PathBuf::from("/tmp/dest"),
+        );
 
         tokio::spawn(async move {
             coordinator.run().await;
@@ -1604,7 +1629,12 @@ mod tests {
 
     #[test]
     fn move_nzb_reorders_queue() {
-        let (mut coordinator, _handle, _rx, _rate_rx) = QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
+        let (mut coordinator, _handle, _rx, _rate_rx) = QueueCoordinator::new(
+            2,
+            1,
+            std::path::PathBuf::from("/tmp/inter"),
+            std::path::PathBuf::from("/tmp/dest"),
+        );
 
         let nzb = NzbInfo {
             id: 1,
@@ -1682,7 +1712,12 @@ mod tests {
 
     #[test]
     fn next_article_respects_pause_and_priority() {
-        let (mut coordinator, _handle, _rx, _rate_rx) = QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
+        let (mut coordinator, _handle, _rx, _rate_rx) = QueueCoordinator::new(
+            2,
+            1,
+            std::path::PathBuf::from("/tmp/inter"),
+            std::path::PathBuf::from("/tmp/dest"),
+        );
         let nzb = NzbInfo {
             id: 1,
             kind: nzbg_core::models::NzbKind::Nzb,
@@ -1760,7 +1795,12 @@ mod tests {
 
     #[test]
     fn fill_download_slots_returns_assignments() {
-        let (mut coordinator, _handle, mut _rx, _rate_rx) = QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
+        let (mut coordinator, _handle, mut _rx, _rate_rx) = QueueCoordinator::new(
+            2,
+            1,
+            std::path::PathBuf::from("/tmp/inter"),
+            std::path::PathBuf::from("/tmp/dest"),
+        );
         let mut nzb = NzbInfo {
             id: 1,
             kind: nzbg_core::models::NzbKind::Nzb,
@@ -1839,7 +1879,12 @@ mod tests {
 
     #[test]
     fn download_complete_updates_status() {
-        let (mut coordinator, _handle, mut _rx, _rate_rx) = QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
+        let (mut coordinator, _handle, mut _rx, _rate_rx) = QueueCoordinator::new(
+            2,
+            1,
+            std::path::PathBuf::from("/tmp/inter"),
+            std::path::PathBuf::from("/tmp/dest"),
+        );
         let mut nzb = NzbInfo {
             id: 1,
             kind: nzbg_core::models::NzbKind::Nzb,
@@ -1937,7 +1982,12 @@ mod tests {
     async fn get_nzb_list_returns_entries() {
         let _nzb_file1 = write_sample_nzb();
         let _nzb_file2 = write_sample_nzb();
-        let (mut coordinator, handle, _rx, _rate_rx) = QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
+        let (mut coordinator, handle, _rx, _rate_rx) = QueueCoordinator::new(
+            2,
+            1,
+            std::path::PathBuf::from("/tmp/inter"),
+            std::path::PathBuf::from("/tmp/dest"),
+        );
         tokio::spawn(async move { coordinator.run().await });
 
         handle
@@ -1960,7 +2010,12 @@ mod tests {
     #[tokio::test]
     async fn edit_queue_pauses_nzb() {
         let _nzb_file = write_sample_nzb();
-        let (mut coordinator, handle, _rx, _rate_rx) = QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
+        let (mut coordinator, handle, _rx, _rate_rx) = QueueCoordinator::new(
+            2,
+            1,
+            std::path::PathBuf::from("/tmp/inter"),
+            std::path::PathBuf::from("/tmp/dest"),
+        );
         tokio::spawn(async move { coordinator.run().await });
 
         let id = handle
@@ -2018,7 +2073,12 @@ mod tests {
 
     #[test]
     fn check_duplicate_finds_queued_match() {
-        let (mut coordinator, _handle, _rx, _rate_rx) = QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
+        let (mut coordinator, _handle, _rx, _rate_rx) = QueueCoordinator::new(
+            2,
+            1,
+            std::path::PathBuf::from("/tmp/inter"),
+            std::path::PathBuf::from("/tmp/dest"),
+        );
         let mut nzb = sample_nzb(1, "test");
         nzb.dup_key = "my-dupe-key".to_string();
         coordinator.queue.queue.push(nzb);
@@ -2032,7 +2092,12 @@ mod tests {
 
     #[test]
     fn check_duplicate_returns_none_for_empty_key() {
-        let (coordinator, _handle, _rx, _rate_rx) = QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
+        let (coordinator, _handle, _rx, _rate_rx) = QueueCoordinator::new(
+            2,
+            1,
+            std::path::PathBuf::from("/tmp/inter"),
+            std::path::PathBuf::from("/tmp/dest"),
+        );
         assert!(
             coordinator
                 .check_duplicate("", nzbg_core::models::DupMode::Score)
@@ -2042,7 +2107,12 @@ mod tests {
 
     #[test]
     fn check_duplicate_returns_none_for_no_match() {
-        let (mut coordinator, _handle, _rx, _rate_rx) = QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
+        let (mut coordinator, _handle, _rx, _rate_rx) = QueueCoordinator::new(
+            2,
+            1,
+            std::path::PathBuf::from("/tmp/inter"),
+            std::path::PathBuf::from("/tmp/dest"),
+        );
         let mut nzb = sample_nzb(1, "test");
         nzb.dup_key = "other-key".to_string();
         coordinator.queue.queue.push(nzb);
@@ -2056,7 +2126,12 @@ mod tests {
 
     #[test]
     fn check_duplicate_force_mode_skips_history() {
-        let (mut coordinator, _handle, _rx, _rate_rx) = QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
+        let (mut coordinator, _handle, _rx, _rate_rx) = QueueCoordinator::new(
+            2,
+            1,
+            std::path::PathBuf::from("/tmp/inter"),
+            std::path::PathBuf::from("/tmp/dest"),
+        );
         let mut hist_nzb = sample_nzb(1, "test");
         hist_nzb.dup_key = "my-dupe-key".to_string();
         coordinator
@@ -2078,7 +2153,12 @@ mod tests {
 
     #[test]
     fn unpause_par_files_unpauses_par2() {
-        let (mut coordinator, _handle, _rx, _rate_rx) = QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
+        let (mut coordinator, _handle, _rx, _rate_rx) = QueueCoordinator::new(
+            2,
+            1,
+            std::path::PathBuf::from("/tmp/inter"),
+            std::path::PathBuf::from("/tmp/dest"),
+        );
         let mut nzb = sample_nzb(1, "test");
         let mut main_file = sample_file_named("data.rar");
         main_file.paused = false;
@@ -2099,7 +2179,12 @@ mod tests {
     #[tokio::test]
     async fn par_unpause_via_handle() {
         let _nzb_file = write_sample_nzb();
-        let (mut coordinator, handle, _rx, _rate_rx) = QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
+        let (mut coordinator, handle, _rx, _rate_rx) = QueueCoordinator::new(
+            2,
+            1,
+            std::path::PathBuf::from("/tmp/inter"),
+            std::path::PathBuf::from("/tmp/dest"),
+        );
         tokio::spawn(async move { coordinator.run().await });
 
         handle
@@ -2113,7 +2198,12 @@ mod tests {
 
     #[test]
     fn health_updates_on_download_complete() {
-        let (mut coordinator, _handle, _rx, _rate_rx) = QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
+        let (mut coordinator, _handle, _rx, _rate_rx) = QueueCoordinator::new(
+            2,
+            1,
+            std::path::PathBuf::from("/tmp/inter"),
+            std::path::PathBuf::from("/tmp/dest"),
+        );
         let mut nzb = sample_nzb(1, "test");
         nzb.total_article_count = 10;
         let mut articles = Vec::new();
@@ -2155,7 +2245,12 @@ mod tests {
 
     #[tokio::test]
     async fn get_history_returns_history_entries() {
-        let (mut coordinator, handle, _rx, _rate_rx) = QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
+        let (mut coordinator, handle, _rx, _rate_rx) = QueueCoordinator::new(
+            2,
+            1,
+            std::path::PathBuf::from("/tmp/inter"),
+            std::path::PathBuf::from("/tmp/dest"),
+        );
         let mut nzb = sample_nzb(1, "done");
         nzb.mark_status = nzbg_core::models::MarkStatus::Good;
         push_to_history(&mut coordinator, nzb);
@@ -2173,7 +2268,12 @@ mod tests {
 
     #[tokio::test]
     async fn history_return_moves_entry_back_to_queue() {
-        let (mut coordinator, handle, _rx, _rate_rx) = QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
+        let (mut coordinator, handle, _rx, _rate_rx) = QueueCoordinator::new(
+            2,
+            1,
+            std::path::PathBuf::from("/tmp/inter"),
+            std::path::PathBuf::from("/tmp/dest"),
+        );
         coordinator.queue.next_nzb_id = 5;
         let nzb = sample_nzb(1, "returned");
         push_to_history(&mut coordinator, nzb);
@@ -2196,7 +2296,12 @@ mod tests {
 
     #[tokio::test]
     async fn history_return_not_found_returns_error() {
-        let (mut coordinator, handle, _rx, _rate_rx) = QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
+        let (mut coordinator, handle, _rx, _rate_rx) = QueueCoordinator::new(
+            2,
+            1,
+            std::path::PathBuf::from("/tmp/inter"),
+            std::path::PathBuf::from("/tmp/dest"),
+        );
         tokio::spawn(async move { coordinator.run().await });
 
         let result = handle.history_return(999).await;
@@ -2207,7 +2312,12 @@ mod tests {
 
     #[tokio::test]
     async fn history_redownload_resets_article_state() {
-        let (mut coordinator, handle, _rx, _rate_rx) = QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
+        let (mut coordinator, handle, _rx, _rate_rx) = QueueCoordinator::new(
+            2,
+            1,
+            std::path::PathBuf::from("/tmp/inter"),
+            std::path::PathBuf::from("/tmp/dest"),
+        );
         coordinator.queue.next_nzb_id = 10;
         let mut nzb = sample_nzb(1, "redownload");
         nzb.size = 100;
@@ -2247,7 +2357,12 @@ mod tests {
 
     #[tokio::test]
     async fn history_mark_updates_mark_status() {
-        let (mut coordinator, handle, _rx, _rate_rx) = QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
+        let (mut coordinator, handle, _rx, _rate_rx) = QueueCoordinator::new(
+            2,
+            1,
+            std::path::PathBuf::from("/tmp/inter"),
+            std::path::PathBuf::from("/tmp/dest"),
+        );
         let nzb = sample_nzb(1, "mark-me");
         push_to_history(&mut coordinator, nzb);
 
@@ -2266,7 +2381,12 @@ mod tests {
 
     #[tokio::test]
     async fn history_mark_not_found_returns_error() {
-        let (mut coordinator, handle, _rx, _rate_rx) = QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
+        let (mut coordinator, handle, _rx, _rate_rx) = QueueCoordinator::new(
+            2,
+            1,
+            std::path::PathBuf::from("/tmp/inter"),
+            std::path::PathBuf::from("/tmp/dest"),
+        );
         tokio::spawn(async move { coordinator.run().await });
 
         let result = handle
@@ -2279,7 +2399,12 @@ mod tests {
 
     #[tokio::test]
     async fn history_delete_removes_entry() {
-        let (mut coordinator, handle, _rx, _rate_rx) = QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
+        let (mut coordinator, handle, _rx, _rate_rx) = QueueCoordinator::new(
+            2,
+            1,
+            std::path::PathBuf::from("/tmp/inter"),
+            std::path::PathBuf::from("/tmp/dest"),
+        );
         let nzb = sample_nzb(1, "delete-me");
         push_to_history(&mut coordinator, nzb);
 
@@ -2295,7 +2420,12 @@ mod tests {
 
     #[tokio::test]
     async fn history_delete_not_found_returns_error() {
-        let (mut coordinator, handle, _rx, _rate_rx) = QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
+        let (mut coordinator, handle, _rx, _rate_rx) = QueueCoordinator::new(
+            2,
+            1,
+            std::path::PathBuf::from("/tmp/inter"),
+            std::path::PathBuf::from("/tmp/dest"),
+        );
         tokio::spawn(async move { coordinator.run().await });
 
         let result = handle.history_delete(999).await;
@@ -2306,7 +2436,12 @@ mod tests {
 
     #[tokio::test]
     async fn snapshot_includes_history() {
-        let (mut coordinator, handle, _rx, _rate_rx) = QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
+        let (mut coordinator, handle, _rx, _rate_rx) = QueueCoordinator::new(
+            2,
+            1,
+            std::path::PathBuf::from("/tmp/inter"),
+            std::path::PathBuf::from("/tmp/dest"),
+        );
         let nzb = sample_nzb(1, "in-history");
         push_to_history(&mut coordinator, nzb);
 
@@ -2329,7 +2464,12 @@ mod tests {
 
     #[test]
     fn next_article_sequential_picks_in_order() {
-        let (mut coordinator, _handle, _rx, _rate_rx) = QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
+        let (mut coordinator, _handle, _rx, _rate_rx) = QueueCoordinator::new(
+            2,
+            1,
+            std::path::PathBuf::from("/tmp/inter"),
+            std::path::PathBuf::from("/tmp/dest"),
+        );
         coordinator.strategy = PostStrategy::Sequential;
         let nzb = nzb_with_content_and_par(1);
         coordinator.queue.queue.push(nzb);
@@ -2340,7 +2480,12 @@ mod tests {
 
     #[test]
     fn next_article_rocket_skips_par_files() {
-        let (mut coordinator, _handle, _rx, _rate_rx) = QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
+        let (mut coordinator, _handle, _rx, _rate_rx) = QueueCoordinator::new(
+            2,
+            1,
+            std::path::PathBuf::from("/tmp/inter"),
+            std::path::PathBuf::from("/tmp/dest"),
+        );
         coordinator.strategy = PostStrategy::Rocket;
         let mut nzb = nzb_with_content_and_par(1);
         nzb.files.reverse();
@@ -2352,7 +2497,12 @@ mod tests {
 
     #[test]
     fn next_article_rocket_falls_back_to_par() {
-        let (mut coordinator, _handle, _rx, _rate_rx) = QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
+        let (mut coordinator, _handle, _rx, _rate_rx) = QueueCoordinator::new(
+            2,
+            1,
+            std::path::PathBuf::from("/tmp/inter"),
+            std::path::PathBuf::from("/tmp/dest"),
+        );
         coordinator.strategy = PostStrategy::Rocket;
         let mut nzb = sample_nzb(1, "par-only");
         nzb.files = vec![sample_file_named("data.par2")];
@@ -2364,7 +2514,12 @@ mod tests {
 
     #[test]
     fn next_article_aggressive_picks_par_first() {
-        let (mut coordinator, _handle, _rx, _rate_rx) = QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
+        let (mut coordinator, _handle, _rx, _rate_rx) = QueueCoordinator::new(
+            2,
+            1,
+            std::path::PathBuf::from("/tmp/inter"),
+            std::path::PathBuf::from("/tmp/dest"),
+        );
         coordinator.strategy = PostStrategy::Aggressive;
         let nzb = nzb_with_content_and_par(1);
         coordinator.queue.queue.push(nzb);
@@ -2375,7 +2530,12 @@ mod tests {
 
     #[test]
     fn next_article_aggressive_falls_back_to_content() {
-        let (mut coordinator, _handle, _rx, _rate_rx) = QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
+        let (mut coordinator, _handle, _rx, _rate_rx) = QueueCoordinator::new(
+            2,
+            1,
+            std::path::PathBuf::from("/tmp/inter"),
+            std::path::PathBuf::from("/tmp/dest"),
+        );
         coordinator.strategy = PostStrategy::Aggressive;
         let mut nzb = sample_nzb(1, "content-only");
         nzb.files = vec![sample_file_named("data.rar")];
@@ -2387,7 +2547,12 @@ mod tests {
 
     #[test]
     fn next_article_balanced_prefers_content() {
-        let (mut coordinator, _handle, _rx, _rate_rx) = QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
+        let (mut coordinator, _handle, _rx, _rate_rx) = QueueCoordinator::new(
+            2,
+            1,
+            std::path::PathBuf::from("/tmp/inter"),
+            std::path::PathBuf::from("/tmp/dest"),
+        );
         coordinator.strategy = PostStrategy::Balanced;
         let mut nzb = nzb_with_content_and_par(1);
         nzb.files.reverse();
@@ -2399,7 +2564,12 @@ mod tests {
 
     #[tokio::test]
     async fn set_strategy_changes_behavior() {
-        let (mut coordinator, handle, _rx, _rate_rx) = QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
+        let (mut coordinator, handle, _rx, _rate_rx) = QueueCoordinator::new(
+            2,
+            1,
+            std::path::PathBuf::from("/tmp/inter"),
+            std::path::PathBuf::from("/tmp/dest"),
+        );
         let mut nzb = nzb_with_content_and_par(1);
         nzb.files.reverse();
         coordinator.queue.queue.push(nzb);
@@ -2453,7 +2623,12 @@ mod tests {
     #[test]
     fn ingest_nzb_parses_files_and_articles() {
         let nzb_file = write_sample_nzb();
-        let (mut coordinator, _handle, _rx, _rate_rx) = QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
+        let (mut coordinator, _handle, _rx, _rate_rx) = QueueCoordinator::new(
+            2,
+            1,
+            std::path::PathBuf::from("/tmp/inter"),
+            std::path::PathBuf::from("/tmp/dest"),
+        );
 
         let id = coordinator
             .ingest_nzb(nzb_file.path(), Some("tv".to_string()), Priority::High)
@@ -2487,7 +2662,12 @@ mod tests {
     #[test]
     fn ingest_nzb_populates_nzb_totals() {
         let nzb_file = write_sample_nzb();
-        let (mut coordinator, _handle, _rx, _rate_rx) = QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
+        let (mut coordinator, _handle, _rx, _rate_rx) = QueueCoordinator::new(
+            2,
+            1,
+            std::path::PathBuf::from("/tmp/inter"),
+            std::path::PathBuf::from("/tmp/dest"),
+        );
 
         coordinator
             .ingest_nzb(nzb_file.path(), None, Priority::Normal)
@@ -2507,7 +2687,12 @@ mod tests {
     #[test]
     fn ingest_nzb_assigns_file_ids() {
         let nzb_file = write_sample_nzb();
-        let (mut coordinator, _handle, _rx, _rate_rx) = QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
+        let (mut coordinator, _handle, _rx, _rate_rx) = QueueCoordinator::new(
+            2,
+            1,
+            std::path::PathBuf::from("/tmp/inter"),
+            std::path::PathBuf::from("/tmp/dest"),
+        );
 
         coordinator
             .ingest_nzb(nzb_file.path(), None, Priority::Normal)
@@ -2529,7 +2714,12 @@ mod tests {
 
     #[test]
     fn ingest_nzb_returns_error_for_missing_file() {
-        let (mut coordinator, _handle, _rx, _rate_rx) = QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
+        let (mut coordinator, _handle, _rx, _rate_rx) = QueueCoordinator::new(
+            2,
+            1,
+            std::path::PathBuf::from("/tmp/inter"),
+            std::path::PathBuf::from("/tmp/dest"),
+        );
         let result = coordinator.ingest_nzb(
             std::path::Path::new("/nonexistent/test.nzb"),
             None,
@@ -2544,7 +2734,12 @@ mod tests {
         mpsc::Receiver<ArticleAssignment>,
         watch::Receiver<u64>,
     ) {
-        let (mut coordinator, handle, rx, rate_rx) = QueueCoordinator::new(4, 2, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
+        let (mut coordinator, handle, rx, rate_rx) = QueueCoordinator::new(
+            4,
+            2,
+            std::path::PathBuf::from("/tmp/inter"),
+            std::path::PathBuf::from("/tmp/dest"),
+        );
         let nzb_file = write_sample_nzb();
         coordinator
             .ingest_nzb(nzb_file.path(), None, Priority::Normal)
@@ -2679,7 +2874,12 @@ mod tests {
 
     #[test]
     fn update_post_status_updates_queued_nzb() {
-        let (mut coordinator, _handle, _rx, _rate_rx) = QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
+        let (mut coordinator, _handle, _rx, _rate_rx) = QueueCoordinator::new(
+            2,
+            1,
+            std::path::PathBuf::from("/tmp/inter"),
+            std::path::PathBuf::from("/tmp/dest"),
+        );
         let nzb = sample_nzb(1, "test");
         coordinator.queue.queue.push(nzb);
 
@@ -2706,7 +2906,12 @@ mod tests {
 
     #[test]
     fn update_post_status_updates_history_nzb() {
-        let (mut coordinator, _handle, _rx, _rate_rx) = QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
+        let (mut coordinator, _handle, _rx, _rate_rx) = QueueCoordinator::new(
+            2,
+            1,
+            std::path::PathBuf::from("/tmp/inter"),
+            std::path::PathBuf::from("/tmp/dest"),
+        );
         let nzb = sample_nzb(1, "test");
         push_to_history(&mut coordinator, nzb);
 
@@ -2721,7 +2926,12 @@ mod tests {
     #[tokio::test]
     async fn update_post_status_via_handle() {
         let _nzb_file = write_sample_nzb();
-        let (mut coordinator, handle, _rx, _rate_rx) = QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
+        let (mut coordinator, handle, _rx, _rate_rx) = QueueCoordinator::new(
+            2,
+            1,
+            std::path::PathBuf::from("/tmp/inter"),
+            std::path::PathBuf::from("/tmp/dest"),
+        );
         tokio::spawn(async move { coordinator.run().await });
 
         let id = handle
@@ -2740,7 +2950,12 @@ mod tests {
     #[test]
     fn nzb_completion_emits_notice() {
         let (completion_tx, mut completion_rx) = mpsc::channel(4);
-        let (mut coordinator, _handle, mut _rx, _rate_rx) = QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
+        let (mut coordinator, _handle, mut _rx, _rate_rx) = QueueCoordinator::new(
+            2,
+            1,
+            std::path::PathBuf::from("/tmp/inter"),
+            std::path::PathBuf::from("/tmp/dest"),
+        );
         coordinator.completion_tx = Some(completion_tx);
 
         let mut nzb = sample_nzb(1, "test-nzb");
@@ -2793,7 +3008,12 @@ mod tests {
 
     #[test]
     fn nzb_completion_without_completion_tx_still_works() {
-        let (mut coordinator, _handle, mut _rx, _rate_rx) = QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
+        let (mut coordinator, _handle, mut _rx, _rate_rx) = QueueCoordinator::new(
+            2,
+            1,
+            std::path::PathBuf::from("/tmp/inter"),
+            std::path::PathBuf::from("/tmp/dest"),
+        );
 
         let mut nzb = sample_nzb(1, "test-nzb");
         nzb.total_article_count = 1;
@@ -2834,7 +3054,12 @@ mod tests {
 
     #[test]
     fn build_all_file_article_states_returns_completed_articles() {
-        let (mut coordinator, _handle, _rx, _rate_rx) = QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
+        let (mut coordinator, _handle, _rx, _rate_rx) = QueueCoordinator::new(
+            2,
+            1,
+            std::path::PathBuf::from("/tmp/inter"),
+            std::path::PathBuf::from("/tmp/dest"),
+        );
         let mut nzb = sample_nzb(1, "test");
         nzb.files = vec![FileInfo {
             id: 10,
@@ -2881,7 +3106,12 @@ mod tests {
 
     #[test]
     fn build_all_file_article_states_skips_files_with_no_completions() {
-        let (mut coordinator, _handle, _rx, _rate_rx) = QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
+        let (mut coordinator, _handle, _rx, _rate_rx) = QueueCoordinator::new(
+            2,
+            1,
+            std::path::PathBuf::from("/tmp/inter"),
+            std::path::PathBuf::from("/tmp/dest"),
+        );
         let mut nzb = sample_nzb(1, "test");
         nzb.files = vec![FileInfo {
             id: 20,
@@ -2897,7 +3127,12 @@ mod tests {
     #[tokio::test]
     async fn get_all_file_article_states_via_handle() {
         let _nzb_file = write_sample_nzb();
-        let (mut coordinator, handle, _rx, _rate_rx) = QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
+        let (mut coordinator, handle, _rx, _rate_rx) = QueueCoordinator::new(
+            2,
+            1,
+            std::path::PathBuf::from("/tmp/inter"),
+            std::path::PathBuf::from("/tmp/dest"),
+        );
         tokio::spawn(async move { coordinator.run().await });
 
         handle
@@ -2913,7 +3148,12 @@ mod tests {
 
     #[test]
     fn seed_state_restores_queue() {
-        let (mut coordinator, _handle, _rx, rate_rx) = QueueCoordinator::new(4, 2, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
+        let (mut coordinator, _handle, _rx, rate_rx) = QueueCoordinator::new(
+            4,
+            2,
+            std::path::PathBuf::from("/tmp/inter"),
+            std::path::PathBuf::from("/tmp/dest"),
+        );
 
         let queue = DownloadQueue {
             queue: vec![sample_nzb(5, "restored")],
