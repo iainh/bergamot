@@ -89,7 +89,7 @@ pub async fn download_worker(
             let result =
                 fetch_and_decode(&fetcher, &assignment, &dir, cache.as_ref(), &writer_pool).await;
             let download_result = match result {
-                Ok((ref data, offset, _crc)) => {
+                Ok((data, offset, crc)) => {
                     tracing::debug!(
                         message_id = %assignment.message_id,
                         offset,
@@ -98,10 +98,10 @@ pub async fn download_worker(
                     );
                     DownloadResult {
                         article_id: assignment.article_id,
-                        outcome: DownloadOutcome::Success { data: data.clone(), offset, crc: _crc },
+                        outcome: DownloadOutcome::Success { data, offset, crc },
                     }
                 }
-                Err(ref err) => {
+                Err(err) => {
                     tracing::debug!(
                         message_id = %assignment.message_id,
                         error = %format!("{err:#}"),
@@ -255,8 +255,12 @@ mod tests {
             lines: yenc_test_lines(),
         });
         let tmp = tempfile::tempdir().expect("tempdir");
-        let (_coordinator, handle, _assignment_rx, _rate_rx) =
-            nzbg_queue::QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
+        let (_coordinator, handle, _assignment_rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(
+            2,
+            1,
+            std::path::PathBuf::from("/tmp/inter"),
+            std::path::PathBuf::from("/tmp/dest"),
+        );
 
         let assignment = ArticleAssignment {
             article_id: ArticleId {

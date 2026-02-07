@@ -355,8 +355,12 @@ pub async fn run_with_config_path(
         .map(|s| s.connections.max(1) as usize)
         .sum::<usize>()
         .max(1);
-    let (coordinator, queue_handle, assignment_rx, rate_rx) =
-        nzbg_queue::QueueCoordinator::new(total_connections, total_connections, inter_dir.clone(), config.dest_dir.clone());
+    let (coordinator, queue_handle, assignment_rx, rate_rx) = nzbg_queue::QueueCoordinator::new(
+        total_connections,
+        total_connections,
+        inter_dir.clone(),
+        config.dest_dir.clone(),
+    );
     let mut coordinator = coordinator.with_completion_tx(completion_tx);
 
     let mut restored_paused = false;
