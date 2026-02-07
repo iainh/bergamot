@@ -679,12 +679,95 @@ impl Service for HistoryCleanup {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct ServerVolume {
     pub bytes_today: u64,
     pub bytes_this_month: u64,
     pub daily_history: Vec<(NaiveDate, u64)>,
     pub monthly_history: Vec<(NaiveDate, u64)>,
+    pub bytes_per_seconds: [u64; 60],
+    pub bytes_per_minutes: [u64; 60],
+    pub bytes_per_hours: [u64; 24],
+    last_epoch_sec: Option<i64>,
+}
+
+impl Default for ServerVolume {
+    fn default() -> Self {
+        Self {
+            bytes_today: 0,
+            bytes_this_month: 0,
+            daily_history: Vec::new(),
+            monthly_history: Vec::new(),
+            bytes_per_seconds: [0; 60],
+            bytes_per_minutes: [0; 60],
+            bytes_per_hours: [0; 24],
+            last_epoch_sec: None,
+        }
+    }
+}
+
+impl ServerVolume {
+    pub fn advance_to(&mut self, now: i64) {
+        let Some(prev) = self.last_epoch_sec else {
+            self.last_epoch_sec = Some(now);
+            return;
+        };
+
+        if now <= prev {
+            self.last_epoch_sec = Some(now);
+            return;
+        }
+
+        let elapsed_sec = now - prev;
+
+        if elapsed_sec >= 60 {
+            self.bytes_per_seconds.fill(0);
+        } else {
+            for s in 1..=elapsed_sec {
+                let idx = ((prev + s) % 60) as usize;
+                self.bytes_per_seconds[idx] = 0;
+            }
+        }
+
+        let prev_min = prev / 60;
+        let now_min = now / 60;
+        let elapsed_min = now_min - prev_min;
+        if elapsed_min > 0 {
+            if elapsed_min >= 60 {
+                self.bytes_per_minutes.fill(0);
+            } else {
+                for m in 1..=elapsed_min {
+                    let idx = ((prev_min + m) % 60) as usize;
+                    self.bytes_per_minutes[idx] = 0;
+                }
+            }
+        }
+
+        let prev_hr = prev / 3600;
+        let now_hr = now / 3600;
+        let elapsed_hr = now_hr - prev_hr;
+        if elapsed_hr > 0 {
+            if elapsed_hr >= 24 {
+                self.bytes_per_hours.fill(0);
+            } else {
+                for h in 1..=elapsed_hr {
+                    let idx = ((prev_hr + h) % 24) as usize;
+                    self.bytes_per_hours[idx] = 0;
+                }
+            }
+        }
+
+        self.last_epoch_sec = Some(now);
+    }
+
+    pub fn record(&mut self, bytes: u64, now: i64) {
+        self.advance_to(now);
+        self.bytes_per_seconds[(now % 60) as usize] += bytes;
+        self.bytes_per_minutes[((now / 60) % 60) as usize] += bytes;
+        self.bytes_per_hours[((now / 3600) % 24) as usize] += bytes;
+        self.bytes_today += bytes;
+        self.bytes_this_month += bytes;
+    }
 }
 
 pub struct StatsTracker {
@@ -709,9 +792,9 @@ impl StatsTracker {
     }
 
     pub fn record_bytes(&mut self, server_id: u32, bytes: u64) {
+        let now = chrono::Utc::now().timestamp();
         let volume = self.volumes.entry(server_id).or_default();
-        volume.bytes_today += bytes;
-        volume.bytes_this_month += bytes;
+        volume.record(bytes, now);
     }
 
     pub fn check_monthly_quota(&self, server_id: u32, quota_gb: u64) -> bool {
@@ -799,7 +882,13 @@ impl SharedStatsTracker {
     ) {
         self.inner
             .lock()
-            .map(|t| (t.volumes.clone(), t.last_day))
+            .map(|mut t| {
+                let now = chrono::Utc::now().timestamp();
+                for volume in t.volumes.values_mut() {
+                    volume.advance_to(now);
+                }
+                (t.volumes.clone(), t.last_day)
+            })
             .unwrap_or_default()
     }
 }
@@ -2363,5 +2452,62 @@ mod tests {
         let mut cleanup = ConnectionCleanup::new().with_pool(manager);
         let result = cleanup.tick().await;
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn server_volume_record_accumulates_in_current_slots() {
+        let mut sv = ServerVolume::default();
+        let t = 1_700_000_000i64;
+        sv.record(100, t);
+        sv.record(200, t);
+
+        let sec_idx = (t % 60) as usize;
+        let min_idx = ((t / 60) % 60) as usize;
+        let hr_idx = ((t / 3600) % 24) as usize;
+
+        assert_eq!(sv.bytes_per_seconds[sec_idx], 300);
+        assert_eq!(sv.bytes_per_minutes[min_idx], 300);
+        assert_eq!(sv.bytes_per_hours[hr_idx], 300);
+        assert_eq!(sv.bytes_today, 300);
+    }
+
+    #[test]
+    fn server_volume_advance_clears_elapsed_seconds() {
+        let mut sv = ServerVolume::default();
+        let t = 1_700_000_000i64;
+        sv.record(500, t);
+
+        let sec_idx = (t % 60) as usize;
+        assert_eq!(sv.bytes_per_seconds[sec_idx], 500);
+
+        sv.advance_to(t + 3);
+        assert_eq!(sv.bytes_per_seconds[sec_idx], 500);
+        let new_idx = ((t + 1) % 60) as usize;
+        assert_eq!(sv.bytes_per_seconds[new_idx], 0);
+    }
+
+    #[test]
+    fn server_volume_advance_large_gap_clears_all_seconds() {
+        let mut sv = ServerVolume::default();
+        let t = 1_700_000_000i64;
+        sv.record(500, t);
+        sv.advance_to(t + 120);
+        assert_eq!(sv.bytes_per_seconds, [0u64; 60]);
+    }
+
+    #[test]
+    fn server_volume_advance_rolls_minutes_and_hours() {
+        let mut sv = ServerVolume::default();
+        let t = 1_700_000_000i64;
+        sv.record(1000, t);
+
+        sv.advance_to(t + 120);
+        let old_min_idx = ((t / 60) % 60) as usize;
+        assert_eq!(sv.bytes_per_minutes[old_min_idx], 1000);
+        let cleared_min_idx = (((t / 60) + 1) % 60) as usize;
+        assert_eq!(sv.bytes_per_minutes[cleared_min_idx], 0);
+
+        let old_hr_idx = ((t / 3600) % 24) as usize;
+        assert_eq!(sv.bytes_per_hours[old_hr_idx], 1000);
     }
 }

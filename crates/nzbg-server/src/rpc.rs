@@ -732,9 +732,13 @@ fn build_server_volume(
     let article_days: Vec<_> = (0..days.len()).map(|_| zero_article.clone()).collect();
 
     let now = chrono::Utc::now().timestamp();
-    let seconds: Vec<_> = (0..60).map(|_| serde_json::json!({"SizeLo": 0, "SizeHi": 0, "SizeMB": 0})).collect();
-    let minutes: Vec<_> = (0..60).map(|_| serde_json::json!({"SizeLo": 0, "SizeHi": 0, "SizeMB": 0})).collect();
-    let hours: Vec<_> = (0..24).map(|_| serde_json::json!({"SizeLo": 0, "SizeHi": 0, "SizeMB": 0})).collect();
+    let seconds: Vec<_> = sv.bytes_per_seconds.iter().map(|b| size_json(*b)).collect();
+    let minutes: Vec<_> = sv.bytes_per_minutes.iter().map(|b| size_json(*b)).collect();
+    let hours: Vec<_> = sv.bytes_per_hours.iter().map(|b| size_json(*b)).collect();
+
+    let sec_slot = (now % 60) as u32;
+    let min_slot = ((now / 60) % 60) as u32;
+    let hour_slot = ((now / 3600) % 24) as u32;
 
     serde_json::json!({
         "ServerID": server_id,
@@ -748,9 +752,9 @@ fn build_server_volume(
         "CustomSizeMB": 0,
         "CustomTime": now,
         "CountersResetTime": now,
-        "SecSlot": 0,
-        "MinSlot": 0,
-        "HourSlot": 0,
+        "SecSlot": sec_slot,
+        "MinSlot": min_slot,
+        "HourSlot": hour_slot,
         "DaySlot": day_slot_idx,
         "BytesPerSeconds": seconds,
         "BytesPerMinutes": minutes,
