@@ -13,7 +13,7 @@ use crate::writer::FileWriterPool;
 
 #[async_trait::async_trait]
 pub trait ArticleFetcher: Send + Sync {
-    async fn fetch_body(&self, message_id: &str, groups: &[String]) -> Result<Vec<Vec<u8>>>;
+    async fn fetch_body(&self, message_id: &str, groups: &[String]) -> Result<Vec<u8>>;
 }
 
 pub struct NntpPoolFetcher {
@@ -28,13 +28,11 @@ impl NntpPoolFetcher {
 
 #[async_trait::async_trait]
 impl ArticleFetcher for NntpPoolFetcher {
-    async fn fetch_body(&self, message_id: &str, groups: &[String]) -> Result<Vec<Vec<u8>>> {
-        let data = self
-            .pool
+    async fn fetch_body(&self, message_id: &str, groups: &[String]) -> Result<Vec<u8>> {
+        self.pool
             .fetch_article(message_id, groups)
             .await
-            .context("fetching article from NNTP pool")?;
-        Ok(data.split(|&b| b == b'\n').map(|s| s.to_vec()).collect())
+            .context("fetching article from NNTP pool")
     }
 }
 
@@ -129,23 +127,22 @@ async fn fetch_and_decode(
     cache: &dyn ArticleCache,
     writer_pool: &FileWriterPool,
 ) -> Result<(Vec<u8>, u64, u32)> {
-    let lines = if let Some(cached) = cache.get(&assignment.message_id) {
+    let raw = if let Some(cached) = cache.get(&assignment.message_id) {
         tracing::debug!(message_id = %assignment.message_id, "cache hit");
-        cached.split(|&b| b == b'\n').map(|s| s.to_vec()).collect()
+        cached
     } else {
         tracing::debug!(message_id = %assignment.message_id, "cache miss");
         let fetched = fetcher
             .fetch_body(&assignment.message_id, &assignment.groups)
             .await
             .context("fetching article body")?;
-        let raw: Vec<u8> = fetched.join(&b'\n');
-        cache.put(assignment.message_id.clone(), raw);
-        fetched
+        cache.put(assignment.message_id.clone(), fetched.clone());
+        std::sync::Arc::new(fetched)
     };
 
     let mut decoder = YencDecoder::new();
     let mut segment = None;
-    for line in &lines {
+    for line in raw.split(|&b| b == b'\n') {
         if let Some(decoded) = decoder.decode_line(line).context("decoding yenc line")? {
             segment = Some(decoded);
         }
@@ -172,28 +169,29 @@ mod tests {
     use std::sync::Arc;
 
     struct MockFetcher {
-        lines: Vec<Vec<u8>>,
+        data: Vec<u8>,
     }
 
     #[async_trait::async_trait]
     impl ArticleFetcher for MockFetcher {
-        async fn fetch_body(&self, _message_id: &str, _groups: &[String]) -> Result<Vec<Vec<u8>>> {
-            Ok(self.lines.clone())
+        async fn fetch_body(&self, _message_id: &str, _groups: &[String]) -> Result<Vec<u8>> {
+            Ok(self.data.clone())
         }
     }
 
-    fn yenc_test_lines() -> Vec<Vec<u8>> {
-        vec![
-            b"=ybegin line=128 size=3 name=test.bin".to_vec(),
-            vec![b'a' + 42, b'b' + 42, b'c' + 42],
-            b"=yend size=3 pcrc32=352441c2".to_vec(),
-        ]
+    fn yenc_test_body() -> Vec<u8> {
+        let lines: Vec<&[u8]> = vec![
+            b"=ybegin line=128 size=3 name=test.bin",
+            &[b'a' + 42, b'b' + 42, b'c' + 42],
+            b"=yend size=3 pcrc32=352441c2",
+        ];
+        lines.join(&b'\n')
     }
 
     #[tokio::test]
     async fn fetch_and_decode_produces_correct_data() {
         let fetcher: Arc<dyn ArticleFetcher> = Arc::new(MockFetcher {
-            lines: yenc_test_lines(),
+            data: yenc_test_body(),
         });
         let tmp = tempfile::tempdir().expect("tempdir");
         let assignment = ArticleAssignment {
@@ -222,7 +220,7 @@ mod tests {
     #[tokio::test]
     async fn fetch_and_decode_writes_file() {
         let fetcher: Arc<dyn ArticleFetcher> = Arc::new(MockFetcher {
-            lines: yenc_test_lines(),
+            data: yenc_test_body(),
         });
         let tmp = tempfile::tempdir().expect("tempdir");
         let assignment = ArticleAssignment {
@@ -252,7 +250,7 @@ mod tests {
     #[tokio::test]
     async fn download_worker_reports_results() {
         let fetcher: Arc<dyn ArticleFetcher> = Arc::new(MockFetcher {
-            lines: yenc_test_lines(),
+            data: yenc_test_body(),
         });
         let tmp = tempfile::tempdir().expect("tempdir");
         let (_coordinator, handle, _assignment_rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(
