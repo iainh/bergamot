@@ -110,17 +110,32 @@ impl<E: Par2Engine, U: Unpacker> PostProcessor<E, U> {
 
     async fn process(&self, req: PostProcessRequest) {
         let mut ctx = PostProcessContext::new(req);
+        tracing::info!(nzb = %ctx.request.nzb_name, "post-processing started");
 
         ctx.set_stage(PostStage::ParRenaming);
         ctx.set_stage(PostStage::ParVerifying);
-        if let Ok(result) = self.par_verify(&ctx).await {
-            ctx.par_result = Some(result);
+        tracing::info!(nzb = %ctx.request.nzb_name, "par2 verify starting");
+        match self.par_verify(&ctx).await {
+            Ok(result) => {
+                tracing::info!(nzb = %ctx.request.nzb_name, result = ?result, "par2 verify finished");
+                ctx.par_result = Some(result);
+            }
+            Err(err) => {
+                tracing::warn!(nzb = %ctx.request.nzb_name, error = %err, "par2 verify failed");
+            }
         }
 
         if matches!(ctx.par_result, Some(Par2Result::RepairNeeded { .. })) {
             ctx.set_stage(PostStage::ParRepairing);
-            if let Ok(result) = self.par_repair(&ctx).await {
-                ctx.par_result = Some(result);
+            tracing::info!(nzb = %ctx.request.nzb_name, "par2 repair starting");
+            match self.par_repair(&ctx).await {
+                Ok(result) => {
+                    tracing::info!(nzb = %ctx.request.nzb_name, result = ?result, "par2 repair finished");
+                    ctx.par_result = Some(result);
+                }
+                Err(err) => {
+                    tracing::warn!(nzb = %ctx.request.nzb_name, error = %err, "par2 repair failed");
+                }
             }
         }
 

@@ -119,23 +119,40 @@ impl Par2Engine for NativePar2Engine {
 }
 
 fn native_verify(working_dir: &Path) -> Result<Par2Result, Par2Error> {
+    tracing::debug!(dir = %working_dir.display(), "parsing par2 recovery set");
     let rs = nzbg_par2::parse_recovery_set(working_dir).map_err(|e| Par2Error::CommandFailed {
         message: e.to_string(),
     })?;
+    tracing::debug!(
+        files = rs.files.len(),
+        recovery_slices = rs.recovery_slices.len(),
+        slice_size = rs.slice_size,
+        "parsed par2 recovery set"
+    );
 
     let result = nzbg_par2::verify_recovery_set(&rs, working_dir);
 
     if result.all_ok() {
+        tracing::info!(dir = %working_dir.display(), "par2 verify: all files OK");
         Ok(Par2Result::AllFilesOk)
     } else {
+        let needed = result.blocks_needed();
+        let available = rs.recovery_slices.len();
+        tracing::info!(
+            dir = %working_dir.display(),
+            blocks_needed = needed,
+            blocks_available = available,
+            "par2 verify: repair needed"
+        );
         Ok(Par2Result::RepairNeeded {
-            blocks_needed: result.blocks_needed(),
-            blocks_available: rs.recovery_slices.len(),
+            blocks_needed: needed,
+            blocks_available: available,
         })
     }
 }
 
 fn native_repair(working_dir: &Path) -> Result<Par2Result, Par2Error> {
+    tracing::debug!(dir = %working_dir.display(), "parsing par2 recovery set for repair");
     let rs = nzbg_par2::parse_recovery_set(working_dir).map_err(|e| Par2Error::CommandFailed {
         message: e.to_string(),
     })?;
@@ -143,32 +160,58 @@ fn native_repair(working_dir: &Path) -> Result<Par2Result, Par2Error> {
     let verify = nzbg_par2::verify_recovery_set(&rs, working_dir);
 
     if verify.all_ok() {
+        tracing::info!(dir = %working_dir.display(), "par2 repair: all files already OK");
         return Ok(Par2Result::AllFilesOk);
     }
 
+    tracing::info!(
+        dir = %working_dir.display(),
+        blocks_needed = verify.blocks_needed(),
+        recovery_slices = rs.recovery_slices.len(),
+        "par2 repair: starting"
+    );
+
     match nzbg_par2::repair_recovery_set(&rs, &verify, working_dir) {
-        Ok(_report) => {
+        Ok(report) => {
+            tracing::debug!(
+                repaired_slices = report.repaired_slices,
+                repaired_files = ?report.repaired_files,
+                "par2 repair: repair_recovery_set completed"
+            );
             let post_verify = nzbg_par2::verify_recovery_set(&rs, working_dir);
             if post_verify.all_ok() {
+                tracing::info!(
+                    dir = %working_dir.display(),
+                    repaired_slices = report.repaired_slices,
+                    "par2 repair: complete, all files now OK"
+                );
                 Ok(Par2Result::RepairComplete)
             } else {
-                Ok(Par2Result::RepairFailed {
-                    reason: format!(
-                        "repair finished but verification still failing ({} blocks needed)",
-                        post_verify.blocks_needed()
-                    ),
-                })
+                let reason = format!(
+                    "repair finished but verification still failing ({} blocks needed)",
+                    post_verify.blocks_needed()
+                );
+                tracing::warn!(dir = %working_dir.display(), %reason, "par2 repair: post-repair verification failed");
+                Ok(Par2Result::RepairFailed { reason })
             }
         }
         Err(nzbg_par2::Par2RepairError::NotEnoughRecoverySlices { needed, available }) => {
+            tracing::warn!(
+                dir = %working_dir.display(),
+                blocks_needed = needed,
+                blocks_available = available,
+                "par2 repair: not enough recovery slices"
+            );
             Ok(Par2Result::RepairNeeded {
                 blocks_needed: needed,
                 blocks_available: available,
             })
         }
-        Err(e) => Ok(Par2Result::RepairFailed {
-            reason: e.to_string(),
-        }),
+        Err(e) => {
+            let reason = e.to_string();
+            tracing::error!(dir = %working_dir.display(), %reason, "par2 repair: failed");
+            Ok(Par2Result::RepairFailed { reason })
+        }
     }
 }
 
