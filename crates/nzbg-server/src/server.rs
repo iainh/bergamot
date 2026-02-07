@@ -388,10 +388,6 @@ impl WebServer {
                 .route("/logout", post(handle_logout));
         }
 
-        let combined_routes = Router::new()
-            .route("/combined.css", get(handle_combined_file))
-            .route("/combined.js", get(handle_combined_file));
-
         let fallback_state = self.state.clone();
         let fallback_auth = auth_state;
         let fallback = axum::routing::any(
@@ -434,8 +430,7 @@ impl WebServer {
             },
         );
 
-        app.merge(combined_routes)
-            .fallback_service(fallback)
+        app.fallback_service(fallback)
             .layer(CompressionLayer::new().gzip(true))
             .layer(CorsLayer::permissive())
     }
@@ -600,39 +595,6 @@ fn serve_embedded_file(path: &str) -> axum::response::Response {
         }
         None => StatusCode::NOT_FOUND.into_response(),
     }
-}
-
-async fn handle_combined_file(uri: axum::http::Uri) -> impl IntoResponse {
-    let path = uri.path();
-    let content_type = if path.ends_with(".css") {
-        "text/css"
-    } else {
-        "application/javascript"
-    };
-
-    let query = uri.query().unwrap_or("");
-    let files: Vec<&str> = query.split('+').collect();
-
-    let mut combined = String::new();
-    for file in &files {
-        match WebUiAssets::get(file) {
-            Some(content) => {
-                if let Ok(s) = std::str::from_utf8(&content.data) {
-                    combined.push_str(s);
-                    combined.push('\n');
-                }
-            }
-            None => {
-                return (
-                    StatusCode::NOT_FOUND,
-                    format!("File not found: {file}"),
-                )
-                    .into_response();
-            }
-        }
-    }
-
-    ([(header::CONTENT_TYPE, content_type)], combined).into_response()
 }
 
 async fn handle_login_page() -> axum::response::Html<&'static str> {
