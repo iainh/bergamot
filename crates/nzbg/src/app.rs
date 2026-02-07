@@ -303,10 +303,6 @@ pub fn forward_completions(
     })
 }
 
-pub async fn run(config: Config, fetcher: Arc<dyn crate::download::ArticleFetcher>) -> Result<()> {
-    run_with_config_path(config, fetcher, None, None, None).await
-}
-
 pub async fn run_with_config_path(
     config: Config,
     fetcher: Arc<dyn crate::download::ArticleFetcher>,
@@ -457,10 +453,9 @@ pub async fn run_with_config_path(
         },
         stats_recorder: shared_stats,
     };
-    let config_guard = config_arc.read().unwrap();
+    let config_snapshot = config_arc.read().unwrap().clone();
     let (scheduler_tx, scheduler_handles) =
-        nzbg_scheduler::start_services(&config_guard, deps).await?;
-    drop(config_guard);
+        nzbg_scheduler::start_services(&config_snapshot, deps).await?;
 
     let stats_handle = spawn_stats_updater(app_state.clone(), queue_handle.clone());
 

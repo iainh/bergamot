@@ -403,34 +403,34 @@ impl WebServer {
                 let serve_dir = serve_dir.clone();
                 async move {
                     let path = req.uri().path().to_string();
-                    if let Some(method) = path.strip_prefix("/jsonrpc/") {
-                        if !method.is_empty() && req.method() == axum::http::Method::GET {
-                            let access = extract_access(&req, &auth.config);
-                            let required = required_access(method);
-                            if access > required || access == AccessLevel::Denied {
-                                return unauthorized_response().into_response();
-                            }
-                            let params = parse_query_params(req.uri().query());
-                            let result =
-                                dispatch_rpc(method, &params, &state).await;
-                            let response = match result {
-                                Ok(value) => JsonRpcResponse {
-                                    jsonrpc: "2.0".to_string(),
-                                    result: Some(value),
-                                    error: None,
-                                    id: serde_json::json!(0),
-                                },
-                                Err(err) => JsonRpcResponse {
-                                    jsonrpc: "2.0".to_string(),
-                                    result: None,
-                                    error: Some(
-                                        serde_json::to_value(JsonRpcErrorBody::from(err)).unwrap(),
-                                    ),
-                                    id: serde_json::json!(0),
-                                },
-                            };
-                            return Json(response).into_response();
+                    if let Some(method) = path.strip_prefix("/jsonrpc/")
+                        && !method.is_empty()
+                        && req.method() == axum::http::Method::GET
+                    {
+                        let access = extract_access(&req, &auth.config);
+                        let required = required_access(method);
+                        if access > required || access == AccessLevel::Denied {
+                            return unauthorized_response().into_response();
                         }
+                        let params = parse_query_params(req.uri().query());
+                        let result = dispatch_rpc(method, &params, &state).await;
+                        let response = match result {
+                            Ok(value) => JsonRpcResponse {
+                                jsonrpc: "2.0".to_string(),
+                                result: Some(value),
+                                error: None,
+                                id: serde_json::json!(0),
+                            },
+                            Err(err) => JsonRpcResponse {
+                                jsonrpc: "2.0".to_string(),
+                                result: None,
+                                error: Some(
+                                    serde_json::to_value(JsonRpcErrorBody::from(err)).unwrap(),
+                                ),
+                                id: serde_json::json!(0),
+                            },
+                        };
+                        return Json(response).into_response();
                     }
                     let mut serve_dir = serve_dir;
                     match serve_dir.call(req).await {

@@ -211,9 +211,9 @@ async fn rpc_listgroups(state: &AppState) -> Result<serde_json::Value, JsonRpcEr
         .into_iter()
         .map(|entry| {
             let remaining_size = entry.total_size.saturating_sub(entry.downloaded_size);
-            let file_size_mb = (entry.total_size / (1024 * 1024)) as u64;
+            let file_size_mb = entry.total_size / (1024 * 1024);
             let file_size_lo = (entry.total_size & 0xFFFF_FFFF) as u32;
-            let remaining_size_mb = (remaining_size / (1024 * 1024)) as u64;
+            let remaining_size_mb = remaining_size / (1024 * 1024);
             let remaining_size_lo = (remaining_size & 0xFFFF_FFFF) as u32;
 
             let status = if entry.paused {
@@ -638,7 +638,7 @@ fn empty_server_volume(server_id: u32) -> serde_json::Value {
     let zero_size = serde_json::json!({"SizeLo": 0, "SizeHi": 0, "SizeMB": 0});
     let zero_article = serde_json::json!({"Failed": 0, "Success": 0});
     let now = chrono::Utc::now().timestamp();
-    let first_day = (now / 86400) as i64;
+    let first_day = now / 86400;
     let day_slot = 0i64;
     let seconds: Vec<_> = (0..60).map(|_| zero_size.clone()).collect();
     let minutes: Vec<_> = (0..60).map(|_| zero_size.clone()).collect();
@@ -676,16 +676,16 @@ fn rpc_servervolumes(state: &AppState) -> Result<serde_json::Value, JsonRpcError
         .unwrap_or_default();
 
     let mut volumes = vec![empty_server_volume(0)];
-    if let Some(config) = state.config() {
-        if let Ok(config) = config.read() {
-            for server in &config.servers {
-                let vol = if let Some(sv) = tracked.get(&server.id) {
-                    build_server_volume(server.id, sv, tracker_date)
-                } else {
-                    empty_server_volume(server.id)
-                };
-                volumes.push(vol);
-            }
+    if let Some(config) = state.config()
+        && let Ok(config) = config.read()
+    {
+        for server in &config.servers {
+            let vol = if let Some(sv) = tracked.get(&server.id) {
+                build_server_volume(server.id, sv, tracker_date)
+            } else {
+                empty_server_volume(server.id)
+            };
+            volumes.push(vol);
         }
     }
     Ok(serde_json::json!(volumes))
@@ -749,7 +749,7 @@ fn build_server_volume(
         "FirstDay": first_day,
         "TotalSizeLo": (total_bytes & 0xFFFF_FFFF) as u32,
         "TotalSizeHi": (total_bytes >> 32) as u32,
-        "TotalSizeMB": (total_bytes / (1024 * 1024)) as u64,
+        "TotalSizeMB": total_bytes / (1024 * 1024),
         "CustomSizeLo": 0,
         "CustomSizeHi": 0,
         "CustomSizeMB": 0,
@@ -771,7 +771,7 @@ fn size_json(bytes: u64) -> serde_json::Value {
     serde_json::json!({
         "SizeLo": (bytes & 0xFFFF_FFFF) as u32,
         "SizeHi": (bytes >> 32) as u32,
-        "SizeMB": (bytes / (1024 * 1024)) as u64,
+        "SizeMB": bytes / (1024 * 1024),
     })
 }
 
