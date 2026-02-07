@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use tokio::sync::{Mutex, watch};
+use tokio::sync::watch;
 
 use nzbg_nntp::SpeedLimiter;
 use nzbg_queue::{ArticleAssignment, DownloadOutcome, DownloadResult, QueueHandle};
@@ -46,15 +46,15 @@ pub async fn download_worker(
     writer_pool: Arc<FileWriterPool>,
 ) {
     let initial_rate = *rate_rx.borrow();
-    let limiter = Arc::new(Mutex::new(SpeedLimiter::new(initial_rate)));
-    let rate_atomic = limiter.lock().await.rate_ref().clone();
+    let limiter = Arc::new(std::sync::Mutex::new(SpeedLimiter::new(initial_rate)));
+    let rate_atomic = limiter.lock().unwrap().rate_ref().clone();
 
     let watcher_limiter = limiter.clone();
     let mut watcher_rx = rate_rx.clone();
     tokio::spawn(async move {
         while watcher_rx.changed().await.is_ok() {
             let rate = *watcher_rx.borrow();
-            watcher_limiter.lock().await.set_rate(rate);
+            watcher_limiter.lock().unwrap().set_rate(rate);
         }
     });
 
@@ -77,10 +77,10 @@ pub async fn download_worker(
         let writer_pool = writer_pool.clone();
         tokio::spawn(async move {
             if rate_atomic.load(std::sync::atomic::Ordering::Relaxed) > 0 {
-                let delay = limiter.lock().await.reserve(assignment.expected_size);
+                let delay = limiter.lock().unwrap().reserve(assignment.expected_size);
                 if let Some(delay) = delay {
                     tokio::time::sleep(delay).await;
-                    limiter.lock().await.after_sleep();
+                    limiter.lock().unwrap().after_sleep();
                 }
             }
 
@@ -297,7 +297,7 @@ mod tests {
         let (rate_tx, rate_rx) = tokio::sync::watch::channel(0u64);
 
         let initial_rate = *rate_rx.borrow();
-        let limiter = Arc::new(tokio::sync::Mutex::new(nzbg_nntp::SpeedLimiter::new(
+        let limiter = Arc::new(std::sync::Mutex::new(nzbg_nntp::SpeedLimiter::new(
             initial_rate,
         )));
 
@@ -306,7 +306,7 @@ mod tests {
         tokio::spawn(async move {
             while watcher_rx.changed().await.is_ok() {
                 let rate = *watcher_rx.borrow();
-                watcher_limiter.lock().await.set_rate(rate);
+                watcher_limiter.lock().unwrap().set_rate(rate);
             }
         });
 
@@ -314,7 +314,7 @@ mod tests {
         tokio::task::yield_now().await;
         tokio::task::yield_now().await;
 
-        let locked = limiter.lock().await;
+        let locked = limiter.lock().unwrap();
         assert_eq!(locked.rate(), 500_000);
     }
 }
