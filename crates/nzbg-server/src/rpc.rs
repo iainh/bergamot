@@ -313,8 +313,11 @@ fn parse_edit_command(command: &str) -> Result<nzbg_queue::EditAction, JsonRpcEr
         )),
         "GroupPause" => Ok(nzbg_queue::EditAction::Pause),
         "GroupResume" => Ok(nzbg_queue::EditAction::Resume),
-        "GroupDelete" | "GroupFinalDelete" => Ok(nzbg_queue::EditAction::Delete {
-            delete_files: command == "GroupFinalDelete",
+        "GroupDelete" | "GroupDupeDelete" | "GroupFinalDelete" => Ok(nzbg_queue::EditAction::Delete {
+            delete_files: true,
+        }),
+        "GroupParkDelete" => Ok(nzbg_queue::EditAction::Delete {
+            delete_files: false,
         }),
         "GroupPauseAllPars" | "GroupPauseExtraPars" => Ok(nzbg_queue::EditAction::Pause),
         _ => Err(rpc_error(format!("unknown editqueue command: {command}"))),
