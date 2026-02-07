@@ -1,47 +1,52 @@
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
+use dashmap::DashMap;
 use tokio::sync::Mutex;
 
+struct FileEntry {
+    file: Mutex<tokio::fs::File>,
+    allocated_len: std::sync::atomic::AtomicU64,
+}
+
 pub struct FileWriterPool {
-    writers: Arc<Mutex<HashMap<PathBuf, Arc<Mutex<tokio::fs::File>>>>>,
+    writers: Arc<DashMap<PathBuf, Arc<FileEntry>>>,
 }
 
 impl FileWriterPool {
     pub fn new() -> Self {
         Self {
-            writers: Arc::new(Mutex::new(HashMap::new())),
+            writers: Arc::new(DashMap::new()),
         }
     }
 
     pub async fn write_segment(&self, path: &Path, offset: u64, data: &[u8]) -> Result<()> {
         use tokio::io::{AsyncSeekExt, AsyncWriteExt};
 
-        let file = self.get_or_create(path).await?;
-        let mut file_guard = file.lock().await;
-
-        let std_file = file_guard
-            .try_clone()
-            .await
-            .context("cloning file handle")?;
-        let std_file = std_file.into_std().await;
+        let entry = self.get_or_create(path).await?;
         let target_len = offset + data.len() as u64;
-        if std_file.metadata()?.len() < target_len {
-            std_file.set_len(target_len)?;
-        }
-        drop(std_file);
 
+        let current = entry
+            .allocated_len
+            .load(std::sync::atomic::Ordering::Acquire);
+        if current < target_len {
+            entry
+                .allocated_len
+                .fetch_max(target_len, std::sync::atomic::Ordering::AcqRel);
+            let file_guard = entry.file.lock().await;
+            file_guard.set_len(target_len).await?;
+        }
+
+        let mut file_guard = entry.file.lock().await;
         file_guard.seek(std::io::SeekFrom::Start(offset)).await?;
         file_guard.write_all(data).await?;
         Ok(())
     }
 
-    async fn get_or_create(&self, path: &Path) -> Result<Arc<Mutex<tokio::fs::File>>> {
-        let mut writers = self.writers.lock().await;
-        if let Some(writer) = writers.get(path) {
-            return Ok(writer.clone());
+    async fn get_or_create(&self, path: &Path) -> Result<Arc<FileEntry>> {
+        if let Some(entry) = self.writers.get(path) {
+            return Ok(entry.value().clone());
         }
 
         if let Some(parent) = path.parent() {
@@ -59,16 +64,21 @@ impl FileWriterPool {
             .await
             .context("opening output file")?;
 
-        let writer = Arc::new(Mutex::new(file));
-        writers.insert(path.to_path_buf(), writer.clone());
-        Ok(writer)
+        let metadata = file.metadata().await.context("reading file metadata")?;
+        let entry = Arc::new(FileEntry {
+            file: Mutex::new(file),
+            allocated_len: std::sync::atomic::AtomicU64::new(metadata.len()),
+        });
+        self.writers
+            .entry(path.to_path_buf())
+            .or_insert(entry.clone());
+        Ok(entry)
     }
 
     pub async fn flush_all(&self) -> Result<()> {
         use tokio::io::AsyncWriteExt;
-        let writers = self.writers.lock().await;
-        for file in writers.values() {
-            let mut f = file.lock().await;
+        for entry in self.writers.iter() {
+            let mut f = entry.value().file.lock().await;
             f.flush().await?;
         }
         Ok(())
@@ -131,5 +141,21 @@ mod tests {
 
         let content = tokio::fs::read(&path).await.expect("read");
         assert_eq!(content, b"data");
+    }
+
+    #[tokio::test]
+    async fn writer_pool_tracks_allocated_length() {
+        let pool = FileWriterPool::new();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let path = tmp.path().join("alloc.bin");
+
+        pool.write_segment(&path, 0, b"abc").await.expect("write1");
+        pool.write_segment(&path, 10, b"xyz").await.expect("write2");
+        pool.flush_all().await.expect("flush");
+
+        let content = tokio::fs::read(&path).await.expect("read");
+        assert_eq!(content.len(), 13);
+        assert_eq!(&content[0..3], b"abc");
+        assert_eq!(&content[10..13], b"xyz");
     }
 }
