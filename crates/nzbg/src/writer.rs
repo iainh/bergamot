@@ -3,15 +3,16 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use dashmap::DashMap;
-use tokio::sync::Mutex;
+use tokio::sync::{mpsc, oneshot};
 
-struct FileEntry {
-    file: Mutex<tokio::fs::File>,
-    allocated_len: std::sync::atomic::AtomicU64,
+struct WriteRequest {
+    offset: u64,
+    data: Vec<u8>,
+    reply: oneshot::Sender<Result<()>>,
 }
 
 pub struct FileWriterPool {
-    writers: Arc<DashMap<PathBuf, Arc<FileEntry>>>,
+    writers: Arc<DashMap<PathBuf, mpsc::Sender<WriteRequest>>>,
 }
 
 impl FileWriterPool {
@@ -22,29 +23,21 @@ impl FileWriterPool {
     }
 
     pub async fn write_segment(&self, path: &Path, offset: u64, data: &[u8]) -> Result<()> {
-        use tokio::io::{AsyncSeekExt, AsyncWriteExt};
-
-        let entry = self.get_or_create(path).await?;
-        let target_len = offset + data.len() as u64;
-
-        let current = entry
-            .allocated_len
-            .load(std::sync::atomic::Ordering::Acquire);
-        if current < target_len {
-            entry
-                .allocated_len
-                .fetch_max(target_len, std::sync::atomic::Ordering::AcqRel);
-            let file_guard = entry.file.lock().await;
-            file_guard.set_len(target_len).await?;
-        }
-
-        let mut file_guard = entry.file.lock().await;
-        file_guard.seek(std::io::SeekFrom::Start(offset)).await?;
-        file_guard.write_all(data).await?;
-        Ok(())
+        let tx = self.get_or_create(path).await?;
+        let (reply_tx, reply_rx) = oneshot::channel();
+        tx.send(WriteRequest {
+            offset,
+            data: data.to_vec(),
+            reply: reply_tx,
+        })
+        .await
+        .map_err(|_| anyhow::anyhow!("writer task closed"))?;
+        reply_rx
+            .await
+            .map_err(|_| anyhow::anyhow!("writer task dropped reply"))?
     }
 
-    async fn get_or_create(&self, path: &Path) -> Result<Arc<FileEntry>> {
+    async fn get_or_create(&self, path: &Path) -> Result<mpsc::Sender<WriteRequest>> {
         if let Some(entry) = self.writers.get(path) {
             return Ok(entry.value().clone());
         }
@@ -64,25 +57,46 @@ impl FileWriterPool {
             .await
             .context("opening output file")?;
 
-        let metadata = file.metadata().await.context("reading file metadata")?;
-        let entry = Arc::new(FileEntry {
-            file: Mutex::new(file),
-            allocated_len: std::sync::atomic::AtomicU64::new(metadata.len()),
-        });
-        self.writers
-            .entry(path.to_path_buf())
-            .or_insert(entry.clone());
-        Ok(entry)
+        let (tx, rx) = mpsc::channel::<WriteRequest>(64);
+        tokio::spawn(writer_task(file, rx));
+
+        self.writers.entry(path.to_path_buf()).or_insert(tx.clone());
+        Ok(tx)
     }
 
     pub async fn flush_all(&self) -> Result<()> {
-        use tokio::io::AsyncWriteExt;
-        for entry in self.writers.iter() {
-            let mut f = entry.value().file.lock().await;
-            f.flush().await?;
+        let keys: Vec<PathBuf> = self.writers.iter().map(|e| e.key().clone()).collect();
+        for key in keys {
+            if let Some((_, tx)) = self.writers.remove(&key) {
+                drop(tx);
+            }
         }
+        tokio::task::yield_now().await;
         Ok(())
     }
+}
+
+async fn writer_task(mut file: tokio::fs::File, mut rx: mpsc::Receiver<WriteRequest>) {
+    use tokio::io::{AsyncSeekExt, AsyncWriteExt};
+
+    let mut allocated_len = file.metadata().await.map(|m| m.len()).unwrap_or(0);
+
+    while let Some(req) = rx.recv().await {
+        let result = async {
+            let target_len = req.offset + req.data.len() as u64;
+            if allocated_len < target_len {
+                file.set_len(target_len).await?;
+                allocated_len = target_len;
+            }
+            file.seek(std::io::SeekFrom::Start(req.offset)).await?;
+            file.write_all(&req.data).await?;
+            Ok(())
+        }
+        .await;
+        let _ = req.reply.send(result);
+    }
+
+    let _ = tokio::io::AsyncWriteExt::flush(&mut file).await;
 }
 
 #[cfg(test)]
@@ -157,5 +171,20 @@ mod tests {
         assert_eq!(content.len(), 13);
         assert_eq!(&content[0..3], b"abc");
         assert_eq!(&content[10..13], b"xyz");
+    }
+
+    #[tokio::test]
+    async fn writer_task_flushes_on_drop() {
+        let pool = FileWriterPool::new();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let path = tmp.path().join("drop.bin");
+
+        pool.write_segment(&path, 0, b"flushed")
+            .await
+            .expect("write");
+        pool.flush_all().await.expect("flush");
+
+        let content = tokio::fs::read(&path).await.expect("read");
+        assert_eq!(content, b"flushed");
     }
 }
