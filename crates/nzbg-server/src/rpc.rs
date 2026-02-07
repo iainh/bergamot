@@ -732,7 +732,23 @@ fn build_server_volume(
         + sv.bytes_today;
 
     let zero_article = serde_json::json!({"Failed": 0, "Success": 0});
-    let article_days: Vec<_> = (0..days.len()).map(|_| zero_article.clone()).collect();
+    let mut article_days: Vec<serde_json::Value> = vec![zero_article; num_days];
+
+    for (date, success, failed) in &sv.articles_daily_history {
+        let slot = (*date - unix_epoch).num_days();
+        let idx = (slot - first_day) as usize;
+        if idx < article_days.len() {
+            article_days[idx] =
+                serde_json::json!({"Success": success, "Failed": failed});
+        }
+    }
+
+    if day_slot_idx < article_days.len() {
+        article_days[day_slot_idx] = serde_json::json!({
+            "Success": sv.articles_success_today,
+            "Failed": sv.articles_failed_today,
+        });
+    }
 
     let now = chrono::Utc::now().timestamp();
     let seconds: Vec<_> = sv.bytes_per_seconds.iter().map(|b| size_json(*b)).collect();

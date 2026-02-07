@@ -11,6 +11,8 @@ use crate::protocol::NntpConnection;
 
 pub trait StatsRecorder: Send + Sync {
     fn record_bytes(&self, server_id: u32, bytes: u64);
+    fn record_article_success(&self, server_id: u32);
+    fn record_article_failure(&self, server_id: u32);
 }
 
 #[async_trait::async_trait]
@@ -132,9 +134,15 @@ impl<F: ConnectionFactory> ServerPool<F> {
                     return Ok(data);
                 }
                 Err(NntpError::ArticleNotFound(msg)) => {
+                    if let Some(stats) = &self.stats {
+                        stats.record_article_failure(state.server.id);
+                    }
                     last_error = NntpError::ArticleNotFound(msg);
                 }
                 Err(err) => {
+                    if let Some(stats) = &self.stats {
+                        stats.record_article_failure(state.server.id);
+                    }
                     self.record_failure(state);
                     last_error = err;
                 }
@@ -181,6 +189,7 @@ impl<F: ConnectionFactory> ServerPool<F> {
         let data = body_lines.join(&b'\n');
         if let Some(stats) = &self.stats {
             stats.record_bytes(state.server.id, data.len() as u64);
+            stats.record_article_success(state.server.id);
         }
         Ok(data)
     }
@@ -703,6 +712,8 @@ mod tests {
                     .store(server_id, AtomicOrdering::SeqCst);
                 self.recorded_bytes.store(bytes, AtomicOrdering::SeqCst);
             }
+            fn record_article_success(&self, _server_id: u32) {}
+            fn record_article_failure(&self, _server_id: u32) {}
         }
 
         let server = test_server(1, 0, 0, 2);
@@ -734,6 +745,8 @@ mod tests {
             fn record_bytes(&self, _server_id: u32, _bytes: u64) {
                 self.call_count.fetch_add(1, AtomicOrdering::SeqCst);
             }
+            fn record_article_success(&self, _server_id: u32) {}
+            fn record_article_failure(&self, _server_id: u32) {}
         }
 
         let server = test_server(1, 0, 0, 2);

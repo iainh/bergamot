@@ -688,6 +688,9 @@ pub struct ServerVolume {
     pub bytes_per_seconds: [u64; 60],
     pub bytes_per_minutes: [u64; 60],
     pub bytes_per_hours: [u64; 24],
+    pub articles_success_today: u64,
+    pub articles_failed_today: u64,
+    pub articles_daily_history: Vec<(NaiveDate, u64, u64)>,
     last_epoch_sec: Option<i64>,
 }
 
@@ -701,6 +704,9 @@ impl Default for ServerVolume {
             bytes_per_seconds: [0; 60],
             bytes_per_minutes: [0; 60],
             bytes_per_hours: [0; 24],
+            articles_success_today: 0,
+            articles_failed_today: 0,
+            articles_daily_history: Vec::new(),
             last_epoch_sec: None,
         }
     }
@@ -768,6 +774,14 @@ impl ServerVolume {
         self.bytes_today += bytes;
         self.bytes_this_month += bytes;
     }
+
+    pub fn record_success(&mut self) {
+        self.articles_success_today += 1;
+    }
+
+    pub fn record_failure(&mut self) {
+        self.articles_failed_today += 1;
+    }
 }
 
 pub struct StatsTracker {
@@ -797,6 +811,16 @@ impl StatsTracker {
         volume.record(bytes, now);
     }
 
+    pub fn record_article_success(&mut self, server_id: u32) {
+        let volume = self.volumes.entry(server_id).or_default();
+        volume.record_success();
+    }
+
+    pub fn record_article_failure(&mut self, server_id: u32) {
+        let volume = self.volumes.entry(server_id).or_default();
+        volume.record_failure();
+    }
+
     pub fn check_monthly_quota(&self, server_id: u32, quota_gb: u64) -> bool {
         if quota_gb == 0 {
             return false;
@@ -812,7 +836,14 @@ impl StatsTracker {
             volume
                 .daily_history
                 .push((self.last_day, volume.bytes_today));
+            volume.articles_daily_history.push((
+                self.last_day,
+                volume.articles_success_today,
+                volume.articles_failed_today,
+            ));
             volume.bytes_today = 0;
+            volume.articles_success_today = 0;
+            volume.articles_failed_today = 0;
 
             if today.day() == self.quota_start_day
                 || (self.quota_start_day > 28
@@ -897,6 +928,18 @@ impl nzbg_nntp::StatsRecorder for SharedStatsTracker {
     fn record_bytes(&self, server_id: u32, bytes: u64) {
         if let Ok(mut tracker) = self.inner.lock() {
             tracker.record_bytes(server_id, bytes);
+        }
+    }
+
+    fn record_article_success(&self, server_id: u32) {
+        if let Ok(mut tracker) = self.inner.lock() {
+            tracker.record_article_success(server_id);
+        }
+    }
+
+    fn record_article_failure(&self, server_id: u32) {
+        if let Ok(mut tracker) = self.inner.lock() {
+            tracker.record_article_failure(server_id);
         }
     }
 }
