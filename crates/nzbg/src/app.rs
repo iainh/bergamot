@@ -304,7 +304,7 @@ pub fn forward_completions(
 }
 
 pub async fn run(config: Config, fetcher: Arc<dyn crate::download::ArticleFetcher>) -> Result<()> {
-    run_with_config_path(config, fetcher, None, None).await
+    run_with_config_path(config, fetcher, None, None, None).await
 }
 
 pub async fn run_with_config_path(
@@ -312,6 +312,7 @@ pub async fn run_with_config_path(
     fetcher: Arc<dyn crate::download::ArticleFetcher>,
     config_path: Option<std::path::PathBuf>,
     log_buffer: Option<Arc<LogBuffer>>,
+    shared_stats: Option<Arc<nzbg_scheduler::SharedStatsTracker>>,
 ) -> Result<()> {
     let web_config = Arc::new(web_server_config(&config));
     let inter_dir = config.inter_dir.clone();
@@ -348,13 +349,21 @@ pub async fn run_with_config_path(
     });
     let forward_handle = forward_completions(completion_rx, postproc_tx.clone());
 
+    let total_connections = config
+        .servers
+        .iter()
+        .map(|s| s.connections.max(1) as usize)
+        .sum::<usize>()
+        .max(1);
     let (coordinator, queue_handle, assignment_rx, rate_rx) =
-        nzbg_queue::QueueCoordinator::new(4, 2);
+        nzbg_queue::QueueCoordinator::new(total_connections, total_connections, inter_dir.clone(), config.dest_dir.clone());
     let mut coordinator = coordinator.with_completion_tx(completion_tx);
 
+    let mut restored_paused = false;
     match restore_queue(&disk) {
         Ok(Some((queue, paused, rate))) => {
             let count = queue.queue.len();
+            restored_paused = paused;
             coordinator.seed_state(queue, paused, rate);
             tracing::info!("restored {count} NZBs from disk state");
         }
@@ -415,6 +424,9 @@ pub async fn run_with_config_path(
         .with_queue(queue_handle.clone())
         .with_shutdown(shutdown_handle)
         .with_disk(disk.clone());
+    app_state_builder
+        .download_paused()
+        .store(restored_paused, std::sync::atomic::Ordering::Relaxed);
     if let Some(cp) = config_path {
         app_state_builder = app_state_builder.with_config(config_arc.clone(), cp);
     }
@@ -423,6 +435,9 @@ pub async fn run_with_config_path(
     }
     if let Some(ref fh) = feed_handle {
         app_state_builder = app_state_builder.with_feed_handle(fh.clone());
+    }
+    if let Some(ref ss) = shared_stats {
+        app_state_builder = app_state_builder.with_stats_tracker(ss.clone());
     }
     let app_state = Arc::new(app_state_builder);
 
@@ -436,7 +451,7 @@ pub async fn run_with_config_path(
             feed_handle,
             server_pool: None,
         },
-        stats_recorder: None,
+        stats_recorder: shared_stats,
     };
     let config_guard = config_arc.read().unwrap();
     let (scheduler_tx, scheduler_handles) =

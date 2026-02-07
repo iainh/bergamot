@@ -29,6 +29,8 @@ pub struct AppState {
     version: String,
     download_rate: Arc<AtomicU64>,
     remaining_bytes: Arc<AtomicU64>,
+    downloaded_bytes: Arc<AtomicU64>,
+    speed_limit: Arc<AtomicU64>,
     start_time: std::time::Instant,
     queue: Option<nzbg_queue::QueueHandle>,
     shutdown: Option<ShutdownHandle>,
@@ -36,10 +38,12 @@ pub struct AppState {
     log_buffer: Option<std::sync::Arc<nzbg_logging::LogBuffer>>,
     config: Option<std::sync::Arc<std::sync::RwLock<nzbg_config::Config>>>,
     config_path: Option<std::path::PathBuf>,
+    download_paused: std::sync::Arc<std::sync::atomic::AtomicBool>,
     postproc_paused: std::sync::Arc<std::sync::atomic::AtomicBool>,
     scan_paused: std::sync::Arc<std::sync::atomic::AtomicBool>,
     scan_trigger: Option<tokio::sync::mpsc::Sender<()>>,
     feed_handle: Option<nzbg_feed::FeedHandle>,
+    stats_tracker: Option<std::sync::Arc<nzbg_scheduler::SharedStatsTracker>>,
 }
 
 impl Default for AppState {
@@ -48,6 +52,8 @@ impl Default for AppState {
             version: "26.0".to_string(),
             download_rate: Arc::new(AtomicU64::new(0)),
             remaining_bytes: Arc::new(AtomicU64::new(0)),
+            downloaded_bytes: Arc::new(AtomicU64::new(0)),
+            speed_limit: Arc::new(AtomicU64::new(0)),
             start_time: std::time::Instant::now(),
             queue: None,
             shutdown: None,
@@ -55,10 +61,12 @@ impl Default for AppState {
             log_buffer: None,
             config: None,
             config_path: None,
+            download_paused: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             postproc_paused: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             scan_paused: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             scan_trigger: None,
             feed_handle: None,
+            stats_tracker: None,
         }
     }
 }
@@ -114,6 +122,10 @@ impl AppState {
         self
     }
 
+    pub fn download_paused(&self) -> &std::sync::Arc<std::sync::atomic::AtomicBool> {
+        &self.download_paused
+    }
+
     pub fn postproc_paused(&self) -> &std::sync::Arc<std::sync::atomic::AtomicBool> {
         &self.postproc_paused
     }
@@ -133,6 +145,20 @@ impl AppState {
 
     pub fn feed_handle(&self) -> Option<&nzbg_feed::FeedHandle> {
         self.feed_handle.as_ref()
+    }
+
+    pub fn with_stats_tracker(
+        mut self,
+        tracker: std::sync::Arc<nzbg_scheduler::SharedStatsTracker>,
+    ) -> Self {
+        self.stats_tracker = Some(tracker);
+        self
+    }
+
+    pub fn stats_tracker(
+        &self,
+    ) -> Option<&std::sync::Arc<nzbg_scheduler::SharedStatsTracker>> {
+        self.stats_tracker.as_ref()
     }
 
     pub fn version(&self) -> &str {
@@ -165,11 +191,23 @@ impl AppState {
         &self.remaining_bytes
     }
 
+    pub fn downloaded_bytes_ref(&self) -> &Arc<AtomicU64> {
+        &self.downloaded_bytes
+    }
+
+    pub fn speed_limit_ref(&self) -> &Arc<AtomicU64> {
+        &self.speed_limit
+    }
+
     pub fn status(&self) -> StatusResponse {
         let remaining = self.remaining_bytes.load(Ordering::Relaxed);
         let remaining_fields = crate::status::SizeFields::from(remaining);
+        let downloaded = self.downloaded_bytes.load(Ordering::Relaxed);
+        let downloaded_fields = crate::status::SizeFields::from(downloaded);
         let download_rate = self.download_rate.load(Ordering::Relaxed);
         let rate_fields = crate::status::SizeFields::from(download_rate);
+        let download_limit = self.speed_limit.load(Ordering::Relaxed);
+        let download_paused = self.download_paused.load(Ordering::Relaxed);
         let post_paused = self.postproc_paused.load(Ordering::Relaxed);
         let scan_paused = self.scan_paused.load(Ordering::Relaxed);
 
@@ -197,9 +235,9 @@ impl AppState {
             forced_size_lo: 0,
             forced_size_hi: 0,
             forced_size_mb: 0,
-            downloaded_size_lo: 0,
-            downloaded_size_hi: 0,
-            downloaded_size_mb: 0,
+            downloaded_size_lo: downloaded_fields.lo,
+            downloaded_size_hi: downloaded_fields.hi,
+            downloaded_size_mb: downloaded_fields.mb,
             month_size_lo: 0,
             month_size_hi: 0,
             month_size_mb: 0,
@@ -215,7 +253,7 @@ impl AppState {
             average_download_rate: 0,
             average_download_rate_lo: 0,
             average_download_rate_hi: 0,
-            download_limit: 0,
+            download_limit,
             thread_count: 0,
             post_job_count: 0,
             par_job_count: 0,
@@ -225,12 +263,12 @@ impl AppState {
             download_time_sec: 0,
             server_time: chrono::Utc::now().timestamp(),
             resume_time: 0,
-            download_paused: false,
+            download_paused,
             server_paused: false,
             download2_paused: false,
             post_paused,
             scan_paused,
-            server_stand_by: true,
+            server_stand_by: download_rate == 0,
             quota_reached: false,
             feed_active: false,
             free_disk_space_lo: dest_free_fields.lo,
@@ -245,7 +283,20 @@ impl AppState {
             total_inter_disk_space_lo: inter_total_fields.lo,
             total_inter_disk_space_hi: inter_total_fields.hi,
             total_inter_disk_space_mb: inter_total_fields.mb,
-            news_servers: vec![],
+            news_servers: self
+                .config
+                .as_ref()
+                .and_then(|c| c.read().ok())
+                .map(|cfg| {
+                    cfg.servers
+                        .iter()
+                        .map(|s| crate::status::NewsServerStatus {
+                            id: s.id,
+                            active: s.active,
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
         }
     }
 }
@@ -262,16 +313,25 @@ pub fn spawn_stats_updater(
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(1));
+        let mut prev_downloaded: u64 = 0;
         loop {
             interval.tick().await;
             match queue.get_status().await {
                 Ok(status) => {
+                    let speed = status.downloaded_size.saturating_sub(prev_downloaded);
+                    prev_downloaded = status.downloaded_size;
                     state
                         .download_rate_ref()
-                        .store(status.download_rate, Ordering::Relaxed);
+                        .store(speed, Ordering::Relaxed);
                     state
                         .remaining_bytes_ref()
                         .store(status.remaining_size, Ordering::Relaxed);
+                    state
+                        .downloaded_bytes_ref()
+                        .store(status.downloaded_size, Ordering::Relaxed);
+                    state
+                        .speed_limit_ref()
+                        .store(status.download_rate, Ordering::Relaxed);
                 }
                 Err(_) => break,
             }

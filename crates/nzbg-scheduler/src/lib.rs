@@ -769,11 +769,38 @@ pub struct SharedStatsTracker {
     inner: std::sync::Mutex<StatsTracker>,
 }
 
+impl std::fmt::Debug for SharedStatsTracker {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SharedStatsTracker").finish_non_exhaustive()
+    }
+}
+
 impl SharedStatsTracker {
     pub fn new(tracker: StatsTracker) -> Self {
         Self {
             inner: std::sync::Mutex::new(tracker),
         }
+    }
+}
+
+impl SharedStatsTracker {
+    pub fn snapshot_volumes(&self) -> std::collections::HashMap<u32, ServerVolume> {
+        self.inner
+            .lock()
+            .map(|t| t.volumes.clone())
+            .unwrap_or_default()
+    }
+
+    pub fn snapshot_with_date(
+        &self,
+    ) -> (
+        std::collections::HashMap<u32, ServerVolume>,
+        chrono::NaiveDate,
+    ) {
+        self.inner
+            .lock()
+            .map(|t| (t.volumes.clone(), t.last_day))
+            .unwrap_or_default()
     }
 }
 
@@ -1236,7 +1263,7 @@ mod tests {
             .unwrap();
         let task = sample_task();
         let clock = FixedClock { now };
-        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1);
+        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
         tokio::spawn(async move { coordinator.run().await });
         let mut scheduler = Scheduler::new(vec![task], handle.clone()).with_clock(Box::new(clock));
 
@@ -1286,7 +1313,7 @@ mod tests {
 
     #[tokio::test]
     async fn command_executor_pause_download_pauses_queue() {
-        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1);
+        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
         tokio::spawn(async move { coordinator.run().await });
 
         let executor = CommandExecutor::new(handle.clone());
@@ -1302,7 +1329,7 @@ mod tests {
 
     #[tokio::test]
     async fn command_executor_unpause_download_resumes_queue() {
-        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1);
+        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
         tokio::spawn(async move { coordinator.run().await });
 
         let executor = CommandExecutor::new(handle.clone());
@@ -1322,7 +1349,7 @@ mod tests {
 
     #[tokio::test]
     async fn command_executor_download_rate_sets_rate() {
-        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1);
+        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
         tokio::spawn(async move { coordinator.run().await });
 
         let executor = CommandExecutor::new(handle.clone());
@@ -1344,7 +1371,7 @@ mod tests {
         let nzb_path = nzb_dir.path().join("test.nzb");
         std::fs::write(&nzb_path, SAMPLE_NZB).expect("write nzb");
 
-        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1);
+        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
         tokio::spawn(async move { coordinator.run().await });
 
         handle
@@ -1374,7 +1401,7 @@ mod tests {
         let nzb_path = nzb_dir.path().join("test.nzb");
         std::fs::write(&nzb_path, SAMPLE_NZB).expect("write nzb");
 
-        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1);
+        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
         tokio::spawn(async move { coordinator.run().await });
 
         handle
@@ -1425,7 +1452,7 @@ mod tests {
     async fn disk_state_flush_cleans_orphaned_file_states() {
         use nzbg_diskstate::{DiskState, FileArticleState, JsonFormat};
 
-        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1);
+        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
         tokio::spawn(async move { coordinator.run().await });
 
         let tmp = tempfile::tempdir().expect("tempdir");
@@ -1557,7 +1584,7 @@ mod tests {
         let nzb_path = tmp.path().join("test.nzb");
         std::fs::write(&nzb_path, SAMPLE_NZB).expect("write");
 
-        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1);
+        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
         tokio::spawn(async move { coordinator.run().await });
 
         let mut scanner = NzbDirScanner {
@@ -1585,7 +1612,7 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tempdir");
         std::fs::write(tmp.path().join("readme.txt"), "text").expect("write");
 
-        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1);
+        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
         tokio::spawn(async move { coordinator.run().await });
 
         let mut scanner = NzbDirScanner {
@@ -1609,7 +1636,7 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tempdir");
         std::fs::write(tmp.path().join("test.nzb"), SAMPLE_NZB).expect("write");
 
-        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1);
+        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
         tokio::spawn(async move { coordinator.run().await });
 
         let mut scanner = NzbDirScanner {
@@ -1631,7 +1658,7 @@ mod tests {
 
     #[tokio::test]
     async fn command_executor_pause_postprocess_sets_flag() {
-        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1);
+        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
         tokio::spawn(async move { coordinator.run().await });
 
         let flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -1650,7 +1677,7 @@ mod tests {
 
     #[tokio::test]
     async fn command_executor_unpause_postprocess_clears_flag() {
-        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1);
+        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
         tokio::spawn(async move { coordinator.run().await });
 
         let flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
@@ -1669,7 +1696,7 @@ mod tests {
 
     #[tokio::test]
     async fn command_executor_pause_scan_sets_flag() {
-        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1);
+        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
         tokio::spawn(async move { coordinator.run().await });
 
         let flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -1688,7 +1715,7 @@ mod tests {
 
     #[tokio::test]
     async fn command_executor_unpause_scan_clears_flag() {
-        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1);
+        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
         tokio::spawn(async move { coordinator.run().await });
 
         let flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
@@ -1707,7 +1734,7 @@ mod tests {
 
     #[tokio::test]
     async fn command_executor_process_triggers_scan() {
-        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1);
+        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
         tokio::spawn(async move { coordinator.run().await });
 
         let (trigger_tx, mut trigger_rx) = tokio::sync::mpsc::channel(4);
@@ -1728,7 +1755,7 @@ mod tests {
 
     #[tokio::test]
     async fn command_executor_activate_server() {
-        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1);
+        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
         tokio::spawn(async move { coordinator.run().await });
 
         let mut server = nzbg_nntp::NewsServer {
@@ -1768,7 +1795,7 @@ mod tests {
 
     #[tokio::test]
     async fn command_executor_deactivate_server() {
-        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1);
+        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
         tokio::spawn(async move { coordinator.run().await });
 
         let server = nzbg_nntp::NewsServer {
@@ -1839,7 +1866,7 @@ mod tests {
         let feed_handle = FeedHandle::new(feed_tx);
         tokio::spawn(coordinator.run_actor(feed_rx));
 
-        let (mut queue_coord, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1);
+        let (mut queue_coord, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
         tokio::spawn(async move { queue_coord.run().await });
 
         let deps = CommandDeps {
@@ -1854,7 +1881,7 @@ mod tests {
 
     #[tokio::test]
     async fn command_executor_extensions_succeeds() {
-        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1);
+        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
         tokio::spawn(async move { coordinator.run().await });
 
         let executor = CommandExecutor::new(handle.clone());
@@ -1867,7 +1894,7 @@ mod tests {
 
     #[tokio::test]
     async fn disk_space_monitor_pauses_queue_on_low_space() {
-        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1);
+        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
         tokio::spawn(async move { coordinator.run().await });
 
         let tmp = tempfile::tempdir().expect("tempdir");
@@ -1890,7 +1917,7 @@ mod tests {
 
     #[tokio::test]
     async fn disk_space_monitor_resumes_queue_on_recovery() {
-        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1);
+        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
         tokio::spawn(async move { coordinator.run().await });
 
         let tmp = tempfile::tempdir().expect("tempdir");
@@ -1915,7 +1942,7 @@ mod tests {
 
     #[tokio::test]
     async fn disk_space_monitor_no_pause_when_threshold_zero() {
-        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1);
+        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
         tokio::spawn(async move { coordinator.run().await });
 
         let tmp = tempfile::tempdir().expect("tempdir");
@@ -1953,7 +1980,7 @@ mod tests {
 
     #[tokio::test]
     async fn disk_space_monitor_custom_check_space() {
-        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1);
+        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
         tokio::spawn(async move { coordinator.run().await });
 
         let tmp = tempfile::tempdir().expect("tempdir");
@@ -1976,7 +2003,7 @@ mod tests {
 
     #[tokio::test]
     async fn disk_space_monitor_with_queue_builder() {
-        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1);
+        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
         tokio::spawn(async move { coordinator.run().await });
 
         let config = nzbg_config::Config::from_raw(std::collections::HashMap::new());
@@ -2070,7 +2097,7 @@ mod tests {
 
     #[tokio::test]
     async fn history_cleanup_skips_when_keep_days_zero() {
-        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1);
+        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
         coordinator.add_to_history(
             sample_nzb(1, "old-entry"),
             nzbg_core::models::HistoryKind::Nzb,
@@ -2107,7 +2134,7 @@ mod tests {
 
     #[tokio::test]
     async fn history_cleanup_preserves_fresh_entries() {
-        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1);
+        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
         coordinator.add_to_history(sample_nzb(1, "fresh"), nzbg_core::models::HistoryKind::Nzb);
         tokio::spawn(async move { coordinator.run().await });
 
@@ -2125,7 +2152,7 @@ mod tests {
 
     #[tokio::test]
     async fn history_cleanup_deletes_old_entries() {
-        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1);
+        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
 
         let queue = nzbg_core::models::DownloadQueue {
             queue: vec![],
@@ -2161,7 +2188,7 @@ mod tests {
 
     #[tokio::test]
     async fn history_cleanup_deletes_multiple_old_entries() {
-        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1);
+        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
 
         let history_entries: Vec<_> = (1..=3)
             .map(|i| nzbg_core::models::HistoryInfo {
@@ -2254,7 +2281,7 @@ mod tests {
 
     #[tokio::test]
     async fn health_checker_check_consistency_empty_queue() {
-        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1);
+        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
         tokio::spawn(async move { coordinator.run().await });
 
         let tmp = tempfile::tempdir().expect("tempdir");
@@ -2287,7 +2314,7 @@ mod tests {
             next_file_id: 1,
         };
 
-        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1);
+        let (mut coordinator, handle, _rx, _rate_rx) = nzbg_queue::QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
         coordinator.seed_state(queue, false, 0);
         tokio::spawn(async move { coordinator.run().await });
 

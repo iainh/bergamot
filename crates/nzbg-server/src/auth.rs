@@ -37,28 +37,28 @@ pub async fn auth_middleware(
 ) -> Result<Response, Response> {
     let config = &state.config;
 
-    if !config.authorized_ips.is_empty() {
-        let client_ip = connect_info
-            .map(|ci| ci.0.ip().to_string())
-            .unwrap_or_default();
-        if !is_ip_allowed(&client_ip, &config.authorized_ips) {
-            return Err(Response::builder()
-                .status(StatusCode::FORBIDDEN)
-                .body(axum::body::Body::empty())
-                .unwrap());
-        }
-    }
+    let client_ip = connect_info
+        .map(|ci| ci.0.ip().to_string())
+        .unwrap_or_default();
 
-    let access = extract_session_cookie(&request)
-        .and_then(|cookie| verify_session_cookie(&cookie, &config.control_password))
-        .or_else(|| {
-            extract_url_credentials(&request)
-                .and_then(|(user, pass)| authenticate(&user, &pass, config))
-        })
-        .or_else(|| {
-            extract_basic_auth(&request).and_then(|(user, pass)| authenticate(&user, &pass, config))
-        })
-        .unwrap_or(AccessLevel::Denied);
+    let ip_authorized = !config.authorized_ips.is_empty()
+        && is_ip_allowed(&client_ip, &config.authorized_ips);
+
+    let access = if ip_authorized {
+        AccessLevel::Control
+    } else {
+        extract_session_cookie(&request)
+            .and_then(|cookie| verify_session_cookie(&cookie, &config.control_password))
+            .or_else(|| {
+                extract_url_credentials(&request)
+                    .and_then(|(user, pass)| authenticate(&user, &pass, config))
+            })
+            .or_else(|| {
+                extract_basic_auth(&request)
+                    .and_then(|(user, pass)| authenticate(&user, &pass, config))
+            })
+            .unwrap_or(AccessLevel::Denied)
+    };
 
     if access == AccessLevel::Denied {
         return Err(unauthorized_response());

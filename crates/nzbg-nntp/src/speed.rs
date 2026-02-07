@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use tokio::time::sleep;
@@ -5,14 +6,18 @@ use tokio::time::sleep;
 #[derive(Debug)]
 pub struct SpeedLimiter {
     rate: u64,
+    rate_atomic: Arc<AtomicU64>,
     tokens: f64,
     last_refill: Instant,
 }
+
+use std::sync::Arc;
 
 impl SpeedLimiter {
     pub fn new(rate_bytes_per_sec: u64) -> Self {
         Self {
             rate: rate_bytes_per_sec,
+            rate_atomic: Arc::new(AtomicU64::new(rate_bytes_per_sec)),
             tokens: rate_bytes_per_sec as f64,
             last_refill: Instant::now(),
         }
@@ -22,13 +27,22 @@ impl SpeedLimiter {
         self.rate
     }
 
-    pub fn set_rate(&mut self, rate_bytes_per_sec: u64) {
-        self.rate = rate_bytes_per_sec;
+    pub fn rate_ref(&self) -> &Arc<AtomicU64> {
+        &self.rate_atomic
     }
 
-    pub async fn acquire(&mut self, bytes: u64) {
+    pub fn set_rate(&mut self, rate_bytes_per_sec: u64) {
+        self.rate = rate_bytes_per_sec;
+        self.rate_atomic.store(rate_bytes_per_sec, Ordering::Relaxed);
+    }
+
+    pub fn is_unlimited(&self) -> bool {
+        self.rate_atomic.load(Ordering::Relaxed) == 0
+    }
+
+    pub fn reserve(&mut self, bytes: u64) -> Option<Duration> {
         if self.rate == 0 {
-            return;
+            return None;
         }
 
         let now = Instant::now();
@@ -39,9 +53,21 @@ impl SpeedLimiter {
         self.tokens -= bytes as f64;
         if self.tokens < 0.0 {
             let delay = Duration::from_secs_f64(-self.tokens / self.rate as f64);
+            Some(delay)
+        } else {
+            None
+        }
+    }
+
+    pub fn after_sleep(&mut self) {
+        self.tokens = 0.0;
+        self.last_refill = Instant::now();
+    }
+
+    pub async fn acquire(&mut self, bytes: u64) {
+        if let Some(delay) = self.reserve(bytes) {
             sleep(delay).await;
-            self.tokens = 0.0;
-            self.last_refill = Instant::now();
+            self.after_sleep();
         }
     }
 }

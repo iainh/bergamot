@@ -49,6 +49,7 @@ pub async fn download_worker(
 ) {
     let initial_rate = *rate_rx.borrow();
     let limiter = Arc::new(Mutex::new(SpeedLimiter::new(initial_rate)));
+    let rate_atomic = limiter.lock().await.rate_ref().clone();
 
     let watcher_limiter = limiter.clone();
     let mut watcher_rx = rate_rx.clone();
@@ -59,33 +60,66 @@ pub async fn download_worker(
         }
     });
 
+    tracing::debug!("download worker started");
+
     while let Some(assignment) = assignment_rx.recv().await {
+        tracing::debug!(
+            message_id = %assignment.message_id,
+            nzb_id = assignment.article_id.nzb_id,
+            file_idx = assignment.article_id.file_idx,
+            seg_idx = assignment.article_id.seg_idx,
+            "received assignment"
+        );
         let fetcher = fetcher.clone();
         let handle = queue_handle.clone();
         let dir = inter_dir.clone();
         let limiter = limiter.clone();
+        let rate_atomic = rate_atomic.clone();
         let cache = cache.clone();
         let writer_pool = writer_pool.clone();
         tokio::spawn(async move {
-            limiter.lock().await.acquire(assignment.expected_size).await;
+            if rate_atomic.load(std::sync::atomic::Ordering::Relaxed) > 0 {
+                let delay = limiter.lock().await.reserve(assignment.expected_size);
+                if let Some(delay) = delay {
+                    tokio::time::sleep(delay).await;
+                    limiter.lock().await.after_sleep();
+                }
+            }
 
             let result =
                 fetch_and_decode(&fetcher, &assignment, &dir, cache.as_ref(), &writer_pool).await;
             let download_result = match result {
-                Ok((data, offset, crc)) => DownloadResult {
-                    article_id: assignment.article_id,
-                    outcome: DownloadOutcome::Success { data, offset, crc },
-                },
-                Err(err) => DownloadResult {
-                    article_id: assignment.article_id,
-                    outcome: DownloadOutcome::Failure {
-                        message: format!("{err:#}"),
-                    },
-                },
+                Ok((ref data, offset, _crc)) => {
+                    tracing::debug!(
+                        message_id = %assignment.message_id,
+                        offset,
+                        data_len = data.len(),
+                        "fetch succeeded"
+                    );
+                    DownloadResult {
+                        article_id: assignment.article_id,
+                        outcome: DownloadOutcome::Success { data: data.clone(), offset, crc: _crc },
+                    }
+                }
+                Err(ref err) => {
+                    tracing::debug!(
+                        message_id = %assignment.message_id,
+                        error = %format!("{err:#}"),
+                        "fetch failed"
+                    );
+                    DownloadResult {
+                        article_id: assignment.article_id,
+                        outcome: DownloadOutcome::Failure {
+                            message: format!("{err:#}"),
+                        },
+                    }
+                }
             };
             let _ = handle.report_download(download_result).await;
         });
     }
+
+    tracing::debug!("download worker shutting down");
 }
 
 async fn fetch_and_decode(
@@ -96,8 +130,10 @@ async fn fetch_and_decode(
     writer_pool: &FileWriterPool,
 ) -> Result<(Vec<u8>, u64, u32)> {
     let lines = if let Some(cached) = cache.get(&assignment.message_id) {
+        tracing::debug!(message_id = %assignment.message_id, "cache hit");
         cached.split(|&b| b == b'\n').map(|s| s.to_vec()).collect()
     } else {
+        tracing::debug!(message_id = %assignment.message_id, "cache miss");
         let fetched = fetcher
             .fetch_body(&assignment.message_id, &assignment.groups)
             .await
@@ -220,7 +256,7 @@ mod tests {
         });
         let tmp = tempfile::tempdir().expect("tempdir");
         let (_coordinator, handle, _assignment_rx, _rate_rx) =
-            nzbg_queue::QueueCoordinator::new(2, 1);
+            nzbg_queue::QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
 
         let assignment = ArticleAssignment {
             article_id: ArticleId {

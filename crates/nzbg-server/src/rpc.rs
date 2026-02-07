@@ -667,15 +667,105 @@ fn empty_server_volume(server_id: u32) -> serde_json::Value {
 }
 
 fn rpc_servervolumes(state: &AppState) -> Result<serde_json::Value, JsonRpcError> {
+    let (tracked, tracker_date) = state
+        .stats_tracker()
+        .map(|t| t.snapshot_with_date())
+        .unwrap_or_default();
+
     let mut volumes = vec![empty_server_volume(0)];
     if let Some(config) = state.config() {
         if let Ok(config) = config.read() {
             for server in &config.servers {
-                volumes.push(empty_server_volume(server.id));
+                let vol = if let Some(sv) = tracked.get(&server.id) {
+                    build_server_volume(server.id, sv, tracker_date)
+                } else {
+                    empty_server_volume(server.id)
+                };
+                volumes.push(vol);
             }
         }
     }
     Ok(serde_json::json!(volumes))
+}
+
+fn build_server_volume(
+    server_id: u32,
+    sv: &nzbg_scheduler::ServerVolume,
+    today: chrono::NaiveDate,
+) -> serde_json::Value {
+    use chrono::NaiveDate;
+
+    let unix_epoch = NaiveDate::from_ymd_opt(1970, 1, 1).unwrap();
+    let today_slot = (today - unix_epoch).num_days();
+
+    let first_day = sv
+        .daily_history
+        .first()
+        .map(|(d, _)| (*d - unix_epoch).num_days())
+        .unwrap_or(today_slot);
+
+    let num_days = (today_slot - first_day + 1) as usize;
+    let zero_size = serde_json::json!({"SizeLo": 0, "SizeHi": 0, "SizeMB": 0});
+    let mut days: Vec<serde_json::Value> = vec![zero_size; num_days];
+
+    for (date, bytes) in &sv.daily_history {
+        let slot = (*date - unix_epoch).num_days();
+        let idx = (slot - first_day) as usize;
+        if idx < days.len() {
+            days[idx] = size_json(*bytes);
+        }
+    }
+
+    let day_slot_idx = (today_slot - first_day) as usize;
+    if day_slot_idx < days.len() {
+        days[day_slot_idx] = size_json(sv.bytes_today);
+    }
+
+    let total_bytes: u64 = sv
+        .daily_history
+        .iter()
+        .map(|(_, b)| b)
+        .sum::<u64>()
+        + sv.bytes_today;
+
+    let zero_article = serde_json::json!({"Failed": 0, "Success": 0});
+    let article_days: Vec<_> = (0..days.len()).map(|_| zero_article.clone()).collect();
+
+    let now = chrono::Utc::now().timestamp();
+    let seconds: Vec<_> = (0..60).map(|_| serde_json::json!({"SizeLo": 0, "SizeHi": 0, "SizeMB": 0})).collect();
+    let minutes: Vec<_> = (0..60).map(|_| serde_json::json!({"SizeLo": 0, "SizeHi": 0, "SizeMB": 0})).collect();
+    let hours: Vec<_> = (0..24).map(|_| serde_json::json!({"SizeLo": 0, "SizeHi": 0, "SizeMB": 0})).collect();
+
+    serde_json::json!({
+        "ServerID": server_id,
+        "DataTime": now,
+        "FirstDay": first_day,
+        "TotalSizeLo": (total_bytes & 0xFFFF_FFFF) as u32,
+        "TotalSizeHi": (total_bytes >> 32) as u32,
+        "TotalSizeMB": (total_bytes / (1024 * 1024)) as u64,
+        "CustomSizeLo": 0,
+        "CustomSizeHi": 0,
+        "CustomSizeMB": 0,
+        "CustomTime": now,
+        "CountersResetTime": now,
+        "SecSlot": 0,
+        "MinSlot": 0,
+        "HourSlot": 0,
+        "DaySlot": day_slot_idx,
+        "BytesPerSeconds": seconds,
+        "BytesPerMinutes": minutes,
+        "BytesPerHours": hours,
+        "BytesPerDays": days,
+        "ArticlesPerDays": article_days,
+    })
+}
+
+fn size_json(bytes: u64) -> serde_json::Value {
+    serde_json::json!({
+        "SizeLo": (bytes & 0xFFFF_FFFF) as u32,
+        "SizeHi": (bytes >> 32) as u32,
+        "SizeMB": (bytes / (1024 * 1024)) as u64,
+    })
 }
 
 fn rpc_loadlog(
@@ -843,12 +933,18 @@ fn format_history_status(e: &nzbg_queue::HistoryListEntry) -> String {
 async fn rpc_pausedownload(state: &AppState) -> Result<serde_json::Value, JsonRpcError> {
     let queue = require_queue(state)?;
     queue.pause_all().await.map_err(rpc_error)?;
+    state
+        .download_paused()
+        .store(true, std::sync::atomic::Ordering::Relaxed);
     Ok(serde_json::json!(true))
 }
 
 async fn rpc_resumedownload(state: &AppState) -> Result<serde_json::Value, JsonRpcError> {
     let queue = require_queue(state)?;
     queue.resume_all().await.map_err(rpc_error)?;
+    state
+        .download_paused()
+        .store(false, std::sync::atomic::Ordering::Relaxed);
     Ok(serde_json::json!(true))
 }
 
@@ -890,7 +986,7 @@ mod tests {
         nzbg_queue::QueueHandle,
         tokio::task::JoinHandle<()>,
     ) {
-        let (mut coordinator, handle, _rx, _rate_rx) = QueueCoordinator::new(2, 1);
+        let (mut coordinator, handle, _rx, _rate_rx) = QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
         let coordinator_handle = tokio::spawn(async move { coordinator.run().await });
         let state = AppState::default().with_queue(handle.clone());
         (state, handle, coordinator_handle)
@@ -925,7 +1021,7 @@ mod tests {
             DiskState::new(tmp_disk.path().to_path_buf(), JsonFormat).expect("disk"),
         );
 
-        let (mut coordinator, handle, _rx, _rate_rx) = QueueCoordinator::new(2, 1);
+        let (mut coordinator, handle, _rx, _rate_rx) = QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
         let coordinator_handle = tokio::spawn(async move { coordinator.run().await });
         let state = AppState::default()
             .with_queue(handle.clone())
@@ -1014,7 +1110,7 @@ mod tests {
     #[tokio::test]
     async fn dispatch_shutdown_triggers_shutdown() {
         let (shutdown_handle, rx) = crate::shutdown::ShutdownHandle::new();
-        let (mut coordinator, handle, _rx, _rate_rx) = QueueCoordinator::new(2, 1);
+        let (mut coordinator, handle, _rx, _rate_rx) = QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
         tokio::spawn(async move { coordinator.run().await });
         let state = AppState::default()
             .with_queue(handle.clone())
@@ -1350,7 +1446,7 @@ mod tests {
         nzbg_queue::QueueHandle,
         tokio::task::JoinHandle<()>,
     ) {
-        let (mut coordinator, handle, _rx, _rate_rx) = QueueCoordinator::new(2, 1);
+        let (mut coordinator, handle, _rx, _rate_rx) = QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
         coordinator.add_to_history(
             nzbg_core::models::NzbInfo {
                 id: 1,

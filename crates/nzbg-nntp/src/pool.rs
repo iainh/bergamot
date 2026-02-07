@@ -147,7 +147,7 @@ impl<F: ConnectionFactory> ServerPool<F> {
         let mut reader = conn.fetch_body(message_id).await?;
         let mut body_lines = Vec::new();
         while let Some(line) = reader.read_line().await? {
-            body_lines.push(line.into_bytes());
+            body_lines.push(line);
         }
 
         self.return_connection(state, conn).await;

@@ -27,7 +27,7 @@ pub struct NntpConnection {
 
 pub struct BodyReader<'a> {
     stream: &'a mut NntpStream,
-    buffer: String,
+    buffer: Vec<u8>,
     done: bool,
 }
 
@@ -35,40 +35,51 @@ impl<'a> BodyReader<'a> {
     fn new(stream: &'a mut NntpStream) -> Self {
         Self {
             stream,
-            buffer: String::new(),
+            buffer: Vec::new(),
             done: false,
         }
     }
 
-    pub async fn read_line(&mut self) -> Result<Option<String>, NntpError> {
+    pub async fn read_line(&mut self) -> Result<Option<Vec<u8>>, NntpError> {
         if self.done {
             return Ok(None);
         }
 
         self.buffer.clear();
         let bytes = match &mut self.stream {
-            NntpStream::Plain(reader) => reader.read_line(&mut self.buffer).await?,
-            NntpStream::Tls(reader) => reader.read_line(&mut self.buffer).await?,
+            NntpStream::Plain(reader) => reader.read_until(b'\n', &mut self.buffer).await?,
+            NntpStream::Tls(reader) => reader.read_until(b'\n', &mut self.buffer).await?,
         };
 
         if bytes == 0 {
             return Err(NntpError::ProtocolError("unexpected EOF".into()));
         }
 
-        let trimmed = self.buffer.trim_end_matches(['\r', '\n']);
-        if trimmed == "." {
+        let trimmed = trim_crlf(&self.buffer);
+        if trimmed == b"." {
             self.done = true;
             return Ok(None);
         }
 
-        let line = if trimmed.starts_with("..") {
-            trimmed[1..].to_string()
+        let line = if trimmed.starts_with(b"..") {
+            trimmed[1..].to_vec()
         } else {
-            trimmed.to_string()
+            trimmed.to_vec()
         };
 
         Ok(Some(line))
     }
+}
+
+fn trim_crlf(buf: &[u8]) -> &[u8] {
+    let mut end = buf.len();
+    if end > 0 && buf[end - 1] == b'\n' {
+        end -= 1;
+    }
+    if end > 0 && buf[end - 1] == b'\r' {
+        end -= 1;
+    }
+    &buf[..end]
 }
 
 impl NntpConnection {
@@ -344,8 +355,8 @@ mod tests {
 
         let mut body = BodyReader::new(&mut stream);
 
-        assert_eq!(body.read_line().await.unwrap(), Some("line1".to_string()));
-        assert_eq!(body.read_line().await.unwrap(), Some(".dot".to_string()));
+        assert_eq!(body.read_line().await.unwrap(), Some(b"line1".to_vec()));
+        assert_eq!(body.read_line().await.unwrap(), Some(b".dot".to_vec()));
         assert_eq!(body.read_line().await.unwrap(), None);
         assert_eq!(body.read_line().await.unwrap(), None);
     }

@@ -188,10 +188,12 @@ impl<F: StateFormat> DiskState<F> {
                 warnings.push(ConsistencyWarning::MissingNzbFile { nzb_id: nzb.id });
             }
 
-            for &file_id in &nzb.file_ids {
-                let state_path = self.state_dir.join(format!("file/{file_id:08}.state"));
-                if !state_path.exists() {
-                    warnings.push(ConsistencyWarning::MissingFileState { file_id });
+            if nzb.success_article_count > 0 || nzb.failed_article_count > 0 {
+                for &file_id in &nzb.file_ids {
+                    let state_path = self.state_dir.join(format!("file/{file_id:08}.state"));
+                    if !state_path.exists() {
+                        warnings.push(ConsistencyWarning::MissingFileState { file_id });
+                    }
                 }
             }
         }
@@ -386,6 +388,7 @@ pub struct StateLock {
 
 impl StateLock {
     pub fn acquire(state_dir: &Path) -> anyhow::Result<Self> {
+        fs::create_dir_all(state_dir)?;
         let lock_path = state_dir.join("diskstate.lock");
         let lock_file = fs::File::create(&lock_path)?;
         lock_file.try_lock_exclusive().map_err(|_| {

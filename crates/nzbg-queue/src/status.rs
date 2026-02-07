@@ -16,6 +16,7 @@ pub struct QueueStatus {
     pub paused: bool,
     pub download_rate: u64,
     pub remaining_size: u64,
+    pub downloaded_size: u64,
 }
 
 #[derive(Debug, Clone)]

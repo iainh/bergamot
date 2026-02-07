@@ -12,7 +12,10 @@ use clap::Parser;
 
 use crate::cli::Cli;
 
-fn build_fetcher(config: &nzbg_config::Config) -> Arc<dyn download::ArticleFetcher> {
+fn build_fetcher(
+    config: &nzbg_config::Config,
+    stats: Option<Arc<dyn nzbg_nntp::StatsRecorder>>,
+) -> Arc<dyn download::ArticleFetcher> {
     let servers: Vec<nzbg_nntp::NewsServer> = config
         .servers
         .iter()
@@ -56,7 +59,10 @@ fn build_fetcher(config: &nzbg_config::Config) -> Arc<dyn download::ArticleFetch
         })
         .collect();
 
-    let pool = nzbg_nntp::ServerPool::new(servers);
+    let mut pool = nzbg_nntp::ServerPool::new(servers);
+    if let Some(stats) = stats {
+        pool = pool.with_stats(stats);
+    }
     Arc::new(download::NntpPoolFetcher::new(pool))
 }
 
@@ -71,6 +77,10 @@ fn main() -> Result<()> {
         .enable_all()
         .build()
         .context("building tokio runtime")?;
+
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .expect("failed to install rustls crypto provider");
 
     rt.block_on(async {
         let _pidfile = cli
@@ -89,7 +99,20 @@ fn main() -> Result<()> {
         let log_buffer = app::init_tracing(&cli.log_level);
 
         tracing::info!("nzbg starting");
-        let fetcher = build_fetcher(&config);
-        app::run_with_config_path(config, fetcher, Some(config_path), Some(log_buffer)).await
+        let stats_tracker = nzbg_scheduler::StatsTracker::from_config(&config);
+        let shared_stats =
+            std::sync::Arc::new(nzbg_scheduler::SharedStatsTracker::new(stats_tracker));
+        let fetcher = build_fetcher(
+            &config,
+            Some(shared_stats.clone() as Arc<dyn nzbg_nntp::StatsRecorder>),
+        );
+        app::run_with_config_path(
+            config,
+            fetcher,
+            Some(config_path),
+            Some(log_buffer),
+            Some(shared_stats.clone()),
+        )
+        .await
     })
 }

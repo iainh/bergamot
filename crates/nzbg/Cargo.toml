@@ -15,6 +15,7 @@ nzbg-extension = { path = "../nzbg-extension" }
 nzbg-feed = { path = "../nzbg-feed" }
 nzbg-logging = { path = "../nzbg-logging" }
 nzbg-nntp = { path = "../nzbg-nntp" }
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
 nzbg-nzb = { path = "../nzbg-nzb" }
 nzbg-postproc = { path = "../nzbg-postproc" }
 nzbg-queue = { path = "../nzbg-queue" }
