@@ -86,18 +86,42 @@ impl<F: ConnectionFactory> ServerPool<F> {
         message_id: &str,
         groups: &[String],
     ) -> Result<Vec<u8>, NntpError> {
+        if self.servers.is_empty() {
+            return Err(NntpError::ProtocolError("no servers available".into()));
+        }
+
         let mut last_error = NntpError::ProtocolError("no servers available".into());
 
-        for state in &self.servers {
-            if self.is_in_backoff(state) {
-                continue;
-            }
+        let available: Vec<_> = self
+            .servers
+            .iter()
+            .filter(|s| !self.is_in_backoff(s))
+            .collect();
 
-            let permit = match state.semaphore.clone().try_acquire_owned() {
+        if available.is_empty() {
+            return Err(NntpError::ProtocolError("all servers in backoff".into()));
+        }
+
+        let mut futures: Vec<_> = available
+            .iter()
+            .enumerate()
+            .map(|(i, s)| {
+                let sem = s.semaphore.clone();
+                Box::pin(async move { (i, sem.acquire_owned().await) })
+            })
+            .collect();
+
+        while !futures.is_empty() {
+            let ((server_idx, result), _winner, remaining) =
+                futures::future::select_all(futures).await;
+            futures = remaining;
+
+            let permit = match result {
                 Ok(permit) => permit,
                 Err(_) => continue,
             };
 
+            let state = available[server_idx];
             match self.try_fetch_from_server(state, message_id, groups).await {
                 Ok(data) => {
                     self.reset_backoff(state);
