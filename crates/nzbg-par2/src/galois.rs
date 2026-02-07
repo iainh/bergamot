@@ -85,6 +85,14 @@ pub fn pow(a: u16, n: u32) -> u16 {
 pub struct MulTable {
     lo: [u16; 256],
     hi: [u16; 256],
+    #[cfg(target_arch = "aarch64")]
+    nibble: NibbleTable,
+}
+
+#[cfg(target_arch = "aarch64")]
+struct NibbleTable {
+    lo: [[u8; 16]; 4],
+    hi: [[u8; 16]; 4],
 }
 
 impl MulTable {
@@ -97,7 +105,32 @@ impl MulTable {
                 hi[i] = mul(coeff, (i as u16) << 8);
             }
         }
-        MulTable { lo, hi }
+
+        #[cfg(target_arch = "aarch64")]
+        let nibble = {
+            let mut tbl = NibbleTable {
+                lo: [[0u8; 16]; 4],
+                hi: [[0u8; 16]; 4],
+            };
+            if coeff != 0 {
+                for p in 0..4 {
+                    for n in 0..16u16 {
+                        let w = n << (p * 4);
+                        let prod = mul(coeff, w);
+                        tbl.lo[p][n as usize] = (prod & 0xFF) as u8;
+                        tbl.hi[p][n as usize] = (prod >> 8) as u8;
+                    }
+                }
+            }
+            tbl
+        };
+
+        MulTable {
+            lo,
+            hi,
+            #[cfg(target_arch = "aarch64")]
+            nibble,
+        }
     }
 
     #[inline]
@@ -116,8 +149,18 @@ pub fn muladd(dst: &mut [u8], src: &[u8], coeff: u16) {
 
 pub fn muladd_with_table(dst: &mut [u8], src: &[u8], table: &MulTable) {
     let len = dst.len().min(src.len());
-    let words = len / 2;
 
+    #[cfg(target_arch = "aarch64")]
+    {
+        muladd_neon(dst, src, len, table);
+    }
+
+    #[cfg(not(target_arch = "aarch64"))]
+    muladd_scalar(dst, src, len, table);
+}
+
+fn muladd_scalar(dst: &mut [u8], src: &[u8], len: usize, table: &MulTable) {
+    let words = len / 2;
     let dst_ptr = dst.as_mut_ptr() as *mut u16;
     let src_ptr = src.as_ptr() as *const u16;
 
@@ -139,6 +182,68 @@ pub fn muladd_with_table(dst: &mut [u8], src: &[u8], table: &MulTable) {
     }
 }
 
+#[cfg(target_arch = "aarch64")]
+fn muladd_neon(dst: &mut [u8], src: &[u8], len: usize, table: &MulTable) {
+    use core::arch::aarch64::*;
+
+    if len < 16 {
+        muladd_scalar(dst, src, len, table);
+        return;
+    }
+
+    unsafe {
+        let mask_0f = vdupq_n_u8(0x0F);
+
+        let t0_lo = vld1q_u8(table.nibble.lo[0].as_ptr());
+        let t0_hi = vld1q_u8(table.nibble.hi[0].as_ptr());
+        let t1_lo = vld1q_u8(table.nibble.lo[1].as_ptr());
+        let t1_hi = vld1q_u8(table.nibble.hi[1].as_ptr());
+        let t2_lo = vld1q_u8(table.nibble.lo[2].as_ptr());
+        let t2_hi = vld1q_u8(table.nibble.hi[2].as_ptr());
+        let t3_lo = vld1q_u8(table.nibble.lo[3].as_ptr());
+        let t3_hi = vld1q_u8(table.nibble.hi[3].as_ptr());
+
+        let chunks = len / 16;
+        let mut offset = 0;
+
+        for _ in 0..chunks {
+            let s = vld1q_u8(src.as_ptr().add(offset));
+            let d = vld1q_u8(dst.as_ptr().add(offset));
+
+            let even_bytes = vuzp1q_u8(s, vdupq_n_u8(0));
+            let odd_bytes = vuzp2q_u8(s, vdupq_n_u8(0));
+
+            let n0 = vandq_u8(even_bytes, mask_0f);
+            let n1 = vshrq_n_u8(even_bytes, 4);
+            let n2 = vandq_u8(odd_bytes, mask_0f);
+            let n3 = vshrq_n_u8(odd_bytes, 4);
+
+            let r_lo = veorq_u8(
+                veorq_u8(vqtbl1q_u8(t0_lo, n0), vqtbl1q_u8(t1_lo, n1)),
+                veorq_u8(vqtbl1q_u8(t2_lo, n2), vqtbl1q_u8(t3_lo, n3)),
+            );
+            let r_hi = veorq_u8(
+                veorq_u8(vqtbl1q_u8(t0_hi, n0), vqtbl1q_u8(t1_hi, n1)),
+                veorq_u8(vqtbl1q_u8(t2_hi, n2), vqtbl1q_u8(t3_hi, n3)),
+            );
+
+            let product = vzip1q_u8(r_lo, r_hi);
+            vst1q_u8(dst.as_mut_ptr().add(offset), veorq_u8(d, product));
+            offset += 16;
+        }
+    }
+
+    let tail_start = (len / 16) * 16;
+    if tail_start < len {
+        muladd_scalar(
+            &mut dst[tail_start..],
+            &src[tail_start..],
+            len - tail_start,
+            table,
+        );
+    }
+}
+
 pub fn mul_slice_inplace(dst: &mut [u8], coeff: u16) {
     if coeff == 0 {
         dst.fill(0);
@@ -148,6 +253,17 @@ pub fn mul_slice_inplace(dst: &mut [u8], coeff: u16) {
         return;
     }
     let table = MulTable::new(coeff);
+
+    #[cfg(target_arch = "aarch64")]
+    {
+        mul_slice_inplace_neon(dst, &table);
+    }
+
+    #[cfg(not(target_arch = "aarch64"))]
+    mul_slice_inplace_scalar(dst, &table);
+}
+
+fn mul_slice_inplace_scalar(dst: &mut [u8], table: &MulTable) {
     let words = dst.len() / 2;
     let dst_ptr = dst.as_mut_ptr() as *mut u16;
 
@@ -164,6 +280,63 @@ pub fn mul_slice_inplace(dst: &mut [u8], coeff: u16) {
         let last = dst.len() - 1;
         let d = dst[last] as u16;
         dst[last] = table.lo[d as usize] as u8;
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+fn mul_slice_inplace_neon(dst: &mut [u8], table: &MulTable) {
+    use core::arch::aarch64::*;
+
+    let len = dst.len();
+    if len < 16 {
+        mul_slice_inplace_scalar(dst, table);
+        return;
+    }
+
+    unsafe {
+        let mask_0f = vdupq_n_u8(0x0F);
+
+        let t0_lo = vld1q_u8(table.nibble.lo[0].as_ptr());
+        let t0_hi = vld1q_u8(table.nibble.hi[0].as_ptr());
+        let t1_lo = vld1q_u8(table.nibble.lo[1].as_ptr());
+        let t1_hi = vld1q_u8(table.nibble.hi[1].as_ptr());
+        let t2_lo = vld1q_u8(table.nibble.lo[2].as_ptr());
+        let t2_hi = vld1q_u8(table.nibble.hi[2].as_ptr());
+        let t3_lo = vld1q_u8(table.nibble.lo[3].as_ptr());
+        let t3_hi = vld1q_u8(table.nibble.hi[3].as_ptr());
+
+        let chunks = len / 16;
+        let mut offset = 0;
+
+        for _ in 0..chunks {
+            let d = vld1q_u8(dst.as_ptr().add(offset));
+
+            let even_bytes = vuzp1q_u8(d, vdupq_n_u8(0));
+            let odd_bytes = vuzp2q_u8(d, vdupq_n_u8(0));
+
+            let n0 = vandq_u8(even_bytes, mask_0f);
+            let n1 = vshrq_n_u8(even_bytes, 4);
+            let n2 = vandq_u8(odd_bytes, mask_0f);
+            let n3 = vshrq_n_u8(odd_bytes, 4);
+
+            let r_lo = veorq_u8(
+                veorq_u8(vqtbl1q_u8(t0_lo, n0), vqtbl1q_u8(t1_lo, n1)),
+                veorq_u8(vqtbl1q_u8(t2_lo, n2), vqtbl1q_u8(t3_lo, n3)),
+            );
+            let r_hi = veorq_u8(
+                veorq_u8(vqtbl1q_u8(t0_hi, n0), vqtbl1q_u8(t1_hi, n1)),
+                veorq_u8(vqtbl1q_u8(t2_hi, n2), vqtbl1q_u8(t3_hi, n3)),
+            );
+
+            let product = vzip1q_u8(r_lo, r_hi);
+            vst1q_u8(dst.as_mut_ptr().add(offset), product);
+            offset += 16;
+        }
+    }
+
+    let tail_start = (len / 16) * 16;
+    if tail_start < len {
+        mul_slice_inplace_scalar(&mut dst[tail_start..], table);
     }
 }
 
