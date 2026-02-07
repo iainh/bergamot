@@ -1,46 +1,54 @@
 use std::path::Path;
 
-use crate::model::{FileVerifyResult, FileVerifyStatus, RecoverySet, VerifyResult};
+use rayon::prelude::*;
+
+use crate::model::{FileVerifyResult, FileVerifyStatus, Par2FileEntry, RecoverySet, VerifyResult};
 
 pub fn verify_recovery_set(rs: &RecoverySet, working_dir: &Path) -> VerifyResult {
     let files: Vec<FileVerifyResult> = rs
         .files
-        .iter()
-        .map(|entry| {
-            let slice_count = if rs.slice_size > 0 {
-                entry.length.div_ceil(rs.slice_size) as u32
-            } else {
-                0
-            };
-
-            let file_path = working_dir.join(&entry.filename);
-
-            if !file_path.is_file() {
-                return FileVerifyResult {
-                    file_id: entry.file_id,
-                    filename: entry.filename.clone(),
-                    status: FileVerifyStatus::Missing,
-                    slice_count,
-                };
-            }
-
-            let status = match verify_file(&file_path, entry, rs.slice_size) {
-                Ok(s) => s,
-                Err(_) => FileVerifyStatus::Damaged {
-                    bad_slices: (0..slice_count).collect(),
-                },
-            };
-
-            FileVerifyResult {
-                file_id: entry.file_id,
-                filename: entry.filename.clone(),
-                status,
-                slice_count,
-            }
-        })
+        .par_iter()
+        .map(|entry| verify_one_entry(entry, rs.slice_size, working_dir))
         .collect();
 
     VerifyResult { files }
+}
+
+fn verify_one_entry(
+    entry: &Par2FileEntry,
+    slice_size: u64,
+    working_dir: &Path,
+) -> FileVerifyResult {
+    let slice_count = if slice_size > 0 {
+        entry.length.div_ceil(slice_size) as u32
+    } else {
+        0
+    };
+
+    let file_path = working_dir.join(&entry.filename);
+
+    if !file_path.is_file() {
+        return FileVerifyResult {
+            file_id: entry.file_id,
+            filename: entry.filename.clone(),
+            status: FileVerifyStatus::Missing,
+            slice_count,
+        };
+    }
+
+    let status = match verify_file(&file_path, entry, slice_size) {
+        Ok(s) => s,
+        Err(_) => FileVerifyStatus::Damaged {
+            bad_slices: (0..slice_count).collect(),
+        },
+    };
+
+    FileVerifyResult {
+        file_id: entry.file_id,
+        filename: entry.filename.clone(),
+        status,
+        slice_count,
+    }
 }
 
 fn verify_file(
@@ -243,6 +251,86 @@ mod tests {
             result.files[0].status,
             FileVerifyStatus::Damaged { .. }
         ));
+    }
+
+    #[test]
+    fn verify_multiple_files_in_parallel() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut entries = Vec::new();
+
+        for i in 0..8 {
+            let name = format!("file_{i}.dat");
+            let data: Vec<u8> = (0..256).map(|b| (b as u8).wrapping_add(i)).collect();
+            std::fs::write(dir.path().join(&name), &data).unwrap();
+            let mut entry = make_entry(&name, &data, 64);
+            entry.file_id = FileId([i; 16]);
+            entries.push(entry);
+        }
+
+        let rs = RecoverySet {
+            set_id: [0; 16],
+            slice_size: 64,
+            files: entries,
+            recovery_slice_count: 0,
+        };
+
+        let result = verify_recovery_set(&rs, dir.path());
+        assert!(result.all_ok());
+        assert_eq!(result.files.len(), 8);
+    }
+
+    #[test]
+    fn verify_mixed_ok_missing_damaged_in_parallel() {
+        let dir = tempfile::tempdir().unwrap();
+
+        // File 1: OK
+        let data1 = vec![0xAA; 128];
+        std::fs::write(dir.path().join("ok.dat"), &data1).unwrap();
+        let mut e1 = make_entry("ok.dat", &data1, 64);
+        e1.file_id = FileId([1; 16]);
+
+        // File 2: Missing
+        let data2 = vec![0xBB; 128];
+        let mut e2 = make_entry("missing.dat", &data2, 64);
+        e2.file_id = FileId([2; 16]);
+
+        // File 3: Damaged
+        let data3 = vec![0xCC; 128];
+        let mut e3 = make_entry("damaged.dat", &data3, 64);
+        e3.file_id = FileId([3; 16]);
+        let mut damaged = data3.clone();
+        damaged[10] = 0xFF;
+        std::fs::write(dir.path().join("damaged.dat"), &damaged).unwrap();
+
+        let rs = RecoverySet {
+            set_id: [0; 16],
+            slice_size: 64,
+            files: vec![e1, e2, e3],
+            recovery_slice_count: 0,
+        };
+
+        let result = verify_recovery_set(&rs, dir.path());
+        assert!(!result.all_ok());
+
+        let statuses: Vec<_> = result
+            .files
+            .iter()
+            .map(|f| (&f.filename, &f.status))
+            .collect();
+        assert!(
+            statuses
+                .iter()
+                .any(|(n, s)| n.as_str() == "ok.dat" && **s == FileVerifyStatus::Ok)
+        );
+        assert!(
+            statuses
+                .iter()
+                .any(|(n, s)| n.as_str() == "missing.dat" && **s == FileVerifyStatus::Missing)
+        );
+        assert!(
+            statuses.iter().any(|(n, s)| n.as_str() == "damaged.dat"
+                && matches!(s, FileVerifyStatus::Damaged { .. }))
+        );
     }
 
     #[test]
