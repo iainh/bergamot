@@ -255,8 +255,9 @@ fn gauss_eliminate(
         let pivot_inv = galois::inv(pivot_val);
 
         if pivot_inv != 1 {
+            let inv_table = galois::MulTable::new(pivot_inv);
             for col in p..k {
-                matrix[p * k + col] = galois::mul(matrix[p * k + col], pivot_inv);
+                matrix[p * k + col] = inv_table.mul_u16(matrix[p * k + col]);
             }
             galois::mul_slice_inplace(&mut rhs[p], pivot_inv);
         }
@@ -270,8 +271,9 @@ fn gauss_eliminate(
                 continue;
             }
 
+            let factor_table = galois::MulTable::new(factor);
             for col in p..k {
-                let val = galois::mul(matrix[p * k + col], factor);
+                let val = factor_table.mul_u16(matrix[p * k + col]);
                 matrix[r * k + col] ^= val;
             }
 
@@ -282,7 +284,7 @@ fn gauss_eliminate(
                 let (left, right) = rhs.split_at_mut(r);
                 (&mut right[0], &left[p])
             };
-            galois::muladd(rhs_r, rhs_p, factor);
+            galois::muladd_with_table(rhs_r, rhs_p, &factor_table);
         }
     }
     Ok(())

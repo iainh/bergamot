@@ -18,6 +18,13 @@
 //! |-----------|-----------|-------------|-----------|---------|
 //! | Repair    |     5 MB  |       66 ms |     25 ms |  ~2.6x  |
 //! | Repair    |    50 MB  |      583 ms |    209 ms |  ~2.8x  |
+//!
+//! ## After #2: hoist MulTable in gauss_eliminate
+//!
+//! | Operation | Data Size | par2cmdline | nzbg-par2 | Speedup |
+//! |-----------|-----------|-------------|-----------|---------|
+//! | Repair    |     5 MB  |       65 ms |     25 ms |  ~2.6x  |
+//! | Repair    |    50 MB  |      583 ms |    213 ms |  ~2.7x  |
 
 use std::path::Path;
 use std::process::Command;
