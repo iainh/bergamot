@@ -2,6 +2,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
+use futures::stream::{FuturesUnordered, StreamExt};
 use tokio::sync::{Mutex, Semaphore};
 
 use crate::error::NntpError;
@@ -90,8 +91,6 @@ impl<F: ConnectionFactory> ServerPool<F> {
             return Err(NntpError::ProtocolError("no servers available".into()));
         }
 
-        let mut last_error = NntpError::ProtocolError("no servers available".into());
-
         let available: Vec<_> = self
             .servers
             .iter()
@@ -102,42 +101,42 @@ impl<F: ConnectionFactory> ServerPool<F> {
             return Err(NntpError::ProtocolError("all servers in backoff".into()));
         }
 
-        let mut futures: Vec<_> = available
+        let futs: FuturesUnordered<_> = available
             .iter()
             .enumerate()
-            .map(|(i, s)| {
-                let sem = s.semaphore.clone();
-                Box::pin(async move { (i, sem.acquire_owned().await) })
+            .map(|(i, state)| {
+                let sem = state.semaphore.clone();
+                async move {
+                    let permit = match sem.acquire_owned().await {
+                        Ok(p) => p,
+                        Err(_) => {
+                            return (i, Err(NntpError::ProtocolError("semaphore closed".into())));
+                        }
+                    };
+                    let result = self.try_fetch_from_server(state, message_id, groups).await;
+                    drop(permit);
+                    (i, result)
+                }
             })
             .collect();
 
-        while !futures.is_empty() {
-            let ((server_idx, result), _winner, remaining) =
-                futures::future::select_all(futures).await;
-            futures = remaining;
+        futures::pin_mut!(futs);
 
-            let permit = match result {
-                Ok(permit) => permit,
-                Err(_) => continue,
-            };
+        let mut last_error = NntpError::ProtocolError("no servers available".into());
 
+        while let Some((server_idx, result)) = futs.next().await {
             let state = available[server_idx];
-            match self.try_fetch_from_server(state, message_id, groups).await {
+            match result {
                 Ok(data) => {
                     self.reset_backoff(state);
-                    drop(permit);
                     return Ok(data);
                 }
                 Err(NntpError::ArticleNotFound(msg)) => {
-                    drop(permit);
                     last_error = NntpError::ArticleNotFound(msg);
-                    continue;
                 }
                 Err(err) => {
                     self.record_failure(state);
-                    drop(permit);
                     last_error = err;
-                    continue;
                 }
             }
         }
@@ -750,6 +749,220 @@ mod tests {
             .await;
         assert!(result.is_err());
         assert_eq!(stats.call_count.load(AtomicOrdering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn parallel_fetch_succeeds_when_one_server_has_article() {
+        let s1 = test_server(1, 0, 0, 2);
+        let s2 = test_server(2, 0, 0, 2);
+
+        struct NotFoundThenSuccessFactory {
+            not_found_server_id: u32,
+            response_body: Vec<u8>,
+        }
+
+        #[async_trait::async_trait]
+        impl ConnectionFactory for NotFoundThenSuccessFactory {
+            async fn connect(&self, server: &NewsServer) -> Result<NntpConnection, NntpError> {
+                let (client, mut server_end) = duplex(4096);
+                let not_found = server.id == self.not_found_server_id;
+                let body = self.response_body.clone();
+                tokio::spawn(async move {
+                    server_end.write_all(b"200 Welcome\r\n").await.unwrap();
+                    let mut buf = vec![0u8; 1024];
+                    loop {
+                        match tokio::io::AsyncReadExt::read(&mut server_end, &mut buf).await {
+                            Ok(0) => break,
+                            Ok(n) => {
+                                let cmd = String::from_utf8_lossy(&buf[..n]);
+                                if cmd.starts_with("GROUP") {
+                                    server_end.write_all(b"211 0 0 0 group\r\n").await.unwrap();
+                                } else if cmd.starts_with("BODY") {
+                                    if not_found {
+                                        server_end
+                                            .write_all(b"430 No Such Article\r\n")
+                                            .await
+                                            .unwrap();
+                                    } else {
+                                        server_end.write_all(b"222 body\r\n").await.unwrap();
+                                        for line in body.split(|&b| b == b'\n') {
+                                            server_end.write_all(line).await.unwrap();
+                                            server_end.write_all(b"\r\n").await.unwrap();
+                                        }
+                                        server_end.write_all(b".\r\n").await.unwrap();
+                                    }
+                                } else if cmd.starts_with("QUIT") {
+                                    server_end.write_all(b"205 bye\r\n").await.unwrap();
+                                    break;
+                                }
+                            }
+                            Err(_) => break,
+                        }
+                    }
+                });
+
+                let reader = BufReader::new(Box::new(client) as Box<dyn crate::protocol::NntpIo>);
+                let stream = crate::protocol::NntpStream::Plain(reader);
+                NntpConnection::from_stream(server.id, stream).await
+            }
+        }
+
+        let factory = Arc::new(NotFoundThenSuccessFactory {
+            not_found_server_id: 1,
+            response_body: b"found-on-server-2".to_vec(),
+        });
+        let pool = ServerPool::with_factory(vec![s1, s2], factory);
+
+        let result = pool
+            .fetch_article("test@example", &["alt.test".into()])
+            .await;
+        assert!(result.is_ok());
+        let data = result.unwrap();
+        assert!(!data.is_empty());
+    }
+
+    #[tokio::test]
+    async fn parallel_fetch_returns_not_found_when_all_servers_miss() {
+        let s1 = test_server(1, 0, 0, 2);
+        let s2 = test_server(2, 0, 0, 2);
+
+        struct AllNotFoundFactory;
+
+        #[async_trait::async_trait]
+        impl ConnectionFactory for AllNotFoundFactory {
+            async fn connect(&self, server: &NewsServer) -> Result<NntpConnection, NntpError> {
+                let (client, mut server_end) = duplex(4096);
+                tokio::spawn(async move {
+                    server_end.write_all(b"200 Welcome\r\n").await.unwrap();
+                    let mut buf = vec![0u8; 1024];
+                    loop {
+                        match tokio::io::AsyncReadExt::read(&mut server_end, &mut buf).await {
+                            Ok(0) => break,
+                            Ok(n) => {
+                                let cmd = String::from_utf8_lossy(&buf[..n]);
+                                if cmd.starts_with("GROUP") {
+                                    server_end.write_all(b"211 0 0 0 group\r\n").await.unwrap();
+                                } else if cmd.starts_with("BODY") {
+                                    server_end
+                                        .write_all(b"430 No Such Article\r\n")
+                                        .await
+                                        .unwrap();
+                                } else if cmd.starts_with("QUIT") {
+                                    server_end.write_all(b"205 bye\r\n").await.unwrap();
+                                    break;
+                                }
+                            }
+                            Err(_) => break,
+                        }
+                    }
+                });
+
+                let reader = BufReader::new(Box::new(client) as Box<dyn crate::protocol::NntpIo>);
+                let stream = crate::protocol::NntpStream::Plain(reader);
+                NntpConnection::from_stream(server.id, stream).await
+            }
+        }
+
+        let factory = Arc::new(AllNotFoundFactory);
+        let pool = ServerPool::with_factory(vec![s1, s2], factory);
+
+        let result = pool
+            .fetch_article("test@example", &["alt.test".into()])
+            .await;
+        assert!(result.is_err());
+        assert!(
+            matches!(result, Err(NntpError::ArticleNotFound(_))),
+            "expected ArticleNotFound"
+        );
+    }
+
+    #[tokio::test]
+    async fn parallel_fetch_is_concurrent_not_sequential() {
+        use std::sync::atomic::AtomicBool;
+
+        let s1 = test_server(1, 0, 0, 2);
+        let s2 = test_server(2, 0, 0, 2);
+
+        struct SlowNotFoundFactory {
+            slow_server_id: u32,
+            response_body: Vec<u8>,
+            slow_started: AtomicBool,
+        }
+
+        #[async_trait::async_trait]
+        impl ConnectionFactory for SlowNotFoundFactory {
+            async fn connect(&self, server: &NewsServer) -> Result<NntpConnection, NntpError> {
+                let (client, mut server_end) = duplex(4096);
+                let is_slow = server.id == self.slow_server_id;
+                let body = self.response_body.clone();
+                let slow_started = if is_slow {
+                    Some(Arc::new(AtomicBool::new(false)))
+                } else {
+                    None
+                };
+                tokio::spawn(async move {
+                    server_end.write_all(b"200 Welcome\r\n").await.unwrap();
+                    let mut buf = vec![0u8; 1024];
+                    loop {
+                        match tokio::io::AsyncReadExt::read(&mut server_end, &mut buf).await {
+                            Ok(0) => break,
+                            Ok(n) => {
+                                let cmd = String::from_utf8_lossy(&buf[..n]);
+                                if cmd.starts_with("GROUP") {
+                                    server_end.write_all(b"211 0 0 0 group\r\n").await.unwrap();
+                                } else if cmd.starts_with("BODY") {
+                                    if is_slow {
+                                        if let Some(ref flag) = slow_started {
+                                            flag.store(true, Ordering::SeqCst);
+                                        }
+                                        tokio::time::sleep(Duration::from_millis(500)).await;
+                                        server_end
+                                            .write_all(b"430 No Such Article\r\n")
+                                            .await
+                                            .unwrap();
+                                    } else {
+                                        server_end.write_all(b"222 body\r\n").await.unwrap();
+                                        for line in body.split(|&b| b == b'\n') {
+                                            server_end.write_all(line).await.unwrap();
+                                            server_end.write_all(b"\r\n").await.unwrap();
+                                        }
+                                        server_end.write_all(b".\r\n").await.unwrap();
+                                    }
+                                } else if cmd.starts_with("QUIT") {
+                                    server_end.write_all(b"205 bye\r\n").await.unwrap();
+                                    break;
+                                }
+                            }
+                            Err(_) => break,
+                        }
+                    }
+                });
+
+                let reader = BufReader::new(Box::new(client) as Box<dyn crate::protocol::NntpIo>);
+                let stream = crate::protocol::NntpStream::Plain(reader);
+                NntpConnection::from_stream(server.id, stream).await
+            }
+        }
+
+        let factory = Arc::new(SlowNotFoundFactory {
+            slow_server_id: 1,
+            response_body: b"fast-data".to_vec(),
+            slow_started: AtomicBool::new(false),
+        });
+        let pool = ServerPool::with_factory(vec![s1, s2], factory);
+
+        let start = Instant::now();
+        let result = pool
+            .fetch_article("test@example", &["alt.test".into()])
+            .await;
+        let elapsed = start.elapsed();
+
+        assert!(result.is_ok());
+        assert!(
+            elapsed < Duration::from_millis(200),
+            "parallel fetch should complete in <200ms (server 2 is fast), took {:?}",
+            elapsed
+        );
     }
 
     #[tokio::test]
