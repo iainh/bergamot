@@ -100,20 +100,51 @@ pub fn repair_recovery_set(
 
     let mut matrix = vec![0u16; k * k];
 
-    for j in 0..total_source_slices {
-        if let Some(&col) = missing_set.get(&j) {
-            for (i, &exp) in exponents.iter().enumerate() {
-                matrix[i * k + col] = galois::pow(bases[j], exp);
-            }
-        } else {
-            let gs = &global_slices[j];
-            let slice_data = read_source_slice(rs, gs, slice_size, working_dir)?;
+    let mut slice_buf = vec![0u8; slice_size];
+    let mut global_j = 0usize;
 
-            for (i, &exp) in exponents.iter().enumerate() {
-                let coeff = galois::pow(bases[j], exp);
-                galois::muladd(&mut recovery_data[i], &slice_data, coeff);
-            }
+    for (file_idx, entry) in rs.files.iter().enumerate() {
+        let slice_count = if rs.slice_size > 0 {
+            entry.length.div_ceil(rs.slice_size) as usize
+        } else {
+            0
+        };
+        if slice_count == 0 {
+            continue;
         }
+
+        let file_path = working_dir.join(&entry.filename);
+        let has_present_slices = (0..slice_count)
+            .any(|local| !missing_set.contains_key(&(global_j + local)));
+
+        let mut file = if has_present_slices && file_path.is_file() {
+            Some(std::fs::File::open(&file_path)?)
+        } else {
+            None
+        };
+
+        for local in 0..slice_count {
+            let j = global_j + local;
+            if let Some(&col) = missing_set.get(&j) {
+                for (i, &exp) in exponents.iter().enumerate() {
+                    matrix[i * k + col] = galois::pow(bases[j], exp);
+                }
+            } else {
+                let gs = &global_slices[j];
+                let f = file.as_mut().unwrap();
+                f.seek(SeekFrom::Start(gs.file_offset))?;
+                f.read_exact(&mut slice_buf[..gs.write_len])?;
+                slice_buf[gs.write_len..].fill(0);
+
+                for (i, &exp) in exponents.iter().enumerate() {
+                    let coeff = galois::pow(bases[j], exp);
+                    galois::muladd(&mut recovery_data[i], &slice_buf, coeff);
+                }
+            }
+            let _ = file_idx;
+        }
+
+        global_j += slice_count;
     }
 
     gauss_eliminate(&mut matrix, &mut recovery_data, k, slice_size)?;
@@ -196,22 +227,6 @@ fn find_missing_global_indices(
     missing
 }
 
-fn read_source_slice(
-    rs: &RecoverySet,
-    gs: &GlobalSlice,
-    slice_size: usize,
-    working_dir: &Path,
-) -> Result<Vec<u8>, std::io::Error> {
-    let entry = &rs.files[gs.file_idx];
-    let file_path = working_dir.join(&entry.filename);
-    let mut buf = vec![0u8; slice_size];
-
-    let mut file = std::fs::File::open(&file_path)?;
-    file.seek(SeekFrom::Start(gs.file_offset))?;
-    let read_len = gs.write_len;
-    file.read_exact(&mut buf[..read_len])?;
-    Ok(buf)
-}
 
 fn gauss_eliminate(
     matrix: &mut [u16],

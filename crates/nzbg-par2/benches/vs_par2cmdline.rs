@@ -11,6 +11,13 @@
 //! | Verify    |    50 MB  |      430 ms |     20 ms |   ~21x  |
 //! | Repair    |     5 MB  |       66 ms |     26 ms |  ~2.5x  |
 //! | Repair    |    50 MB  |      584 ms |    212 ms | ~2.75x  |
+//!
+//! ## After #1: eliminate per-slice file open/alloc in repair
+//!
+//! | Operation | Data Size | par2cmdline | nzbg-par2 | Speedup |
+//! |-----------|-----------|-------------|-----------|---------|
+//! | Repair    |     5 MB  |       66 ms |     25 ms |  ~2.6x  |
+//! | Repair    |    50 MB  |      583 ms |    209 ms |  ~2.8x  |
 
 use std::path::Path;
 use std::process::Command;
