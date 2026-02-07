@@ -236,7 +236,7 @@ mod tests {
         let data = vec![0u8; 128];
         let entry = make_entry("test.dat", &data, 64);
 
-        std::fs::write(dir.path().join("test.dat"), &[0u8; 100]).unwrap();
+        std::fs::write(dir.path().join("test.dat"), [0u8; 100]).unwrap();
 
         let rs = RecoverySet {
             set_id: [0; 16],
