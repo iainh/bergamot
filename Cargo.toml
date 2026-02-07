@@ -12,6 +12,7 @@ members = [
   "crates/nzbg-nntp",
   "crates/nzbg-yenc",
   "crates/nzbg-queue",
+  "crates/nzbg-par2",
   "crates/nzbg-postproc",
   "crates/nzbg-server",
   "crates/nzbg-config",
