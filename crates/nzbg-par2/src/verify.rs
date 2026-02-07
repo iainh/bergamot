@@ -4,6 +4,8 @@ use rayon::prelude::*;
 
 use crate::model::{FileVerifyResult, FileVerifyStatus, Par2FileEntry, RecoverySet, VerifyResult};
 
+const MMAP_THRESHOLD: u64 = 1024 * 1024;
+
 pub fn verify_recovery_set(rs: &RecoverySet, working_dir: &Path) -> VerifyResult {
     let files: Vec<FileVerifyResult> = rs
         .files
@@ -56,9 +58,6 @@ fn verify_file(
     entry: &crate::model::Par2FileEntry,
     slice_size: u64,
 ) -> Result<FileVerifyStatus, std::io::Error> {
-    use digest::Digest;
-    use std::io::Read;
-
     let metadata = std::fs::metadata(path)?;
     if metadata.len() != entry.length {
         let slice_count = if slice_size > 0 {
@@ -70,6 +69,21 @@ fn verify_file(
             bad_slices: (0..slice_count).collect(),
         });
     }
+
+    if entry.length >= MMAP_THRESHOLD {
+        verify_file_mmap(path, entry, slice_size)
+    } else {
+        verify_file_sequential(path, entry, slice_size)
+    }
+}
+
+fn verify_file_sequential(
+    path: &Path,
+    entry: &crate::model::Par2FileEntry,
+    slice_size: u64,
+) -> Result<FileVerifyStatus, std::io::Error> {
+    use digest::Digest;
+    use std::io::Read;
 
     let mut file = std::fs::File::open(path)?;
 
@@ -114,6 +128,68 @@ fn verify_file(
         return Ok(FileVerifyStatus::Damaged { bad_slices });
     }
 
+    let full_md5: [u8; 16] = full_hasher.finalize().into();
+    if full_md5 != entry.hash_full.0 {
+        return Ok(FileVerifyStatus::Damaged { bad_slices: vec![] });
+    }
+
+    Ok(FileVerifyStatus::Ok)
+}
+
+fn verify_file_mmap(
+    path: &Path,
+    entry: &crate::model::Par2FileEntry,
+    slice_size: u64,
+) -> Result<FileVerifyStatus, std::io::Error> {
+    use digest::Digest;
+
+    let file = std::fs::File::open(path)?;
+    let mmap = unsafe { memmap2::Mmap::map(&file)? };
+    let data = &mmap[..];
+    let ss = slice_size as usize;
+
+    let bad_slices: Vec<u32> = entry
+        .slice_checksums
+        .par_iter()
+        .enumerate()
+        .filter_map(|(idx, expected)| {
+            let offset = idx * ss;
+            let end = std::cmp::min(offset + ss, data.len());
+            let chunk = &data[offset..end];
+            let chunk_len = chunk.len();
+
+            let mut slice_hasher = md5::Md5::new();
+            slice_hasher.update(chunk);
+            if chunk_len < ss {
+                let padding = vec![0u8; ss - chunk_len];
+                slice_hasher.update(&padding);
+            }
+            let slice_md5: [u8; 16] = slice_hasher.finalize().into();
+
+            let crc = crc32fast::hash(chunk);
+            let padded_crc = if chunk_len < ss {
+                let padding = vec![0u8; ss - chunk_len];
+                let mut h = crc32fast::Hasher::new_with_initial(crc);
+                h.update(&padding);
+                h.finalize()
+            } else {
+                crc
+            };
+
+            if slice_md5 != expected.md5 || padded_crc != expected.crc32 {
+                Some(idx as u32)
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    if !bad_slices.is_empty() {
+        return Ok(FileVerifyStatus::Damaged { bad_slices });
+    }
+
+    let mut full_hasher = md5::Md5::new();
+    full_hasher.update(data);
     let full_md5: [u8; 16] = full_hasher.finalize().into();
     if full_md5 != entry.hash_full.0 {
         return Ok(FileVerifyStatus::Damaged { bad_slices: vec![] });
@@ -349,5 +425,77 @@ mod tests {
 
         let result = verify_recovery_set(&rs, dir.path());
         assert!(result.all_ok());
+    }
+
+    #[test]
+    fn verify_mmap_path_large_file_ok() {
+        let dir = tempfile::tempdir().unwrap();
+        let slice_size = 65536u64;
+        let data: Vec<u8> = (0..2_000_000u64).map(|i| (i % 251) as u8).collect();
+        std::fs::write(dir.path().join("large.dat"), &data).unwrap();
+
+        let entry = make_entry("large.dat", &data, slice_size);
+        assert!(data.len() as u64 > MMAP_THRESHOLD);
+
+        let rs = RecoverySet {
+            set_id: [0; 16],
+            slice_size,
+            files: vec![entry],
+            recovery_slice_count: 0,
+        };
+
+        let result = verify_recovery_set(&rs, dir.path());
+        assert!(result.all_ok(), "large file should verify OK: {result:?}");
+    }
+
+    #[test]
+    fn verify_mmap_path_large_file_damaged() {
+        let dir = tempfile::tempdir().unwrap();
+        let slice_size = 65536u64;
+        let mut data: Vec<u8> = (0..2_000_000u64).map(|i| (i % 251) as u8).collect();
+        let entry = make_entry("large.dat", &data, slice_size);
+
+        data[100_000] ^= 0xFF;
+        std::fs::write(dir.path().join("large.dat"), &data).unwrap();
+
+        let rs = RecoverySet {
+            set_id: [0; 16],
+            slice_size,
+            files: vec![entry],
+            recovery_slice_count: 0,
+        };
+
+        let result = verify_recovery_set(&rs, dir.path());
+        assert!(!result.all_ok());
+        let damaged_slice = 100_000 / slice_size as usize;
+        match &result.files[0].status {
+            FileVerifyStatus::Damaged { bad_slices } => {
+                assert!(
+                    bad_slices.contains(&(damaged_slice as u32)),
+                    "should detect slice {damaged_slice} as bad, got: {bad_slices:?}"
+                );
+            }
+            other => panic!("expected Damaged, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn verify_mmap_path_large_file_unaligned_tail() {
+        let dir = tempfile::tempdir().unwrap();
+        let slice_size = 65536u64;
+        let data: Vec<u8> = (0..1_500_000u64).map(|i| (i % 173) as u8).collect();
+        assert!(!(data.len() as u64).is_multiple_of(slice_size));
+        std::fs::write(dir.path().join("tail.dat"), &data).unwrap();
+
+        let entry = make_entry("tail.dat", &data, slice_size);
+        let rs = RecoverySet {
+            set_id: [0; 16],
+            slice_size,
+            files: vec![entry],
+            recovery_slice_count: 0,
+        };
+
+        let result = verify_recovery_set(&rs, dir.path());
+        assert!(result.all_ok(), "unaligned tail via mmap should verify OK");
     }
 }
