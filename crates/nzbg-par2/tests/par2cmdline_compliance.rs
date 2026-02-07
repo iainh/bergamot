@@ -215,6 +215,92 @@ fn compliance_readbeyondeof_verify_ok() {
     );
 }
 
+// ── Phase 4/6: repair tests ──
+
+#[test]
+fn compliance_flatdata_repair_missing_files() {
+    let dir = tempfile::tempdir().unwrap();
+    extract_tarball("flatdata.tar.gz", dir.path());
+    extract_tarball("flatdata-par2files.tar.gz", dir.path());
+
+    std::fs::remove_file(dir.path().join("test-1.data")).unwrap();
+    std::fs::remove_file(dir.path().join("test-3.data")).unwrap();
+
+    let rs = nzbg_par2::parse_recovery_set(dir.path()).expect("parse failed");
+    let result = nzbg_par2::verify_recovery_set(&rs, dir.path());
+    assert!(!result.all_ok());
+
+    let report = nzbg_par2::repair_recovery_set(&rs, &result, dir.path()).expect("repair failed");
+    assert!(report.repaired_slices > 0);
+
+    let result_after = nzbg_par2::verify_recovery_set(&rs, dir.path());
+    assert!(
+        result_after.all_ok(),
+        "files should verify OK after repair: {result_after:?}"
+    );
+}
+
+#[test]
+fn compliance_flatdata_repair_damaged_file() {
+    let dir = tempfile::tempdir().unwrap();
+    extract_tarball("flatdata.tar.gz", dir.path());
+    extract_tarball("flatdata-par2files.tar.gz", dir.path());
+
+    let path = dir.path().join("test-5.data");
+    let mut data = std::fs::read(&path).unwrap();
+    data[0] ^= 0xFF;
+    std::fs::write(&path, &data).unwrap();
+
+    let rs = nzbg_par2::parse_recovery_set(dir.path()).expect("parse failed");
+    let result = nzbg_par2::verify_recovery_set(&rs, dir.path());
+    assert!(!result.all_ok());
+
+    let report = nzbg_par2::repair_recovery_set(&rs, &result, dir.path()).expect("repair failed");
+    assert!(report.repaired_slices > 0);
+
+    let result_after = nzbg_par2::verify_recovery_set(&rs, dir.path());
+    assert!(
+        result_after.all_ok(),
+        "files should verify OK after repair: {result_after:?}"
+    );
+}
+
+#[test]
+fn compliance_flatdata_repair_cross_check_with_cli() {
+    if !par2_available() {
+        eprintln!("SKIPPED: par2 CLI not installed");
+        return;
+    }
+
+    let dir = tempfile::tempdir().unwrap();
+    extract_tarball("flatdata.tar.gz", dir.path());
+    extract_tarball("flatdata-par2files.tar.gz", dir.path());
+
+    // Save originals for comparison
+    let orig_1 = std::fs::read(dir.path().join("test-1.data")).unwrap();
+    let orig_3 = std::fs::read(dir.path().join("test-3.data")).unwrap();
+
+    std::fs::remove_file(dir.path().join("test-1.data")).unwrap();
+    std::fs::remove_file(dir.path().join("test-3.data")).unwrap();
+
+    let rs = nzbg_par2::parse_recovery_set(dir.path()).expect("parse failed");
+    let result = nzbg_par2::verify_recovery_set(&rs, dir.path());
+
+    nzbg_par2::repair_recovery_set(&rs, &result, dir.path()).expect("repair failed");
+
+    let repaired_1 = std::fs::read(dir.path().join("test-1.data")).unwrap();
+    let repaired_3 = std::fs::read(dir.path().join("test-3.data")).unwrap();
+
+    assert_eq!(
+        repaired_1, orig_1,
+        "repaired test-1.data must match original"
+    );
+    assert_eq!(
+        repaired_3, orig_3,
+        "repaired test-3.data must match original"
+    );
+}
+
 // ── Phase 4d: subdirectory handling ──
 
 #[test]

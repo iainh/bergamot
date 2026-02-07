@@ -26,3 +26,15 @@ pub enum Par2VerifyError {
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
 }
+
+#[derive(Debug, Error)]
+pub enum Par2RepairError {
+    #[error("I/O error: {0}")]
+    Io(#[from] std::io::Error),
+
+    #[error("not enough recovery slices: need {needed}, have {available}")]
+    NotEnoughRecoverySlices { needed: usize, available: usize },
+
+    #[error("matrix is singular, cannot solve")]
+    SingularMatrix,
+}

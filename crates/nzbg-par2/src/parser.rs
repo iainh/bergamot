@@ -5,7 +5,7 @@ use crate::error::Par2ParseError;
 use crate::format::{
     FileDescriptionBody, HEADER_SIZE, IFSCBody, MainBody, PacketHeader, PacketType,
 };
-use crate::model::{FileId, Md5Digest, Par2FileEntry, RecoverySet};
+use crate::model::{FileId, Md5Digest, Par2FileEntry, RecoverySet, RecoverySliceRef};
 
 struct RawParsed {
     set_id: Option<[u8; 16]>,
@@ -13,6 +13,7 @@ struct RawParsed {
     descriptions: Vec<FileDescriptionBody>,
     ifscs: Vec<IFSCBody>,
     recovery_slice_count: usize,
+    recovery_slices: Vec<RecoverySliceRef>,
 }
 
 impl RawParsed {
@@ -23,11 +24,16 @@ impl RawParsed {
             descriptions: Vec::new(),
             ifscs: Vec::new(),
             recovery_slice_count: 0,
+            recovery_slices: Vec::new(),
         }
     }
 }
 
-fn parse_file<R: Read + Seek>(reader: &mut R, raw: &mut RawParsed) -> Result<(), Par2ParseError> {
+fn parse_file<R: Read + Seek>(
+    reader: &mut R,
+    raw: &mut RawParsed,
+    file_path: Option<&Path>,
+) -> Result<(), Par2ParseError> {
     let mut offset: u64 = 0;
     let file_len = reader.seek(SeekFrom::End(0))?;
     reader.seek(SeekFrom::Start(0))?;
@@ -87,6 +93,21 @@ fn parse_file<R: Read + Seek>(reader: &mut R, raw: &mut RawParsed) -> Result<(),
             }
             PacketType::RecoverySlice => {
                 raw.recovery_slice_count += 1;
+                if body_len >= 4 {
+                    let mut exp_buf = [0u8; 4];
+                    reader.read_exact(&mut exp_buf)?;
+                    let exponent = u32::from_le_bytes(exp_buf);
+                    let data_offset = offset + HEADER_SIZE as u64 + 4;
+                    let data_len = body_len - 4;
+                    if let Some(path) = file_path {
+                        raw.recovery_slices.push(RecoverySliceRef {
+                            par2_path: path.to_path_buf(),
+                            data_offset,
+                            data_len,
+                            exponent,
+                        });
+                    }
+                }
             }
             PacketType::Creator | PacketType::Unknown => {}
         }
@@ -124,6 +145,7 @@ fn build_recovery_set(raw: RawParsed) -> Result<RecoverySet, Par2ParseError> {
         slice_size: main.slice_size,
         files,
         recovery_slice_count: raw.recovery_slice_count,
+        recovery_slices: raw.recovery_slices,
     })
 }
 
@@ -140,8 +162,9 @@ pub fn parse_recovery_set(par2_dir: &Path) -> Result<RecoverySet, Par2ParseError
         .collect();
 
     for entry in entries {
-        let mut file = std::fs::File::open(entry.path())?;
-        parse_file(&mut file, &mut raw)?;
+        let path = entry.path();
+        let mut file = std::fs::File::open(&path)?;
+        parse_file(&mut file, &mut raw, Some(&path))?;
     }
 
     build_recovery_set(raw)
@@ -150,7 +173,7 @@ pub fn parse_recovery_set(par2_dir: &Path) -> Result<RecoverySet, Par2ParseError
 pub fn parse_recovery_set_from_file(par2_file: &Path) -> Result<RecoverySet, Par2ParseError> {
     let mut raw = RawParsed::new();
     let mut file = std::fs::File::open(par2_file)?;
-    parse_file(&mut file, &mut raw)?;
+    parse_file(&mut file, &mut raw, Some(par2_file))?;
     build_recovery_set(raw)
 }
 
@@ -227,7 +250,7 @@ mod tests {
 
         let mut cursor = Cursor::new(data);
         let mut raw = RawParsed::new();
-        parse_file(&mut cursor, &mut raw).unwrap();
+        parse_file(&mut cursor, &mut raw, None).unwrap();
 
         let rs = build_recovery_set(raw).unwrap();
         assert_eq!(rs.set_id, set_id);
@@ -260,7 +283,7 @@ mod tests {
 
         let mut cursor = Cursor::new(data);
         let mut raw = RawParsed::new();
-        parse_file(&mut cursor, &mut raw).unwrap();
+        parse_file(&mut cursor, &mut raw, None).unwrap();
 
         let rs = build_recovery_set(raw).unwrap();
         assert_eq!(rs.recovery_slice_count, 2);
@@ -281,7 +304,7 @@ mod tests {
 
         let mut cursor = Cursor::new(data);
         let mut raw = RawParsed::new();
-        let err = parse_file(&mut cursor, &mut raw).unwrap_err();
+        let err = parse_file(&mut cursor, &mut raw, None).unwrap_err();
         assert!(matches!(err, Par2ParseError::InconsistentSetId));
     }
 

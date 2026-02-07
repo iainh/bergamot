@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use crate::format::SliceChecksumEntry;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -17,11 +19,20 @@ pub struct Par2FileEntry {
 }
 
 #[derive(Debug, Clone)]
+pub struct RecoverySliceRef {
+    pub par2_path: PathBuf,
+    pub data_offset: u64,
+    pub data_len: usize,
+    pub exponent: u32,
+}
+
+#[derive(Debug, Clone)]
 pub struct RecoverySet {
     pub set_id: [u8; 16],
     pub slice_size: u64,
     pub files: Vec<Par2FileEntry>,
     pub recovery_slice_count: usize,
+    pub recovery_slices: Vec<RecoverySliceRef>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

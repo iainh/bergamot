@@ -255,6 +255,7 @@ mod tests {
             slice_size: 32,
             files: vec![entry],
             recovery_slice_count: 0,
+            recovery_slices: vec![],
         };
 
         let result = verify_recovery_set(&rs, dir.path());
@@ -271,6 +272,7 @@ mod tests {
             slice_size: 32,
             files: vec![entry],
             recovery_slice_count: 0,
+            recovery_slices: vec![],
         };
 
         let result = verify_recovery_set(&rs, dir.path());
@@ -293,6 +295,7 @@ mod tests {
             slice_size: 64,
             files: vec![entry],
             recovery_slice_count: 0,
+            recovery_slices: vec![],
         };
 
         let result = verify_recovery_set(&rs, dir.path());
@@ -319,6 +322,7 @@ mod tests {
             slice_size: 64,
             files: vec![entry],
             recovery_slice_count: 0,
+            recovery_slices: vec![],
         };
 
         let result = verify_recovery_set(&rs, dir.path());
@@ -348,6 +352,7 @@ mod tests {
             slice_size: 64,
             files: entries,
             recovery_slice_count: 0,
+            recovery_slices: vec![],
         };
 
         let result = verify_recovery_set(&rs, dir.path());
@@ -383,6 +388,7 @@ mod tests {
             slice_size: 64,
             files: vec![e1, e2, e3],
             recovery_slice_count: 0,
+            recovery_slices: vec![],
         };
 
         let result = verify_recovery_set(&rs, dir.path());
@@ -421,6 +427,7 @@ mod tests {
             slice_size: 64,
             files: vec![entry],
             recovery_slice_count: 0,
+            recovery_slices: vec![],
         };
 
         let result = verify_recovery_set(&rs, dir.path());
@@ -442,6 +449,7 @@ mod tests {
             slice_size,
             files: vec![entry],
             recovery_slice_count: 0,
+            recovery_slices: vec![],
         };
 
         let result = verify_recovery_set(&rs, dir.path());
@@ -463,6 +471,7 @@ mod tests {
             slice_size,
             files: vec![entry],
             recovery_slice_count: 0,
+            recovery_slices: vec![],
         };
 
         let result = verify_recovery_set(&rs, dir.path());
@@ -493,6 +502,7 @@ mod tests {
             slice_size,
             files: vec![entry],
             recovery_slice_count: 0,
+            recovery_slices: vec![],
         };
 
         let result = verify_recovery_set(&rs, dir.path());
