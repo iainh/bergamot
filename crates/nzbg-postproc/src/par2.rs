@@ -94,6 +94,52 @@ fn parse_par2_output(
     Err(Par2Error::ExitStatus { code: exit_code })
 }
 
+#[derive(Debug, Clone)]
+pub struct NativePar2Engine;
+
+#[async_trait]
+impl Par2Engine for NativePar2Engine {
+    async fn verify(&self, _par2_file: &Path, working_dir: &Path) -> Result<Par2Result, Par2Error> {
+        let working_dir = working_dir.to_path_buf();
+        tokio::task::spawn_blocking(move || native_verify(&working_dir))
+            .await
+            .map_err(|e| Par2Error::CommandFailed {
+                message: e.to_string(),
+            })?
+    }
+
+    async fn repair(&self, par2_file: &Path, working_dir: &Path) -> Result<Par2Result, Par2Error> {
+        let par2_path = PathBuf::from("par2");
+        let output = Command::new(&par2_path)
+            .arg("repair")
+            .arg(par2_file)
+            .current_dir(working_dir)
+            .output()
+            .await
+            .map_err(|e| Par2Error::CommandFailed {
+                message: e.to_string(),
+            })?;
+        parse_par2_output(&output.stdout, &output.stderr, output.status.code())
+    }
+}
+
+fn native_verify(working_dir: &Path) -> Result<Par2Result, Par2Error> {
+    let rs = nzbg_par2::parse_recovery_set(working_dir).map_err(|e| Par2Error::CommandFailed {
+        message: e.to_string(),
+    })?;
+
+    let result = nzbg_par2::verify_recovery_set(&rs, working_dir);
+
+    if result.all_ok() {
+        Ok(Par2Result::AllFilesOk)
+    } else {
+        Ok(Par2Result::RepairNeeded {
+            blocks_needed: result.blocks_needed(),
+            blocks_available: rs.recovery_slice_count,
+        })
+    }
+}
+
 fn parse_repair_counts(text: &str) -> Option<(usize, usize)> {
     let mut needed = None;
     let mut available = None;
