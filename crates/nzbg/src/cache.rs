@@ -1,15 +1,15 @@
 use std::collections::{HashMap, VecDeque};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 pub trait ArticleCache: Send + Sync {
-    fn get(&self, message_id: &str) -> Option<Vec<u8>>;
+    fn get(&self, message_id: &str) -> Option<Arc<Vec<u8>>>;
     fn put(&self, message_id: String, data: Vec<u8>);
 }
 
 pub struct NoopCache;
 
 impl ArticleCache for NoopCache {
-    fn get(&self, _message_id: &str) -> Option<Vec<u8>> {
+    fn get(&self, _message_id: &str) -> Option<Arc<Vec<u8>>> {
         None
     }
     fn put(&self, _message_id: String, _data: Vec<u8>) {}
@@ -21,7 +21,7 @@ pub struct BoundedCache {
 }
 
 struct CacheInner {
-    entries: HashMap<String, Vec<u8>>,
+    entries: HashMap<String, Arc<Vec<u8>>>,
     order: VecDeque<String>,
     current_bytes: usize,
 }
@@ -40,7 +40,7 @@ impl BoundedCache {
 }
 
 impl ArticleCache for BoundedCache {
-    fn get(&self, message_id: &str) -> Option<Vec<u8>> {
+    fn get(&self, message_id: &str) -> Option<Arc<Vec<u8>>> {
         let inner = self.inner.lock().unwrap();
         inner.entries.get(message_id).cloned()
     }
@@ -65,7 +65,7 @@ impl ArticleCache for BoundedCache {
         }
         inner.current_bytes += data_len;
         inner.order.push_back(message_id.clone());
-        inner.entries.insert(message_id, data);
+        inner.entries.insert(message_id, Arc::new(data));
     }
 }
 
@@ -84,7 +84,7 @@ mod tests {
         let cache = BoundedCache::new(1024);
         cache.put("msg1".to_string(), vec![1, 2, 3]);
         let result = cache.get("msg1");
-        assert_eq!(result, Some(vec![1, 2, 3]));
+        assert_eq!(result.as_deref(), Some(&vec![1, 2, 3]));
     }
 
     #[test]
@@ -93,7 +93,7 @@ mod tests {
         cache.put("a".to_string(), vec![0; 6]);
         cache.put("b".to_string(), vec![1; 6]);
         assert!(cache.get("a").is_none());
-        assert_eq!(cache.get("b"), Some(vec![1; 6]));
+        assert_eq!(cache.get("b").as_deref(), Some(&vec![1; 6]));
     }
 
     #[test]
@@ -108,6 +108,6 @@ mod tests {
         let cache = BoundedCache::new(1024);
         cache.put("msg".to_string(), vec![1, 2, 3]);
         cache.put("msg".to_string(), vec![4, 5, 6]);
-        assert_eq!(cache.get("msg"), Some(vec![1, 2, 3]));
+        assert_eq!(cache.get("msg").as_deref(), Some(&vec![1, 2, 3]));
     }
 }
