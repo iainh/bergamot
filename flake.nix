@@ -26,6 +26,7 @@
             clippy
             rustfmt
             rust-analyzer
+            par2cmdline
           ];
 
           RUST_BACKTRACE = 1;
