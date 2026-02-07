@@ -108,18 +108,13 @@ impl Par2Engine for NativePar2Engine {
             })?
     }
 
-    async fn repair(&self, par2_file: &Path, working_dir: &Path) -> Result<Par2Result, Par2Error> {
-        let par2_path = PathBuf::from("par2");
-        let output = Command::new(&par2_path)
-            .arg("repair")
-            .arg(par2_file)
-            .current_dir(working_dir)
-            .output()
+    async fn repair(&self, _par2_file: &Path, working_dir: &Path) -> Result<Par2Result, Par2Error> {
+        let working_dir = working_dir.to_path_buf();
+        tokio::task::spawn_blocking(move || native_repair(&working_dir))
             .await
             .map_err(|e| Par2Error::CommandFailed {
                 message: e.to_string(),
-            })?;
-        parse_par2_output(&output.stdout, &output.stderr, output.status.code())
+            })?
     }
 }
 
@@ -135,8 +130,45 @@ fn native_verify(working_dir: &Path) -> Result<Par2Result, Par2Error> {
     } else {
         Ok(Par2Result::RepairNeeded {
             blocks_needed: result.blocks_needed(),
-            blocks_available: rs.recovery_slice_count,
+            blocks_available: rs.recovery_slices.len(),
         })
+    }
+}
+
+fn native_repair(working_dir: &Path) -> Result<Par2Result, Par2Error> {
+    let rs = nzbg_par2::parse_recovery_set(working_dir).map_err(|e| Par2Error::CommandFailed {
+        message: e.to_string(),
+    })?;
+
+    let verify = nzbg_par2::verify_recovery_set(&rs, working_dir);
+
+    if verify.all_ok() {
+        return Ok(Par2Result::AllFilesOk);
+    }
+
+    match nzbg_par2::repair_recovery_set(&rs, &verify, working_dir) {
+        Ok(_report) => {
+            let post_verify = nzbg_par2::verify_recovery_set(&rs, working_dir);
+            if post_verify.all_ok() {
+                Ok(Par2Result::RepairComplete)
+            } else {
+                Ok(Par2Result::RepairFailed {
+                    reason: format!(
+                        "repair finished but verification still failing ({} blocks needed)",
+                        post_verify.blocks_needed()
+                    ),
+                })
+            }
+        }
+        Err(nzbg_par2::Par2RepairError::NotEnoughRecoverySlices { needed, available }) => {
+            Ok(Par2Result::RepairNeeded {
+                blocks_needed: needed,
+                blocks_available: available,
+            })
+        }
+        Err(e) => Ok(Par2Result::RepairFailed {
+            reason: e.to_string(),
+        }),
     }
 }
 

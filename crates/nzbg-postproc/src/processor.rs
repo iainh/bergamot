@@ -119,7 +119,9 @@ impl<E: Par2Engine, U: Unpacker> PostProcessor<E, U> {
 
         if matches!(ctx.par_result, Some(Par2Result::RepairNeeded { .. })) {
             ctx.set_stage(PostStage::ParRepairing);
-            let _ = self.par_repair(&ctx).await;
+            if let Ok(result) = self.par_repair(&ctx).await {
+                ctx.par_result = Some(result);
+            }
         }
 
         ctx.set_stage(PostStage::Unpacking);

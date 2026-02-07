@@ -334,9 +334,7 @@ pub async fn run_with_config_path(
     let (postproc_tx, postproc_rx) = tokio::sync::mpsc::channel::<PostProcessRequest>(16);
 
     let pp_config = Arc::new(postproc_config(&config));
-    let par2 = Arc::new(nzbg_postproc::Par2CommandLine {
-        par2_path: pp_config.par2_path.clone(),
-    });
+    let par2 = Arc::new(nzbg_postproc::NativePar2Engine);
     let unpacker = Arc::new(nzbg_postproc::CommandLineUnpacker);
     let history = Arc::new(std::sync::Mutex::new(Vec::new()));
     let mut postprocessor = PostProcessor::new(postproc_rx, pp_config, history, par2, unpacker);
