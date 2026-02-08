@@ -65,7 +65,7 @@ pub async fn dispatch_rpc(
         "loadextensions" => Ok(serde_json::json!([])),
         "testserver" => rpc_testserver(params).await,
         "editserver" => Ok(serde_json::json!(true)),
-        "scheduleresume" => Ok(serde_json::json!(true)),
+        "scheduleresume" => rpc_scheduleresume(params, state),
         "reload" => Ok(serde_json::json!(true)),
         "clearlog" => {
             if let Some(buffer) = state.log_buffer() {
@@ -532,6 +532,31 @@ fn rpc_systemhealth(state: &AppState) -> Result<serde_json::Value, JsonRpcError>
         "Alerts": [],
         "Sections": [],
     }))
+}
+
+fn rpc_scheduleresume(
+    params: &serde_json::Value,
+    state: &AppState,
+) -> Result<serde_json::Value, JsonRpcError> {
+    let arr = params.as_array();
+    let seconds = arr
+        .and_then(|a| a.first())
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    if seconds == 0 {
+        state
+            .resume_at()
+            .store(0, std::sync::atomic::Ordering::Relaxed);
+    } else {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        state
+            .resume_at()
+            .store(now + seconds, std::sync::atomic::Ordering::Relaxed);
+    }
+    Ok(serde_json::json!(true))
 }
 
 fn rpc_resetservervolume(
@@ -1555,6 +1580,44 @@ mod tests {
         assert_eq!(result["QueueAvailable"], true);
         assert_eq!(result["Healthy"], true);
         handle.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn dispatch_scheduleresume_sets_resume_time() {
+        let (state, handle, _coord) = state_with_queue();
+        dispatch_rpc("pausedownload", &serde_json::json!([]), &state)
+            .await
+            .expect("pause");
+
+        let result = dispatch_rpc("scheduleresume", &serde_json::json!([60]), &state)
+            .await
+            .expect("scheduleresume");
+        assert_eq!(result, serde_json::json!(true));
+
+        let resume_at = state.resume_at().load(std::sync::atomic::Ordering::Relaxed);
+        assert!(
+            resume_at > 0,
+            "resume_at should be set to a future timestamp"
+        );
+
+        handle.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn dispatch_scheduleresume_zero_clears_timer() {
+        let state = AppState::default();
+        state
+            .resume_at()
+            .store(9999, std::sync::atomic::Ordering::Relaxed);
+
+        let result = dispatch_rpc("scheduleresume", &serde_json::json!([0]), &state)
+            .await
+            .expect("scheduleresume");
+        assert_eq!(result, serde_json::json!(true));
+        assert_eq!(
+            state.resume_at().load(std::sync::atomic::Ordering::Relaxed),
+            0
+        );
     }
 
     #[tokio::test]

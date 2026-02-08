@@ -42,6 +42,7 @@ pub struct AppState {
     download_paused: std::sync::Arc<std::sync::atomic::AtomicBool>,
     postproc_paused: std::sync::Arc<std::sync::atomic::AtomicBool>,
     scan_paused: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    resume_at: std::sync::Arc<AtomicU64>,
     scan_trigger: Option<tokio::sync::mpsc::Sender<()>>,
     feed_handle: Option<nzbg_feed::FeedHandle>,
     stats_tracker: Option<std::sync::Arc<nzbg_scheduler::SharedStatsTracker>>,
@@ -65,6 +66,7 @@ impl Default for AppState {
             download_paused: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             postproc_paused: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             scan_paused: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            resume_at: Arc::new(AtomicU64::new(0)),
             scan_trigger: None,
             feed_handle: None,
             stats_tracker: None,
@@ -135,6 +137,10 @@ impl AppState {
         &self.scan_paused
     }
 
+    pub fn resume_at(&self) -> &Arc<AtomicU64> {
+        &self.resume_at
+    }
+
     pub fn scan_trigger(&self) -> Option<&tokio::sync::mpsc::Sender<()>> {
         self.scan_trigger.as_ref()
     }
@@ -156,9 +162,7 @@ impl AppState {
         self
     }
 
-    pub fn stats_tracker(
-        &self,
-    ) -> Option<&std::sync::Arc<nzbg_scheduler::SharedStatsTracker>> {
+    pub fn stats_tracker(&self) -> Option<&std::sync::Arc<nzbg_scheduler::SharedStatsTracker>> {
         self.stats_tracker.as_ref()
     }
 
@@ -263,7 +267,7 @@ impl AppState {
             up_time_sec: self.start_time.elapsed().as_secs(),
             download_time_sec: 0,
             server_time: chrono::Utc::now().timestamp(),
-            resume_time: 0,
+            resume_time: self.resume_at.load(Ordering::Relaxed) as i64,
             download_paused,
             server_paused: false,
             download2_paused: false,
@@ -321,9 +325,7 @@ pub fn spawn_stats_updater(
                 Ok(status) => {
                     let speed = status.downloaded_size.saturating_sub(prev_downloaded);
                     prev_downloaded = status.downloaded_size;
-                    state
-                        .download_rate_ref()
-                        .store(speed, Ordering::Relaxed);
+                    state.download_rate_ref().store(speed, Ordering::Relaxed);
                     state
                         .remaining_bytes_ref()
                         .store(status.remaining_size, Ordering::Relaxed);
@@ -390,45 +392,41 @@ impl WebServer {
 
         let fallback_state = self.state.clone();
         let fallback_auth = auth_state;
-        let fallback = axum::routing::any(
-            move |req: axum::http::Request<axum::body::Body>| {
-                let state = fallback_state.clone();
-                let auth = fallback_auth.clone();
-                async move {
-                    let path = req.uri().path().to_string();
-                    if let Some(method) = path.strip_prefix("/jsonrpc/")
-                        && !method.is_empty()
-                        && req.method() == axum::http::Method::GET
-                    {
-                        let access = extract_access(&req, &auth.config);
-                        let required = required_access(method);
-                        if access > required || access == AccessLevel::Denied {
-                            return unauthorized_response().into_response();
-                        }
-                        let params = parse_query_params(req.uri().query());
-                        let result = dispatch_rpc(method, &params, &state).await;
-                        let response = match result {
-                            Ok(value) => JsonRpcResponse {
-                                jsonrpc: "2.0".to_string(),
-                                result: Some(value),
-                                error: None,
-                                id: serde_json::json!(0),
-                            },
-                            Err(err) => JsonRpcResponse {
-                                jsonrpc: "2.0".to_string(),
-                                result: None,
-                                error: Some(
-                                    serde_json::to_value(JsonRpcErrorBody::from(err)).unwrap(),
-                                ),
-                                id: serde_json::json!(0),
-                            },
-                        };
-                        return Json(response).into_response();
+        let fallback = axum::routing::any(move |req: axum::http::Request<axum::body::Body>| {
+            let state = fallback_state.clone();
+            let auth = fallback_auth.clone();
+            async move {
+                let path = req.uri().path().to_string();
+                if let Some(method) = path.strip_prefix("/jsonrpc/")
+                    && !method.is_empty()
+                    && req.method() == axum::http::Method::GET
+                {
+                    let access = extract_access(&req, &auth.config);
+                    let required = required_access(method);
+                    if access > required || access == AccessLevel::Denied {
+                        return unauthorized_response().into_response();
                     }
-                    serve_embedded_file(&path)
+                    let params = parse_query_params(req.uri().query());
+                    let result = dispatch_rpc(method, &params, &state).await;
+                    let response = match result {
+                        Ok(value) => JsonRpcResponse {
+                            jsonrpc: "2.0".to_string(),
+                            result: Some(value),
+                            error: None,
+                            id: serde_json::json!(0),
+                        },
+                        Err(err) => JsonRpcResponse {
+                            jsonrpc: "2.0".to_string(),
+                            result: None,
+                            error: Some(serde_json::to_value(JsonRpcErrorBody::from(err)).unwrap()),
+                            id: serde_json::json!(0),
+                        },
+                    };
+                    return Json(response).into_response();
                 }
-            },
-        );
+                serve_embedded_file(&path)
+            }
+        });
 
         app.fallback_service(fallback)
             .layer(CompressionLayer::new().gzip(true))
@@ -587,11 +585,7 @@ fn serve_embedded_file(path: &str) -> axum::response::Response {
             let mime = mime_guess::from_path(file_path)
                 .first_or_octet_stream()
                 .to_string();
-            (
-                [(header::CONTENT_TYPE, mime)],
-                content.data.to_vec(),
-            )
-                .into_response()
+            ([(header::CONTENT_TYPE, mime)], content.data.to_vec()).into_response()
         }
         None => StatusCode::NOT_FOUND.into_response(),
     }
@@ -662,8 +656,7 @@ fn parse_query_params(query: Option<&str>) -> serde_json::Value {
                     if val.is_empty() {
                         return None;
                     }
-                    let decoded =
-                        percent_encoding::percent_decode_str(val).decode_utf8_lossy();
+                    let decoded = percent_encoding::percent_decode_str(val).decode_utf8_lossy();
                     let decoded = decoded.into_owned();
                     if let Ok(n) = decoded.parse::<u64>() {
                         Some(serde_json::Value::Number(n.into()))
