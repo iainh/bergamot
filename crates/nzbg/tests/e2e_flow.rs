@@ -36,6 +36,10 @@ fn fixtures_multifile_path() -> PathBuf {
     fixtures_dir().join("fixtures-multifile.json")
 }
 
+fn fixtures_concurrent_path() -> PathBuf {
+    fixtures_dir().join("fixtures-concurrent.json")
+}
+
 fn sample_nzb_path() -> PathBuf {
     fixtures_dir().join("sample.nzb")
 }
@@ -1274,4 +1278,106 @@ async fn multifile_nzb_produces_all_output_files() {
         .await
         .expect("app shutdown timeout");
     let _ = tokio::time::timeout(Duration::from_secs(2), stub_task).await;
+}
+
+#[tokio::test]
+async fn concurrent_downloads_complete_without_corruption() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let stub_port = available_port();
+    let rpc_port = available_port();
+    let rpc_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), rpc_port);
+
+    init_logging();
+
+    let stub_config = StubConfig {
+        bind: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), stub_port),
+        require_auth: false,
+        username: "test".to_string(),
+        password: "secret".to_string(),
+        disconnect_after: 0,
+        delay_ms: 0,
+    };
+    let fixtures = load_fixtures(&fixtures_concurrent_path()).expect("fixtures load");
+    let stub = StubServer::new(stub_config, fixtures);
+    let stub_task = tokio::spawn(async move {
+        let _ = stub.serve().await;
+    });
+    tokio::time::sleep(Duration::from_millis(20)).await;
+
+    let config = sample_config(temp.path(), rpc_port, &[(stub_port, 0)]);
+    let inter_dir = config.inter_dir.clone();
+    let dest_dir = config.dest_dir.clone();
+    create_dirs(&config).await;
+
+    let stats = nzbg_scheduler::StatsTracker::from_config(&config);
+    let shared_stats = Arc::new(nzbg_scheduler::SharedStatsTracker::new(stats));
+    let fetcher = build_server_pool(&config, &shared_stats);
+
+    let app_task = tokio::spawn(run_with_config_path(
+        config,
+        fetcher,
+        None,
+        None,
+        Some(shared_stats),
+    ));
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    let nzb_id_1 = append_nzb(rpc_addr, &sample_nzb_path()).await;
+    let nzb_id_2 = append_nzb(rpc_addr, &multifile_nzb_path()).await;
+    assert_ne!(nzb_id_1, nzb_id_2, "NZB IDs should be distinct");
+
+    let completed_1 = wait_for_completion(rpc_addr, nzb_id_1, 60).await;
+    let completed_2 = wait_for_completion(rpc_addr, nzb_id_2, 60).await;
+    assert!(completed_1, "first NZB should complete");
+    assert!(completed_2, "second NZB should complete");
+
+    let collect_files = |inter: PathBuf, nzb_id: u64| async move {
+        let working = inter.join(format!("nzb-{nzb_id}"));
+        tokio::time::timeout(Duration::from_secs(3), async move {
+            loop {
+                if let Ok(mut entries) = tokio::fs::read_dir(&working).await {
+                    let mut contents = Vec::new();
+                    while let Ok(Some(entry)) = entries.next_entry().await {
+                        if let Ok(content) = tokio::fs::read_to_string(entry.path()).await {
+                            contents.push(content);
+                        }
+                    }
+                    if !contents.is_empty() {
+                        contents.sort();
+                        return contents;
+                    }
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        })
+        .await
+    };
+
+    let files_1 = collect_files(inter_dir.clone(), nzb_id_1)
+        .await
+        .expect("NZB 1 files should be produced");
+    assert_eq!(files_1.len(), 1, "sample.nzb should produce 1 file");
+    assert_eq!(files_1[0], "ABCDEFGH", "sample.nzb content mismatch");
+
+    let mut files_2 = collect_files(inter_dir.clone(), nzb_id_2)
+        .await
+        .expect("NZB 2 files should be produced");
+    assert_eq!(files_2.len(), 2, "multifile.nzb should produce 2 files");
+    files_2.sort();
+    assert!(
+        files_2.contains(&"ABCD".to_string()),
+        "multifile.nzb should contain alpha content ABCD"
+    );
+    assert!(
+        files_2.contains(&"MNOP".to_string()),
+        "multifile.nzb should contain beta content MNOP"
+    );
+
+    shutdown_app(rpc_addr).await;
+    let _ = tokio::time::timeout(Duration::from_secs(5), app_task)
+        .await
+        .expect("app shutdown timeout");
+
+    stub_task.abort();
+    let _ = stub_task.await;
 }
