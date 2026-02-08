@@ -41,8 +41,8 @@ pub async fn auth_middleware(
         .map(|ci| ci.0.ip().to_string())
         .unwrap_or_default();
 
-    let ip_authorized = !config.authorized_ips.is_empty()
-        && is_ip_allowed(&client_ip, &config.authorized_ips);
+    let ip_authorized =
+        !config.authorized_ips.is_empty() && is_ip_allowed(&client_ip, &config.authorized_ips);
 
     let access = if ip_authorized {
         AccessLevel::Control

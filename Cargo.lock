@@ -1410,6 +1410,7 @@ dependencies = [
  "nzbg-diskstate",
  "nzbg-feed",
  "nzbg-logging",
+ "nzbg-nntp",
  "nzbg-queue",
  "nzbg-scheduler",
  "percent-encoding",
