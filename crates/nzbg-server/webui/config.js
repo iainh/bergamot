@@ -1457,6 +1457,10 @@ var Config = (new function($)
 
 		var portOptionId = option.formId.substring(0, suffixStartIdx) + '_Port';
 		var portOption = findOptionById(portOptionId);
+		if (!portOption)
+		{
+			return;
+		}
 		var useTls = getOptionValue(option) === 'yes';
 		var currentPort = getOptionValue(portOption);
 		var inputField = $('#' + portOptionId)[0];
@@ -2035,6 +2039,10 @@ var Config = (new function($)
 
 	function getOptionValue(option)
 	{
+		if (!option || !option.formId)
+		{
+			return null;
+		}
 		var control = $('#' + option.formId);
 		if (option.type === 'switch')
 		{
@@ -2049,6 +2057,10 @@ var Config = (new function($)
 
 	function setOptionValue(option, value)
 	{
+		if (!option || !option.formId)
+		{
+			return;
+		}
 		var control = $('#' + option.formId);
 		if (option.type === 'switch')
 		{
