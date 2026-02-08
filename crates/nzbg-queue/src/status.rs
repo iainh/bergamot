@@ -77,6 +77,7 @@ pub struct HistoryListEntry {
     pub move_status: nzbg_core::models::MoveStatus,
     pub delete_status: nzbg_core::models::DeleteStatus,
     pub mark_status: nzbg_core::models::MarkStatus,
+    pub script_status: nzbg_core::models::ScriptStatus,
     pub health: u32,
 }
 

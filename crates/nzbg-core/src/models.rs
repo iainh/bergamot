@@ -58,6 +58,7 @@ pub struct NzbInfo {
     pub delete_status: DeleteStatus,
     pub mark_status: MarkStatus,
     pub url_status: UrlStatus,
+    pub script_status: ScriptStatus,
     pub health: u32,
     pub critical_health: u32,
     pub files: Vec<FileInfo>,
@@ -134,6 +135,15 @@ pub enum MarkStatus {
     Good = 1,
     Bad = 2,
     Success = 3,
+}
+
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize_repr, Deserialize_repr)]
+pub enum ScriptStatus {
+    #[default]
+    None = 0,
+    Failure = 1,
+    Success = 2,
 }
 
 #[repr(u32)]
@@ -409,6 +419,7 @@ mod tests {
             delete_status: DeleteStatus::None,
             mark_status: MarkStatus::None,
             url_status: UrlStatus::None,
+            script_status: ScriptStatus::None,
             health: 1000,
             critical_health: 950,
             files: vec![],

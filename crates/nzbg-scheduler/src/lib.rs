@@ -2353,6 +2353,7 @@ mod tests {
             delete_status: nzbg_core::models::DeleteStatus::None,
             mark_status: nzbg_core::models::MarkStatus::None,
             url_status: nzbg_core::models::UrlStatus::None,
+            script_status: nzbg_core::models::ScriptStatus::None,
             health: 1000,
             critical_health: 1000,
             files: vec![],

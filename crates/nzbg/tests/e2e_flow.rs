@@ -2187,3 +2187,77 @@ async fn error_all_servers_down_produces_failure() {
         .await
         .expect("app shutdown timeout");
 }
+
+#[tokio::test]
+async fn extension_script_runs_during_post_processing() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let stub_port = available_port();
+    let rpc_port = available_port();
+    let rpc_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), rpc_port);
+
+    init_logging();
+
+    let stub_task = start_stub(stub_port, fixtures_complete_path(), 1).await;
+    tokio::time::sleep(Duration::from_millis(20)).await;
+
+    let config = sample_config(temp.path(), rpc_port, &[(stub_port, 0)]);
+    let script_dir = config.script_dir.clone();
+    create_dirs(&config).await;
+    tokio::fs::create_dir_all(&script_dir)
+        .await
+        .expect("script dir");
+
+    let marker_path = temp.path().join("extension_ran.marker");
+    let script_path = script_dir.join("TestExtension.sh");
+    let script_content = format!(
+        "#!/bin/sh\necho \"[INFO] extension running\"\ntouch \"{}\"\nexit 93\n",
+        marker_path.display()
+    );
+    tokio::fs::write(&script_path, &script_content)
+        .await
+        .expect("write script");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        tokio::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755))
+            .await
+            .expect("chmod script");
+    }
+
+    let stats = nzbg_scheduler::StatsTracker::from_config(&config);
+    let shared_stats = Arc::new(nzbg_scheduler::SharedStatsTracker::new(stats));
+    let fetcher = build_server_pool(&config, &shared_stats);
+
+    let app_task = tokio::spawn(run_with_config_path(
+        config,
+        fetcher,
+        None,
+        None,
+        Some(shared_stats),
+    ));
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    let nzb_id = append_nzb(rpc_addr, &sample_nzb_path()).await;
+    let completed = wait_for_completion(rpc_addr, nzb_id, 50).await;
+    assert!(completed, "NZB should complete downloading");
+
+    let marker_found = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if marker_path.exists() {
+                return true;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .expect("extension marker file should appear within timeout");
+    assert!(marker_found, "extension script should have created marker file");
+
+    shutdown_app(rpc_addr).await;
+    let _ = tokio::time::timeout(Duration::from_secs(5), app_task)
+        .await
+        .expect("app shutdown timeout");
+
+    stub_task.abort();
+    let _ = stub_task.await;
+}

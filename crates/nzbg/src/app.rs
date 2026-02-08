@@ -9,8 +9,12 @@ use tracing_subscriber::util::SubscriberInitExt;
 use nzbg_config::{Config, parse_config};
 use nzbg_core::models::{ArticleInfo, ArticleStatus, DownloadQueue, FileInfo, NzbInfo, Priority};
 use nzbg_diskstate::{DiskState, JsonFormat, StateLock};
+use nzbg_extension::{
+    ExtensionInfo, ExtensionKind, ExtensionManager, ExtensionRunner, NzbppContext, ProcessRunner,
+    build_nzbpp_env,
+};
 use nzbg_logging::{BufferLayer, LogBuffer};
-use nzbg_postproc::{PostProcessRequest, PostProcessor};
+use nzbg_postproc::{ExtensionContext, ExtensionExecutor, PostProcessRequest, PostProcessor};
 use nzbg_queue::NzbCompletionNotice;
 use nzbg_server::{
     AppState, ServerConfig as WebServerConfig, ShutdownHandle, WebServer, spawn_stats_updater,
@@ -247,6 +251,7 @@ pub fn restore_queue(disk: &DiskState<JsonFormat>) -> Result<Option<(DownloadQue
             delete_status: nzbg_core::models::DeleteStatus::None,
             mark_status: nzbg_core::models::MarkStatus::None,
             url_status: nzbg_core::models::UrlStatus::None,
+            script_status: nzbg_core::models::ScriptStatus::None,
             health: nzb_state.health,
             critical_health: nzb_state.critical_health,
             files,
@@ -279,6 +284,134 @@ fn postproc_config(config: &Config) -> nzbg_postproc::Config {
         unpack_cleanup_disk: config.unpack_cleanup_disk,
         ext_cleanup_disk: config.ext_cleanup_disk.clone(),
     }
+}
+
+struct PostProcessExtensionExecutor<R: ProcessRunner> {
+    runner: Arc<ExtensionRunner<R>>,
+    extensions: Vec<ExtensionInfo>,
+    dest_dir: std::path::PathBuf,
+}
+
+#[async_trait::async_trait]
+impl<R: ProcessRunner + 'static> ExtensionExecutor for PostProcessExtensionExecutor<R> {
+    async fn run_post_process(
+        &self,
+        ctx: &ExtensionContext,
+    ) -> Result<(), nzbg_postproc::PostProcessError> {
+        let nzbpp = build_nzbpp_env(&NzbppContext {
+            nzb_name: &ctx.nzb_name,
+            nzb_id: ctx.nzb_id,
+            category: &ctx.category,
+            working_dir: &ctx.working_dir,
+            dest_dir: &self.dest_dir,
+            final_dir: &ctx.working_dir,
+            total_status: "SUCCESS",
+            par_status: &ctx.par_status,
+            unpack_status: &ctx.unpack_status,
+            parameters: &ctx.parameters,
+        });
+        for ext in &self.extensions {
+            if !ext.enabled {
+                continue;
+            }
+            match self
+                .runner
+                .run_post_process(ext, &nzbpp, &ctx.working_dir)
+                .await
+            {
+                Ok(result) => {
+                    tracing::info!(
+                        extension = %ext.metadata.name,
+                        exit_code = result.exit_code,
+                        "extension finished"
+                    );
+                }
+                Err(err) => {
+                    tracing::warn!(
+                        extension = %ext.metadata.name,
+                        error = %err,
+                        "extension failed to run"
+                    );
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+fn scan_script_dir(script_dir: &Path) -> Vec<ExtensionInfo> {
+    let entries = match std::fs::read_dir(script_dir) {
+        Ok(e) => e,
+        Err(err) => {
+            tracing::debug!("cannot read script dir {}: {err}", script_dir.display());
+            return Vec::new();
+        }
+    };
+    let mut extensions = Vec::new();
+    for (order, entry) in entries.filter_map(|e| e.ok()).enumerate() {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if path
+                .metadata()
+                .is_ok_and(|meta| meta.permissions().mode() & 0o111 == 0)
+            {
+                continue;
+            }
+        }
+        let name = path
+            .file_stem()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+        extensions.push(ExtensionInfo {
+            metadata: nzbg_extension::ExtensionMetadata {
+                name: name.clone(),
+                display_name: name,
+                description: String::new(),
+                kind: vec![ExtensionKind::PostProcessing],
+                parameters: Vec::new(),
+                author: None,
+                homepage: None,
+                version: None,
+                nzbget_min_version: None,
+            },
+            path,
+            enabled: true,
+            order: order as u32,
+        });
+    }
+    extensions.sort_by_key(|e| e.order);
+    extensions
+}
+
+fn build_extension_executor(
+    config: &Config,
+) -> Option<Arc<dyn ExtensionExecutor>> {
+    let script_dir = &config.script_dir;
+    let extensions = scan_script_dir(script_dir);
+    if extensions.is_empty() {
+        return None;
+    }
+    tracing::info!(
+        count = extensions.len(),
+        dir = %script_dir.display(),
+        "discovered post-processing extensions"
+    );
+    let manager = ExtensionManager::new(vec![script_dir.clone()]);
+    let runner = Arc::new(ExtensionRunner::new(
+        nzbg_extension::RealProcessRunner,
+        manager,
+    ));
+    Some(Arc::new(PostProcessExtensionExecutor {
+        runner,
+        extensions,
+        dest_dir: config.dest_dir.clone(),
+    }))
 }
 
 pub fn forward_completions(
@@ -337,6 +470,9 @@ pub async fn run_with_config_path(
     let unpacker = Arc::new(nzbg_postproc::CommandLineUnpacker);
     let history = Arc::new(std::sync::Mutex::new(Vec::new()));
     let mut postprocessor = PostProcessor::new(postproc_rx, pp_config, history, par2, unpacker);
+    if let Some(executor) = build_extension_executor(&config) {
+        postprocessor = postprocessor.with_extensions(executor);
+    }
     let postproc_handle = tokio::spawn(async move {
         postprocessor.run().await;
     });

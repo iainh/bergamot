@@ -1008,7 +1008,12 @@ async fn rpc_history(
             m.insert("ParStatus".into(), serde_json::json!(par_status_str));
             m.insert("UnpackStatus".into(), serde_json::json!(unpack_status_str));
             m.insert("MoveStatus".into(), serde_json::json!(move_status_str));
-            m.insert("ScriptStatus".into(), serde_json::json!("NONE"));
+            let script_status_str = match e.script_status {
+                nzbg_core::models::ScriptStatus::None => "NONE",
+                nzbg_core::models::ScriptStatus::Failure => "FAILURE",
+                nzbg_core::models::ScriptStatus::Success => "SUCCESS",
+            };
+            m.insert("ScriptStatus".into(), serde_json::json!(script_status_str));
             m.insert("DeleteStatus".into(), serde_json::json!(delete_status_str));
             m.insert("MarkStatus".into(), serde_json::json!(mark_status_str));
             m.insert("UrlStatus".into(), serde_json::json!("NONE"));
@@ -1915,6 +1920,7 @@ mod tests {
                 delete_status: nzbg_core::models::DeleteStatus::None,
                 mark_status: nzbg_core::models::MarkStatus::None,
                 url_status: nzbg_core::models::UrlStatus::None,
+                script_status: nzbg_core::models::ScriptStatus::None,
                 health: 1000,
                 critical_health: 1000,
                 files: vec![],
