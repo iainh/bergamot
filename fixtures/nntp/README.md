@@ -1,6 +1,7 @@
 # NNTP fixtures
 
-`fixtures.json` provides deterministic NNTP message bodies for the stub server.
+`fixtures-basic.json` provides deterministic NNTP message bodies for unit tests
+and includes one missing segment to exercise retry behavior.
 
-The default fixture includes three yEnc segments, with one marked missing to
-exercise retry/repair behavior.
+`fixtures-complete.json` provides a complete set of segments for end-to-end
+integration tests.

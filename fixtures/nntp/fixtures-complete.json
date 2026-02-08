@@ -6,9 +6,7 @@
         "segment-1@test",
         "segment-2@test"
       ],
-      "missing_articles": [
-        "segment-2@test"
-      ],
+      "missing_articles": [],
       "articles": {
         "segment-1@test": "=ybegin line=128 size=4 name=sample.txt part=1\n=ypart begin=1 end=4\nklmn\n=yend size=4 pcrc32=db1720a5",
         "segment-2@test": "=ybegin line=128 size=4 name=sample.txt part=2\n=ypart begin=5 end=8\nopqr\n=yend size=4 pcrc32=3ea69601"

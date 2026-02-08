@@ -13,7 +13,7 @@ struct Args {
     #[arg(long, default_value = "127.0.0.1:3119")]
     bind: std::net::SocketAddr,
 
-    #[arg(long, default_value = "fixtures/nntp/fixtures.json")]
+    #[arg(long, default_value = "fixtures/nntp/fixtures-basic.json")]
     fixtures: PathBuf,
 
     #[arg(long, default_value_t = false)]
@@ -38,7 +38,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let fixtures = load_fixtures(&args.fixtures)?;
     let config = StubConfig {
         bind: args.bind,
-        fixtures_path: args.fixtures.clone(),
         require_auth: args.require_auth,
         username: args.username,
         password: args.password,

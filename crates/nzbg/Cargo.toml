@@ -32,3 +32,7 @@ dashmap = "6.1.0"
 chrono = "0.4"
 crc32fast = "1"
 tempfile = "3.11"
+reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
+nzbg-nntp-stub = { path = "../nzbg-nntp-stub" }
+serde_json = "1.0"
+base64 = "0.22"

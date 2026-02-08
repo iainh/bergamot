@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -25,7 +25,6 @@ pub struct GroupConfig {
 #[derive(Debug, Clone)]
 pub struct StubConfig {
     pub bind: SocketAddr,
-    pub fixtures_path: PathBuf,
     pub require_auth: bool,
     pub username: String,
     pub password: String,

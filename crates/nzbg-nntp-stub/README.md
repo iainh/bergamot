@@ -8,7 +8,7 @@ bodies from a JSON fixture file and can inject delays or disconnects.
 ```sh
 cargo run -p nzbg-nntp-stub -- \
   --bind 127.0.0.1:3119 \
-  --fixtures fixtures/nntp/fixtures.json
+  --fixtures fixtures/nntp/fixtures-basic.json
 ```
 
 ## Fixture format

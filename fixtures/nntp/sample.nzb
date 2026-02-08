@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE nzb PUBLIC "-//newzBin//DTD NZB 1.1//EN" "http://www.newzbin.com/DTD/2003/nzb.dtd">
+<nzb xmlns="http://www.newzbin.com/DTD/2003/nzb">
+  <file poster="tester" date="1700000000" subject="sample.txt">
+    <groups>
+      <group>alt.test</group>
+    </groups>
+    <segments>
+      <segment bytes="4" number="1">segment-1@test</segment>
+      <segment bytes="4" number="2">segment-2@test</segment>
+    </segments>
+  </file>
+</nzb>

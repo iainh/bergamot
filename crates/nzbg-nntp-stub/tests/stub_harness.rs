@@ -11,7 +11,7 @@ fn fixtures_path() -> PathBuf {
         .join("..")
         .join("fixtures")
         .join("nntp")
-        .join("fixtures.json")
+        .join("fixtures-basic.json")
 }
 
 fn test_server(port: u16) -> NewsServer {
@@ -57,7 +57,6 @@ async fn fetches_body_from_stub() {
 
     let config = StubConfig {
         bind,
-        fixtures_path: fixtures_path(),
         require_auth: false,
         username: "test".to_string(),
         password: "secret".to_string(),
@@ -95,7 +94,6 @@ async fn fetches_body_with_auth() {
 
     let config = StubConfig {
         bind,
-        fixtures_path: fixtures_path(),
         require_auth: true,
         username: "test".to_string(),
         password: "secret".to_string(),
@@ -133,7 +131,6 @@ async fn reports_missing_article() {
 
     let config = StubConfig {
         bind,
-        fixtures_path: fixtures_path(),
         require_auth: false,
         username: "test".to_string(),
         password: "secret".to_string(),
@@ -169,7 +166,6 @@ async fn handles_disconnects() {
 
     let config = StubConfig {
         bind,
-        fixtures_path: fixtures_path(),
         require_auth: false,
         username: "test".to_string(),
         password: "secret".to_string(),
@@ -205,7 +201,6 @@ async fn handles_response_delays() {
 
     let config = StubConfig {
         bind,
-        fixtures_path: fixtures_path(),
         require_auth: false,
         username: "test".to_string(),
         password: "secret".to_string(),
