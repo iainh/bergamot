@@ -44,6 +44,10 @@ fn fixtures_par2_path() -> PathBuf {
     fixtures_dir().join("fixtures-par2.json")
 }
 
+fn fixtures_all_missing_path() -> PathBuf {
+    fixtures_dir().join("fixtures-all-missing.json")
+}
+
 fn sample_nzb_path() -> PathBuf {
     fixtures_dir().join("sample.nzb")
 }
@@ -151,6 +155,34 @@ async fn jsonrpc_call(
     .expect("rpc send");
     let body: serde_json::Value = response.json().await.expect("rpc json");
     body["result"].clone()
+}
+
+async fn jsonrpc_call_full(
+    addr: SocketAddr,
+    credentials: &str,
+    method: &str,
+    params: serde_json::Value,
+) -> serde_json::Value {
+    let payload = serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": method,
+        "params": params,
+        "id": 1
+    });
+    let auth = base64::engine::general_purpose::STANDARD.encode(credentials);
+
+    let response = timeout(
+        Duration::from_secs(3),
+        reqwest::Client::new()
+            .post(format!("http://{addr}/jsonrpc"))
+            .header("Authorization", format!("Basic {auth}"))
+            .json(&payload)
+            .send(),
+    )
+    .await
+    .expect("rpc timeout")
+    .expect("rpc send");
+    response.json().await.expect("rpc json")
 }
 
 fn init_logging() {
@@ -1976,4 +2008,182 @@ async fn rpc_rate_speed_limiting() {
         .expect("app shutdown timeout");
 
     let _ = tokio::time::timeout(Duration::from_secs(2), stub_task).await;
+}
+
+#[tokio::test]
+async fn error_invalid_nzb_returns_rpc_error() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let stub_port = available_port();
+    let rpc_port = available_port();
+    let rpc_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), rpc_port);
+
+    init_logging();
+
+    let stub_task = start_stub(stub_port, fixtures_complete_path(), 1).await;
+    tokio::time::sleep(Duration::from_millis(20)).await;
+
+    let config = sample_config(temp.path(), rpc_port, &[(stub_port, 0)]);
+    create_dirs(&config).await;
+
+    let stats = nzbg_scheduler::StatsTracker::from_config(&config);
+    let shared_stats = Arc::new(nzbg_scheduler::SharedStatsTracker::new(stats));
+    let fetcher = build_server_pool(&config, &shared_stats);
+
+    let app_task = tokio::spawn(run_with_config_path(
+        config,
+        fetcher,
+        None,
+        None,
+        Some(shared_stats),
+    ));
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    let garbage = base64::engine::general_purpose::STANDARD.encode(b"this is not valid xml at all");
+    let response = jsonrpc_call_full(
+        rpc_addr,
+        "nzbget:secret",
+        "append",
+        serde_json::json!(["bad.nzb", garbage, "", 0]),
+    )
+    .await;
+    assert!(
+        response.get("error").is_some(),
+        "invalid NZB should produce a JSON-RPC error, got: {response}"
+    );
+    assert!(
+        response.get("result").is_none() || response["result"].is_null(),
+        "invalid NZB should not produce a result"
+    );
+
+    let empty_nzb = r#"<?xml version="1.0"?><nzb xmlns="http://www.newzbin.com/DTD/2003/nzb"></nzb>"#;
+    let empty_b64 = base64::engine::general_purpose::STANDARD.encode(empty_nzb.as_bytes());
+    let response2 = jsonrpc_call_full(
+        rpc_addr,
+        "nzbget:secret",
+        "append",
+        serde_json::json!(["empty.nzb", empty_b64, "", 0]),
+    )
+    .await;
+    assert!(
+        response2.get("error").is_some(),
+        "empty NZB (no files) should produce a JSON-RPC error, got: {response2}"
+    );
+
+    shutdown_app(rpc_addr).await;
+    let _ = tokio::time::timeout(Duration::from_secs(5), app_task)
+        .await
+        .expect("app shutdown timeout");
+
+    let _ = tokio::time::timeout(Duration::from_secs(2), stub_task).await;
+}
+
+#[tokio::test]
+async fn error_all_articles_missing_produces_failure_history() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let stub_port = available_port();
+    let rpc_port = available_port();
+    let rpc_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), rpc_port);
+
+    init_logging();
+
+    let stub_task = start_stub(stub_port, fixtures_all_missing_path(), 2).await;
+    tokio::time::sleep(Duration::from_millis(20)).await;
+
+    let config = sample_config(temp.path(), rpc_port, &[(stub_port, 0)]);
+    create_dirs(&config).await;
+
+    let stats = nzbg_scheduler::StatsTracker::from_config(&config);
+    let shared_stats = Arc::new(nzbg_scheduler::SharedStatsTracker::new(stats));
+    let fetcher = build_server_pool(&config, &shared_stats);
+
+    let app_task = tokio::spawn(run_with_config_path(
+        config,
+        fetcher,
+        None,
+        None,
+        Some(shared_stats),
+    ));
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    let nzb_id = append_nzb(rpc_addr, &sample_nzb_path()).await;
+    let completed = wait_for_completion(rpc_addr, nzb_id, 50).await;
+    assert!(completed, "NZB with all missing articles should still complete (move to history)");
+
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let history = jsonrpc_call(
+        rpc_addr,
+        "nzbget:secret",
+        "history",
+        serde_json::json!([false]),
+    )
+    .await;
+    let entries = history.as_array().expect("history array");
+    let entry = entries
+        .iter()
+        .find(|e| e.get("NZBID").and_then(|v| v.as_u64()) == Some(nzb_id))
+        .expect("should find NZB in history");
+
+    let health = entry.get("Health").and_then(|v| v.as_u64()).unwrap_or(1000);
+    assert_eq!(health, 0, "health should be 0 when all articles failed");
+
+    shutdown_app(rpc_addr).await;
+    let _ = tokio::time::timeout(Duration::from_secs(5), app_task)
+        .await
+        .expect("app shutdown timeout");
+
+    let _ = tokio::time::timeout(Duration::from_secs(2), stub_task).await;
+}
+
+#[tokio::test]
+async fn error_all_servers_down_produces_failure() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let dead_port = available_port();
+    let rpc_port = available_port();
+    let rpc_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), rpc_port);
+
+    init_logging();
+
+    let config = sample_config(temp.path(), rpc_port, &[(dead_port, 0)]);
+    create_dirs(&config).await;
+
+    let stats = nzbg_scheduler::StatsTracker::from_config(&config);
+    let shared_stats = Arc::new(nzbg_scheduler::SharedStatsTracker::new(stats));
+    let fetcher = build_server_pool(&config, &shared_stats);
+
+    let app_task = tokio::spawn(run_with_config_path(
+        config,
+        fetcher,
+        None,
+        None,
+        Some(shared_stats),
+    ));
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    let nzb_id = append_nzb(rpc_addr, &sample_nzb_path()).await;
+    let completed = wait_for_completion(rpc_addr, nzb_id, 60).await;
+    assert!(completed, "NZB should eventually complete even when servers are unreachable");
+
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let history = jsonrpc_call(
+        rpc_addr,
+        "nzbget:secret",
+        "history",
+        serde_json::json!([false]),
+    )
+    .await;
+    let entries = history.as_array().expect("history array");
+    let entry = entries
+        .iter()
+        .find(|e| e.get("NZBID").and_then(|v| v.as_u64()) == Some(nzb_id))
+        .expect("should find NZB in history");
+
+    let health = entry.get("Health").and_then(|v| v.as_u64()).unwrap_or(1000);
+    assert_eq!(health, 0, "health should be 0 when all servers are down");
+
+    shutdown_app(rpc_addr).await;
+    let _ = tokio::time::timeout(Duration::from_secs(5), app_task)
+        .await
+        .expect("app shutdown timeout");
 }

@@ -32,4 +32,4 @@ Tracking file for end-to-end test coverage deficiencies to address before produc
 - [ ] **Feed polling** — RSS feed pointing at stub HTTP server triggers auto-fetch
 - [ ] **Extension script execution** — Post-processing script runs, exit code affects final status
 - [x] **Graceful shutdown under load** — Shutdown while downloading, disk state consistent for recovery
-- [ ] **Error propagation** — Invalid NZB, corrupt yEnc, all-servers-down produce correct error statuses
+- [x] **Error propagation** — Invalid NZB, corrupt yEnc, all-servers-down produce correct error statuses
