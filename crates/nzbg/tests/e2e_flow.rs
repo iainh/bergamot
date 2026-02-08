@@ -1380,6 +1380,160 @@ async fn concurrent_downloads_complete_without_corruption() {
 }
 
 #[tokio::test]
+async fn graceful_shutdown_under_load() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let stub_port = available_port();
+    let rpc_port = available_port();
+    let rpc_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), rpc_port);
+
+    init_logging();
+
+    let stub_config = StubConfig {
+        bind: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), stub_port),
+        require_auth: false,
+        username: "test".to_string(),
+        password: "secret".to_string(),
+        disconnect_after: 0,
+        delay_ms: 500,
+    };
+    let fixtures = load_fixtures(&fixtures_multiseg_path()).expect("fixtures load");
+    let stub = StubServer::new(stub_config, fixtures);
+    let stub_task = tokio::spawn(async move {
+        let _ = stub.serve().await;
+    });
+    tokio::time::sleep(Duration::from_millis(20)).await;
+
+    let config = sample_config(temp.path(), rpc_port, &[(stub_port, 0)]);
+    create_dirs(&config).await;
+
+    let stats = nzbg_scheduler::StatsTracker::from_config(&config);
+    let shared_stats = Arc::new(nzbg_scheduler::SharedStatsTracker::new(stats));
+    let fetcher = build_server_pool(&config, &shared_stats);
+
+    let app_task = tokio::spawn(run_with_config_path(
+        config.clone(),
+        fetcher,
+        None,
+        None,
+        Some(shared_stats),
+    ));
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    let nzb_id = append_nzb(rpc_addr, &multi_nzb_path()).await;
+
+    tokio::time::sleep(Duration::from_millis(600)).await;
+
+    let groups = jsonrpc_call(
+        rpc_addr,
+        "nzbget:secret",
+        "listgroups",
+        serde_json::json!([]),
+    )
+    .await;
+    let still_active = groups
+        .as_array()
+        .map(|a| !a.is_empty())
+        .unwrap_or(false);
+    assert!(
+        still_active,
+        "download should still be in progress when shutdown is issued"
+    );
+
+    shutdown_app(rpc_addr).await;
+    let app_result = tokio::time::timeout(Duration::from_secs(10), app_task)
+        .await
+        .expect("app should shut down within timeout");
+    assert!(
+        app_result.is_ok(),
+        "app task should complete without panic"
+    );
+
+    let queue_json = temp.path().join("queue").join("queue.json");
+    assert!(
+        queue_json.exists(),
+        "queue.json should be persisted after graceful shutdown"
+    );
+
+    let queue_data = tokio::fs::read_to_string(&queue_json)
+        .await
+        .expect("read queue.json");
+    let queue_val: serde_json::Value =
+        serde_json::from_str(&queue_data).expect("queue.json should be valid JSON");
+    let nzbs = queue_val
+        .get("nzbs")
+        .and_then(|v| v.as_array())
+        .expect("queue.json should contain nzbs array");
+    assert!(
+        !nzbs.is_empty(),
+        "queue.json should contain the in-progress NZB"
+    );
+
+    let rpc_port2 = available_port();
+    let rpc_addr2 = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), rpc_port2);
+
+    let config2 = sample_config(temp.path(), rpc_port2, &[(stub_port, 0)]);
+
+    let stats2 = nzbg_scheduler::StatsTracker::from_config(&config2);
+    let shared_stats2 = Arc::new(nzbg_scheduler::SharedStatsTracker::new(stats2));
+    let fetcher2 = build_server_pool(&config2, &shared_stats2);
+
+    let app_task2 = tokio::spawn(run_with_config_path(
+        config2.clone(),
+        fetcher2,
+        None,
+        None,
+        Some(shared_stats2),
+    ));
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    let completed = wait_for_completion(rpc_addr2, nzb_id, 80).await;
+    assert!(completed, "NZB should complete after restart from graceful shutdown state");
+
+    let dest_dir = config2.dest_dir.clone();
+    let inter_dir = config2.inter_dir.clone();
+    let expected = "ABCDABCDABCDABCDABCDABCD";
+    let content = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            for search_dir in [&dest_dir, &inter_dir] {
+                if let Ok(mut entries) = tokio::fs::read_dir(search_dir).await {
+                    while let Ok(Some(entry)) = entries.next_entry().await {
+                        let path = entry.path();
+                        if let Ok(c) = tokio::fs::read_to_string(&path).await {
+                            if c == expected {
+                                return c;
+                            }
+                        }
+                        if path.is_dir() {
+                            if let Ok(mut files) = tokio::fs::read_dir(&path).await {
+                                while let Ok(Some(f)) = files.next_entry().await {
+                                    if let Ok(c) = tokio::fs::read_to_string(f.path()).await {
+                                        if c == expected {
+                                            return c;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .expect("completed file should appear after restart");
+    assert_eq!(content, expected);
+
+    shutdown_app(rpc_addr2).await;
+    let _ = tokio::time::timeout(Duration::from_secs(5), app_task2)
+        .await
+        .expect("second app shutdown timeout");
+
+    stub_task.abort();
+    let _ = stub_task.await;
+}
+
+#[tokio::test]
 async fn post_processing_par2_verify_and_move() {
     let temp = tempfile::tempdir().expect("tempdir");
     let stub_port = available_port();

@@ -31,5 +31,5 @@ Tracking file for end-to-end test coverage deficiencies to address before produc
 - [x] **Post-processing pipeline** — PAR2 verify/repair + archive extraction as full e2e flow
 - [ ] **Feed polling** — RSS feed pointing at stub HTTP server triggers auto-fetch
 - [ ] **Extension script execution** — Post-processing script runs, exit code affects final status
-- [ ] **Graceful shutdown under load** — Shutdown while downloading, disk state consistent for recovery
+- [x] **Graceful shutdown under load** — Shutdown while downloading, disk state consistent for recovery
 - [ ] **Error propagation** — Invalid NZB, corrupt yEnc, all-servers-down produce correct error statuses
