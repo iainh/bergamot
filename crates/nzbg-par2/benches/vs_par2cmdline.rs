@@ -133,7 +133,11 @@ fn bench_repair(dir: &Path, iterations: u32) {
     let rs = nzbg_par2::parse_recovery_set(dir).expect("parse failed");
 
     // Figure out how many slices file_0 occupies so we only delete what's repairable
-    let file0_entry = rs.files.iter().find(|f| f.filename == "file_0.dat").unwrap();
+    let file0_entry = rs
+        .files
+        .iter()
+        .find(|f| f.filename == "file_0.dat")
+        .unwrap();
     let file0_slices = file0_entry.length.div_ceil(rs.slice_size) as usize;
     if file0_slices > rs.recovery_slice_count {
         println!(
@@ -245,10 +249,7 @@ fn main() {
 
     println!("par2 performance benchmark: nzbg-par2 vs par2cmdline");
     println!("  iterations:  {iterations}");
-    println!(
-        "  file size:   {:.2} MB",
-        file_size as f64 / 1_048_576.0
-    );
+    println!("  file size:   {:.2} MB", file_size as f64 / 1_048_576.0);
     println!("  file count:  {file_count}");
 
     let dir = tempfile::tempdir().unwrap();

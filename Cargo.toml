@@ -10,6 +10,7 @@ members = [
   "crates/nzbg-core",
   "crates/nzbg-nzb",
   "crates/nzbg-nntp",
+  "crates/nzbg-nntp-stub",
   "crates/nzbg-yenc",
   "crates/nzbg-queue",
   "crates/nzbg-par2",

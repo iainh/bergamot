@@ -1,0 +1,20 @@
+{
+  "greeting": "200 nzbg test server ready",
+  "groups": {
+    "alt.test": {
+      "article_ids": [
+        "segment-1@test",
+        "segment-2@test",
+        "segment-3@test"
+      ],
+      "missing_articles": [
+        "segment-2@test"
+      ],
+      "articles": {
+        "segment-1@test": "=ybegin line=128 size=24 name=sample.bin\n+\u0001\u0002\u0003\u0004\n=yend size=4 crc32=00000000",
+        "segment-2@test": "=ybegin line=128 size=24 name=sample.bin\n+\u0005\u0006\u0007\u0008\n=yend size=4 crc32=00000000",
+        "segment-3@test": "=ybegin line=128 size=24 name=sample.bin\n+\t\n=yend size=1 crc32=00000000"
+      }
+    }
+  }
+}

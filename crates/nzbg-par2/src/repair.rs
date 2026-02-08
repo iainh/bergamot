@@ -116,8 +116,8 @@ pub fn repair_recovery_set(
         }
 
         let file_path = working_dir.join(&entry.filename);
-        let has_present_slices = (0..slice_count)
-            .any(|local| !missing_set.contains_key(&(global_j + local)));
+        let has_present_slices =
+            (0..slice_count).any(|local| !missing_set.contains_key(&(global_j + local)));
 
         let mut file = if has_present_slices && file_path.is_file() {
             Some(std::fs::File::open(&file_path)?)
@@ -232,7 +232,6 @@ fn find_missing_global_indices(
     }
     missing
 }
-
 
 fn gauss_eliminate(
     matrix: &mut [u16],
