@@ -63,7 +63,7 @@ pub async fn dispatch_rpc(
         "sysinfo" => rpc_sysinfo(state),
         "systemhealth" => rpc_systemhealth(state),
         "loadextensions" => Ok(serde_json::json!([])),
-        "testserver" => Ok(serde_json::json!("")),
+        "testserver" => rpc_testserver(params).await,
         "editserver" => Ok(serde_json::json!(true)),
         "scheduleresume" => Ok(serde_json::json!(true)),
         "reload" => Ok(serde_json::json!(true)),
@@ -75,13 +75,19 @@ pub async fn dispatch_rpc(
         }
         "readurl" => {
             let arr = params.as_array();
-            let url = arr.and_then(|a| a.first()).and_then(|v| v.as_str()).unwrap_or("");
+            let url = arr
+                .and_then(|a| a.first())
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
             match reqwest::get(url).await {
                 Ok(resp) => {
                     let body = resp.text().await.unwrap_or_default();
                     Ok(serde_json::json!(body))
                 }
-                Err(e) => Err(JsonRpcError { code: -32000, message: e.to_string() }),
+                Err(e) => Err(JsonRpcError {
+                    code: -32000,
+                    message: e.to_string(),
+                }),
             }
         }
         "testextension" => Ok(serde_json::json!("")),
@@ -147,10 +153,7 @@ async fn rpc_append(
         .as_array()
         .ok_or_else(|| rpc_error("params must be an array"))?;
 
-    let nzb_filename = arr
-        .first()
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
+    let nzb_filename = arr.first().and_then(|v| v.as_str()).unwrap_or("");
 
     let content = arr.get(1).and_then(|v| v.as_str()).unwrap_or("");
 
@@ -165,12 +168,15 @@ async fn rpc_append(
     let priority = priority_from_i32(priority_val);
 
     let temp_dir = std::env::temp_dir().join("nzbg-downloads");
-    std::fs::create_dir_all(&temp_dir)
-        .map_err(|e| rpc_error(format!("creating temp dir: {e}")))?;
+    std::fs::create_dir_all(&temp_dir).map_err(|e| rpc_error(format!("creating temp dir: {e}")))?;
 
     let (nzb_path, nzb_bytes) = if is_url(content) {
         let (filename, bytes) = fetch_nzb_url(content).await?;
-        let name = if nzb_filename.is_empty() { &filename } else { nzb_filename };
+        let name = if nzb_filename.is_empty() {
+            &filename
+        } else {
+            nzb_filename
+        };
         let path = temp_dir.join(name);
         std::fs::write(&path, &bytes).map_err(|e| rpc_error(format!("writing temp NZB: {e}")))?;
         (path, bytes)
@@ -178,13 +184,17 @@ async fn rpc_append(
         let bytes = base64::engine::general_purpose::STANDARD
             .decode(content)
             .map_err(|e| rpc_error(format!("decoding base64 NZB content: {e}")))?;
-        let name = if nzb_filename.is_empty() { "download.nzb" } else { nzb_filename };
+        let name = if nzb_filename.is_empty() {
+            "download.nzb"
+        } else {
+            nzb_filename
+        };
         let path = temp_dir.join(name);
         std::fs::write(&path, &bytes).map_err(|e| rpc_error(format!("writing temp NZB: {e}")))?;
         (path, bytes)
     } else if !nzb_filename.is_empty() {
-        let bytes = std::fs::read(nzb_filename)
-            .map_err(|e| rpc_error(format!("reading NZB: {e}")))?;
+        let bytes =
+            std::fs::read(nzb_filename).map_err(|e| rpc_error(format!("reading NZB: {e}")))?;
         (PathBuf::from(nzb_filename), bytes)
     } else {
         return Err(rpc_error("missing NZB content or filename"));
@@ -313,9 +323,9 @@ fn parse_edit_command(command: &str) -> Result<nzbg_queue::EditAction, JsonRpcEr
         )),
         "GroupPause" => Ok(nzbg_queue::EditAction::Pause),
         "GroupResume" => Ok(nzbg_queue::EditAction::Resume),
-        "GroupDelete" | "GroupDupeDelete" | "GroupFinalDelete" => Ok(nzbg_queue::EditAction::Delete {
-            delete_files: true,
-        }),
+        "GroupDelete" | "GroupDupeDelete" | "GroupFinalDelete" => {
+            Ok(nzbg_queue::EditAction::Delete { delete_files: true })
+        }
         "GroupParkDelete" => Ok(nzbg_queue::EditAction::Delete {
             delete_files: false,
         }),
@@ -724,12 +734,7 @@ fn build_server_volume(
         days[day_slot_idx] = size_json(sv.bytes_today);
     }
 
-    let total_bytes: u64 = sv
-        .daily_history
-        .iter()
-        .map(|(_, b)| b)
-        .sum::<u64>()
-        + sv.bytes_today;
+    let total_bytes: u64 = sv.daily_history.iter().map(|(_, b)| b).sum::<u64>() + sv.bytes_today;
 
     let zero_article = serde_json::json!({"Failed": 0, "Success": 0});
     let mut article_days: Vec<serde_json::Value> = vec![zero_article; num_days];
@@ -738,8 +743,7 @@ fn build_server_volume(
         let slot = (*date - unix_epoch).num_days();
         let idx = (slot - first_day) as usize;
         if idx < article_days.len() {
-            article_days[idx] =
-                serde_json::json!({"Success": success, "Failed": failed});
+            article_days[idx] = serde_json::json!({"Success": success, "Failed": failed});
         }
     }
 
@@ -891,10 +895,16 @@ async fn rpc_history(
             m.insert("DupeScore".into(), serde_json::json!(0));
             m.insert("DupeMode".into(), serde_json::json!("SCORE"));
             m.insert("ParStatus".into(), serde_json::json!(e.par_status as u32));
-            m.insert("UnpackStatus".into(), serde_json::json!(e.unpack_status as u32));
+            m.insert(
+                "UnpackStatus".into(),
+                serde_json::json!(e.unpack_status as u32),
+            );
             m.insert("MoveStatus".into(), serde_json::json!(e.move_status as u32));
             m.insert("ScriptStatus".into(), serde_json::json!(0));
-            m.insert("DeleteStatus".into(), serde_json::json!(e.delete_status as u32));
+            m.insert(
+                "DeleteStatus".into(),
+                serde_json::json!(e.delete_status as u32),
+            );
             m.insert("MarkStatus".into(), serde_json::json!(e.mark_status as u32));
             m.insert("UrlStatus".into(), serde_json::json!(0));
             m.insert("DupStatus".into(), serde_json::json!(0));
@@ -953,6 +963,67 @@ fn format_history_status(e: &nzbg_queue::HistoryListEntry) -> String {
     "SUCCESS".to_string()
 }
 
+async fn rpc_testserver(params: &serde_json::Value) -> Result<serde_json::Value, JsonRpcError> {
+    let arr = params
+        .as_array()
+        .ok_or_else(|| rpc_error("params must be an array"))?;
+
+    let host = arr
+        .first()
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| rpc_error("missing host parameter"))?;
+    let port = arr.get(1).and_then(|v| v.as_u64()).unwrap_or(119) as u16;
+    let username = arr.get(2).and_then(|v| v.as_str()).unwrap_or("");
+    let password = arr.get(3).and_then(|v| v.as_str()).unwrap_or("");
+    let encryption_str = arr.get(4).and_then(|v| v.as_str()).unwrap_or("no");
+    let encryption = match encryption_str.to_lowercase().as_str() {
+        "yes" | "tls" => nzbg_nntp::Encryption::Tls,
+        "starttls" => nzbg_nntp::Encryption::StartTls,
+        _ => nzbg_nntp::Encryption::None,
+    };
+
+    let server = nzbg_nntp::NewsServer {
+        id: 0,
+        name: "test".to_string(),
+        active: true,
+        host: host.to_string(),
+        port,
+        username: if username.is_empty() {
+            None
+        } else {
+            Some(username.to_string())
+        },
+        password: if password.is_empty() {
+            None
+        } else {
+            Some(password.to_string())
+        },
+        encryption,
+        cipher: None,
+        connections: 1,
+        retention: 0,
+        level: 0,
+        optional: false,
+        group: 0,
+        join_group: false,
+        ip_version: nzbg_nntp::IpVersion::Auto,
+        cert_verification: true,
+    };
+
+    match nzbg_nntp::NntpConnection::connect(&server).await {
+        Ok(mut conn) => {
+            if !username.is_empty()
+                && let Err(e) = conn.authenticate(username, password).await
+            {
+                return Ok(serde_json::json!(format!("Authentication failed: {e}")));
+            }
+            let _ = conn.quit().await;
+            Ok(serde_json::json!("Connection successful"))
+        }
+        Err(e) => Ok(serde_json::json!(e.to_string())),
+    }
+}
+
 async fn rpc_pausedownload(state: &AppState) -> Result<serde_json::Value, JsonRpcError> {
     let queue = require_queue(state)?;
     queue.pause_all().await.map_err(rpc_error)?;
@@ -1009,7 +1080,12 @@ mod tests {
         nzbg_queue::QueueHandle,
         tokio::task::JoinHandle<()>,
     ) {
-        let (mut coordinator, handle, _rx, _rate_rx) = QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
+        let (mut coordinator, handle, _rx, _rate_rx) = QueueCoordinator::new(
+            2,
+            1,
+            std::path::PathBuf::from("/tmp/inter"),
+            std::path::PathBuf::from("/tmp/dest"),
+        );
         let coordinator_handle = tokio::spawn(async move { coordinator.run().await });
         let state = AppState::default().with_queue(handle.clone());
         (state, handle, coordinator_handle)
@@ -1044,7 +1120,12 @@ mod tests {
             DiskState::new(tmp_disk.path().to_path_buf(), JsonFormat).expect("disk"),
         );
 
-        let (mut coordinator, handle, _rx, _rate_rx) = QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
+        let (mut coordinator, handle, _rx, _rate_rx) = QueueCoordinator::new(
+            2,
+            1,
+            std::path::PathBuf::from("/tmp/inter"),
+            std::path::PathBuf::from("/tmp/dest"),
+        );
         let coordinator_handle = tokio::spawn(async move { coordinator.run().await });
         let state = AppState::default()
             .with_queue(handle.clone())
@@ -1133,7 +1214,12 @@ mod tests {
     #[tokio::test]
     async fn dispatch_shutdown_triggers_shutdown() {
         let (shutdown_handle, rx) = crate::shutdown::ShutdownHandle::new();
-        let (mut coordinator, handle, _rx, _rate_rx) = QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
+        let (mut coordinator, handle, _rx, _rate_rx) = QueueCoordinator::new(
+            2,
+            1,
+            std::path::PathBuf::from("/tmp/inter"),
+            std::path::PathBuf::from("/tmp/dest"),
+        );
         tokio::spawn(async move { coordinator.run().await });
         let state = AppState::default()
             .with_queue(handle.clone())
@@ -1456,6 +1542,31 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn dispatch_testserver_connects_to_unreachable_host() {
+        let state = AppState::default();
+        let params = serde_json::json!([
+            "unreachable.invalid", // host
+            119,                   // port
+            "",                    // username
+            "",                    // password
+            "no",                  // encryption
+            1                      // connections
+        ]);
+        let result = dispatch_rpc("testserver", &params, &state)
+            .await
+            .expect("testserver should return Ok with error message");
+        let msg = result.as_str().expect("should be a string");
+        assert!(!msg.is_empty(), "should contain an error message");
+    }
+
+    #[tokio::test]
+    async fn dispatch_testserver_missing_params_returns_error() {
+        let state = AppState::default();
+        let result = dispatch_rpc("testserver", &serde_json::json!([]), &state).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
     async fn dispatch_feeds_returns_empty_array() {
         let state = AppState::default();
         let result = dispatch_rpc("feeds", &serde_json::json!([]), &state)
@@ -1469,7 +1580,12 @@ mod tests {
         nzbg_queue::QueueHandle,
         tokio::task::JoinHandle<()>,
     ) {
-        let (mut coordinator, handle, _rx, _rate_rx) = QueueCoordinator::new(2, 1, std::path::PathBuf::from("/tmp/inter"), std::path::PathBuf::from("/tmp/dest"));
+        let (mut coordinator, handle, _rx, _rate_rx) = QueueCoordinator::new(
+            2,
+            1,
+            std::path::PathBuf::from("/tmp/inter"),
+            std::path::PathBuf::from("/tmp/dest"),
+        );
         coordinator.add_to_history(
             nzbg_core::models::NzbInfo {
                 id: 1,

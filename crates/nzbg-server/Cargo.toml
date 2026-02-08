@@ -13,6 +13,7 @@ nzbg-core = { path = "../nzbg-core" }
 nzbg-feed = { path = "../nzbg-feed" }
 nzbg-diskstate = { path = "../nzbg-diskstate" }
 nzbg-logging = { path = "../nzbg-logging" }
+nzbg-nntp = { path = "../nzbg-nntp" }
 nzbg-queue = { path = "../nzbg-queue" }
 nzbg-scheduler = { path = "../nzbg-scheduler" }
 mime_guess = "2"
