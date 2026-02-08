@@ -25,7 +25,7 @@ Tracking file for end-to-end test coverage deficiencies to address before produc
 
 ## Functional Scenarios
 
-- [ ] **Authentication rejection** — Wrong credentials get a 401
+- [x] **Authentication rejection** — Wrong credentials get a 401
 - [ ] **Multi-file NZB** — Multiple distinct output files produced correctly
 - [ ] **Concurrent downloads** — 2+ NZBs appended simultaneously both complete without corruption
 - [ ] **Post-processing pipeline** — PAR2 verify/repair + archive extraction as full e2e flow

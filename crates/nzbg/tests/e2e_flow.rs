@@ -1091,3 +1091,100 @@ async fn rpc_history_schema_conformance() {
         .expect("app shutdown timeout");
     let _ = tokio::time::timeout(Duration::from_secs(2), stub_task).await;
 }
+
+async fn jsonrpc_raw(
+    addr: SocketAddr,
+    auth_header: Option<&str>,
+    method: &str,
+) -> reqwest::Response {
+    let payload = serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": method,
+        "params": [],
+        "id": 1
+    });
+    let mut req = reqwest::Client::new()
+        .post(format!("http://{addr}/jsonrpc"))
+        .json(&payload);
+    if let Some(auth) = auth_header {
+        req = req.header("Authorization", auth);
+    }
+    timeout(Duration::from_secs(3), req.send())
+        .await
+        .expect("rpc timeout")
+        .expect("rpc send")
+}
+
+#[tokio::test]
+async fn rpc_authentication_rejection() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let stub_port = available_port();
+    let rpc_port = available_port();
+    let rpc_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), rpc_port);
+
+    init_logging();
+
+    let stub_task = start_stub(stub_port, fixtures_complete_path(), 1).await;
+    tokio::time::sleep(Duration::from_millis(20)).await;
+
+    let config = sample_config(temp.path(), rpc_port, &[(stub_port, 0)]);
+    create_dirs(&config).await;
+
+    let stats = nzbg_scheduler::StatsTracker::from_config(&config);
+    let shared_stats = Arc::new(nzbg_scheduler::SharedStatsTracker::new(stats));
+    let fetcher = build_server_pool(&config, &shared_stats);
+
+    let app_task = tokio::spawn(run_with_config_path(
+        config,
+        fetcher,
+        None,
+        None,
+        Some(shared_stats),
+    ));
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    let wrong_creds = base64::engine::general_purpose::STANDARD.encode("nzbget:wrongpassword");
+    let resp = jsonrpc_raw(
+        rpc_addr,
+        Some(&format!("Basic {wrong_creds}")),
+        "version",
+    )
+    .await;
+    assert_eq!(
+        resp.status().as_u16(),
+        401,
+        "wrong credentials should return 401"
+    );
+    assert!(
+        resp.headers()
+            .get("www-authenticate")
+            .is_some(),
+        "401 response should include WWW-Authenticate header"
+    );
+
+    let resp_no_auth = jsonrpc_raw(rpc_addr, None, "version").await;
+    assert_eq!(
+        resp_no_auth.status().as_u16(),
+        401,
+        "missing credentials should return 401"
+    );
+
+    let valid_creds = base64::engine::general_purpose::STANDARD.encode("nzbget:secret");
+    let resp_ok = jsonrpc_raw(
+        rpc_addr,
+        Some(&format!("Basic {valid_creds}")),
+        "version",
+    )
+    .await;
+    assert_eq!(
+        resp_ok.status().as_u16(),
+        200,
+        "correct credentials should return 200"
+    );
+
+    shutdown_app(rpc_addr).await;
+    let _ = tokio::time::timeout(Duration::from_secs(5), app_task)
+        .await
+        .expect("app shutdown timeout");
+    let _ = tokio::time::timeout(Duration::from_secs(2), stub_task).await;
+}
