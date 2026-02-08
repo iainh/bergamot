@@ -237,6 +237,10 @@ impl Config {
         Ok(())
     }
 
+    pub fn refresh_servers(&mut self) {
+        self.servers = crate::parse::extract_servers(&self.raw);
+    }
+
     pub fn save(&self, path: &std::path::Path) -> Result<(), crate::error::ConfigError> {
         let mut output = String::new();
         let mut keys: Vec<_> = self.raw.keys().collect();

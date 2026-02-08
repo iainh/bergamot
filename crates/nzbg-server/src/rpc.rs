@@ -64,7 +64,7 @@ pub async fn dispatch_rpc(
         "systemhealth" => rpc_systemhealth(state),
         "loadextensions" => Ok(serde_json::json!([])),
         "testserver" => rpc_testserver(params).await,
-        "editserver" => Ok(serde_json::json!(true)),
+        "editserver" => rpc_editserver(params, state),
         "scheduleresume" => rpc_scheduleresume(params, state),
         "reload" => Ok(serde_json::json!(true)),
         "clearlog" => {
@@ -532,6 +532,42 @@ fn rpc_systemhealth(state: &AppState) -> Result<serde_json::Value, JsonRpcError>
         "Alerts": [],
         "Sections": [],
     }))
+}
+
+fn rpc_editserver(
+    params: &serde_json::Value,
+    state: &AppState,
+) -> Result<serde_json::Value, JsonRpcError> {
+    let config_arc = state
+        .config()
+        .ok_or_else(|| rpc_error("Config not available"))?;
+    let config_path = state
+        .config_path()
+        .ok_or_else(|| rpc_error("Config path not available"))?;
+
+    let arr = params
+        .as_array()
+        .ok_or_else(|| rpc_error("params must be an array"))?;
+
+    {
+        let mut config = config_arc
+            .write()
+            .map_err(|_| rpc_error("Config lock poisoned"))?;
+        for entry in arr {
+            if let (Some(name), Some(value)) = (
+                entry.get("Name").and_then(|v| v.as_str()),
+                entry.get("Value").and_then(|v| v.as_str()),
+            ) {
+                let _ = config.set_option(name, value);
+            }
+        }
+        config.refresh_servers();
+        config
+            .save(config_path)
+            .map_err(|e| rpc_error(format!("saving config: {e}")))?;
+    }
+
+    Ok(serde_json::json!(true))
 }
 
 fn rpc_scheduleresume(
@@ -1580,6 +1616,32 @@ mod tests {
         assert_eq!(result["QueueAvailable"], true);
         assert_eq!(result["Healthy"], true);
         handle.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn dispatch_editserver_updates_config() {
+        let (state, tmp) = state_with_config();
+        let params = serde_json::json!([
+            {"Name": "Server1.Host", "Value": "news.example.com"},
+            {"Name": "Server1.Port", "Value": "563"},
+            {"Name": "Server1.Connections", "Value": "8"}
+        ]);
+        let result = dispatch_rpc("editserver", &params, &state)
+            .await
+            .expect("editserver");
+        assert_eq!(result, serde_json::json!(true));
+
+        let saved = std::fs::read_to_string(tmp.path().join("nzbg.conf")).expect("read");
+        assert!(saved.contains("Server1.Host=news.example.com"));
+        assert!(saved.contains("Server1.Port=563"));
+    }
+
+    #[tokio::test]
+    async fn dispatch_editserver_no_config_returns_error() {
+        let state = AppState::default();
+        let params = serde_json::json!([{"Name": "Server1.Host", "Value": "test"}]);
+        let result = dispatch_rpc("editserver", &params, &state).await;
+        assert!(result.is_err());
     }
 
     #[tokio::test]
