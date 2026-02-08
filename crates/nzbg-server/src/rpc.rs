@@ -977,11 +977,19 @@ async fn rpc_history(
                 nzbg_core::models::HistoryKind::DupHidden => "DUP",
             };
             let status = format_history_status(&e);
+            let par_status_str = format_par_status(e.par_status);
+            let unpack_status_str = format_unpack_status(e.unpack_status);
+            let move_status_str = format_move_status(e.move_status);
+            let delete_status_str = format_delete_status(e.delete_status);
+            let mark_status_str = format_mark_status(e.mark_status);
+
             let mut m = serde_json::Map::new();
             m.insert("ID".into(), serde_json::json!(e.id));
             m.insert("NZBID".into(), serde_json::json!(e.id));
             m.insert("Kind".into(), serde_json::json!(kind));
             m.insert("Name".into(), serde_json::json!(e.name));
+            m.insert("NZBName".into(), serde_json::json!(e.name));
+            m.insert("NZBNicename".into(), serde_json::json!(e.name));
             m.insert("Status".into(), serde_json::json!(status));
             m.insert("FileSizeMB".into(), serde_json::json!(file_size_mb));
             m.insert("FileSizeLo".into(), serde_json::json!(file_size_lo));
@@ -989,24 +997,20 @@ async fn rpc_history(
             m.insert("Category".into(), serde_json::json!(e.category));
             m.insert("HistoryTime".into(), serde_json::json!(time_secs));
             m.insert("MinPostTime".into(), serde_json::json!(0));
+            m.insert("MaxPostTime".into(), serde_json::json!(0));
+            m.insert("Deleted".into(), serde_json::json!(e.delete_status != nzbg_core::models::DeleteStatus::None));
             m.insert("DupeKey".into(), serde_json::json!(""));
             m.insert("DupeScore".into(), serde_json::json!(0));
             m.insert("DupeMode".into(), serde_json::json!("SCORE"));
-            m.insert("ParStatus".into(), serde_json::json!(e.par_status as u32));
-            m.insert(
-                "UnpackStatus".into(),
-                serde_json::json!(e.unpack_status as u32),
-            );
-            m.insert("MoveStatus".into(), serde_json::json!(e.move_status as u32));
-            m.insert("ScriptStatus".into(), serde_json::json!(0));
-            m.insert(
-                "DeleteStatus".into(),
-                serde_json::json!(e.delete_status as u32),
-            );
-            m.insert("MarkStatus".into(), serde_json::json!(e.mark_status as u32));
-            m.insert("UrlStatus".into(), serde_json::json!(0));
-            m.insert("DupStatus".into(), serde_json::json!(0));
-            m.insert("ExParStatus".into(), serde_json::json!(0));
+            m.insert("ParStatus".into(), serde_json::json!(par_status_str));
+            m.insert("UnpackStatus".into(), serde_json::json!(unpack_status_str));
+            m.insert("MoveStatus".into(), serde_json::json!(move_status_str));
+            m.insert("ScriptStatus".into(), serde_json::json!("NONE"));
+            m.insert("DeleteStatus".into(), serde_json::json!(delete_status_str));
+            m.insert("MarkStatus".into(), serde_json::json!(mark_status_str));
+            m.insert("UrlStatus".into(), serde_json::json!("NONE"));
+            m.insert("DupStatus".into(), serde_json::json!("NONE"));
+            m.insert("ExParStatus".into(), serde_json::json!("NONE"));
             m.insert("ExtraParBlocks".into(), serde_json::json!(0));
             m.insert("Health".into(), serde_json::json!(e.health));
             m.insert("CriticalHealth".into(), serde_json::json!(0));
@@ -1023,6 +1027,7 @@ async fn rpc_history(
             m.insert("URL".into(), serde_json::json!(""));
             m.insert("DownloadedSizeMB".into(), serde_json::json!(file_size_mb));
             m.insert("DownloadedSizeLo".into(), serde_json::json!(file_size_lo));
+            m.insert("DownloadedSizeHi".into(), serde_json::json!(file_size_hi));
             m.insert("DownloadTimeSec".into(), serde_json::json!(0));
             m.insert("PostTotalTimeSec".into(), serde_json::json!(0));
             m.insert("ParTimeSec".into(), serde_json::json!(0));
@@ -1059,6 +1064,55 @@ fn format_history_status(e: &nzbg_queue::HistoryListEntry) -> String {
         return "FAILURE".to_string();
     }
     "SUCCESS".to_string()
+}
+
+fn format_par_status(s: nzbg_core::models::ParStatus) -> &'static str {
+    match s {
+        nzbg_core::models::ParStatus::None => "NONE",
+        nzbg_core::models::ParStatus::Failure => "FAILURE",
+        nzbg_core::models::ParStatus::Success => "SUCCESS",
+        nzbg_core::models::ParStatus::RepairPossible => "REPAIR_POSSIBLE",
+        nzbg_core::models::ParStatus::Manual => "MANUAL",
+    }
+}
+
+fn format_unpack_status(s: nzbg_core::models::UnpackStatus) -> &'static str {
+    match s {
+        nzbg_core::models::UnpackStatus::None => "NONE",
+        nzbg_core::models::UnpackStatus::Failure => "FAILURE",
+        nzbg_core::models::UnpackStatus::Success => "SUCCESS",
+        nzbg_core::models::UnpackStatus::Password => "PASSWORD",
+        nzbg_core::models::UnpackStatus::Space => "SPACE",
+    }
+}
+
+fn format_move_status(s: nzbg_core::models::MoveStatus) -> &'static str {
+    match s {
+        nzbg_core::models::MoveStatus::None => "NONE",
+        nzbg_core::models::MoveStatus::Failure => "FAILURE",
+        nzbg_core::models::MoveStatus::Success => "SUCCESS",
+    }
+}
+
+fn format_delete_status(s: nzbg_core::models::DeleteStatus) -> &'static str {
+    match s {
+        nzbg_core::models::DeleteStatus::None => "NONE",
+        nzbg_core::models::DeleteStatus::Manual => "MANUAL",
+        nzbg_core::models::DeleteStatus::Health => "HEALTH",
+        nzbg_core::models::DeleteStatus::Dupe => "DUPE",
+        nzbg_core::models::DeleteStatus::Bad => "BAD",
+        nzbg_core::models::DeleteStatus::Scan => "SCAN",
+        nzbg_core::models::DeleteStatus::Copy => "COPY",
+    }
+}
+
+fn format_mark_status(s: nzbg_core::models::MarkStatus) -> &'static str {
+    match s {
+        nzbg_core::models::MarkStatus::None => "NONE",
+        nzbg_core::models::MarkStatus::Good => "GOOD",
+        nzbg_core::models::MarkStatus::Bad => "BAD",
+        nzbg_core::models::MarkStatus::Success => "SUCCESS",
+    }
 }
 
 async fn rpc_testserver(params: &serde_json::Value) -> Result<serde_json::Value, JsonRpcError> {
