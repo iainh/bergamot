@@ -1889,3 +1889,91 @@ async fn rpc_pausedownload_resumedownload() {
     stub_task.abort();
     let _ = stub_task.await;
 }
+
+#[tokio::test]
+async fn rpc_rate_speed_limiting() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let stub_port = available_port();
+    let rpc_port = available_port();
+    let rpc_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), rpc_port);
+
+    init_logging();
+
+    let stub_task = start_stub(stub_port, fixtures_complete_path(), 2).await;
+    tokio::time::sleep(Duration::from_millis(20)).await;
+
+    let config = sample_config(temp.path(), rpc_port, &[(stub_port, 0)]);
+    create_dirs(&config).await;
+
+    let stats = nzbg_scheduler::StatsTracker::from_config(&config);
+    let shared_stats = Arc::new(nzbg_scheduler::SharedStatsTracker::new(stats));
+    let fetcher = build_server_pool(&config, &shared_stats);
+
+    let app_task = tokio::spawn(run_with_config_path(
+        config,
+        fetcher,
+        None,
+        None,
+        Some(shared_stats),
+    ));
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    let set_result = jsonrpc_call(
+        rpc_addr,
+        "nzbget:secret",
+        "rate",
+        serde_json::json!([100]),
+    )
+    .await;
+    assert!(set_result.as_bool().unwrap_or(false), "rate should succeed");
+
+    tokio::time::sleep(Duration::from_millis(1200)).await;
+
+    let status = jsonrpc_call(
+        rpc_addr,
+        "nzbget:secret",
+        "status",
+        serde_json::json!([]),
+    )
+    .await;
+    let limit = status
+        .get("DownloadLimit")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    assert_eq!(limit, 100 * 1024, "DownloadLimit should be 100 KB/s in bytes/s");
+
+    let nzb_id = append_nzb(rpc_addr, &sample_nzb_path()).await;
+    let completed = wait_for_completion(rpc_addr, nzb_id, 50).await;
+    assert!(completed, "download should complete with rate limit set");
+
+    let clear_result = jsonrpc_call(
+        rpc_addr,
+        "nzbget:secret",
+        "rate",
+        serde_json::json!([0]),
+    )
+    .await;
+    assert!(clear_result.as_bool().unwrap_or(false), "clearing rate should succeed");
+
+    tokio::time::sleep(Duration::from_millis(1200)).await;
+
+    let status_after = jsonrpc_call(
+        rpc_addr,
+        "nzbget:secret",
+        "status",
+        serde_json::json!([]),
+    )
+    .await;
+    let limit_after = status_after
+        .get("DownloadLimit")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(1);
+    assert_eq!(limit_after, 0, "DownloadLimit should be 0 after clearing");
+
+    shutdown_app(rpc_addr).await;
+    let _ = tokio::time::timeout(Duration::from_secs(5), app_task)
+        .await
+        .expect("app shutdown timeout");
+
+    let _ = tokio::time::timeout(Duration::from_secs(2), stub_task).await;
+}

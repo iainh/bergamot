@@ -16,7 +16,7 @@ Tracking file for end-to-end test coverage deficiencies to address before produc
 - [x] **`history` schema conformance** — Validate all fields required by Sonarr/Radarr after a completed download
 - [x] **`editqueue`** — Queue manipulation: pause/resume/delete/move/priority changes
 - [x] **`pausedownload`/`resumedownload`** — Downloads actually pause and resume
-- [ ] **`rate`** — Speed limiting takes effect during download
+- [x] **`rate`** — Speed limiting takes effect during download
 - [ ] **`config`/`saveconfig`** — Round-trip config read/write; Sonarr uses `config` to discover paths
 - [ ] **`servervolumes`** — Bytes-transferred accounting after download
 - [ ] **`postqueue`** — Post-processing queue visibility during/after download
