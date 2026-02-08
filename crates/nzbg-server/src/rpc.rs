@@ -46,7 +46,7 @@ pub async fn dispatch_rpc(
         "loadlog" => rpc_loadlog(params, state),
         "log" => rpc_loadlog(params, state),
         "servervolumes" => rpc_servervolumes(state),
-        "resetservervolume" => Ok(serde_json::json!(true)),
+        "resetservervolume" => rpc_resetservervolume(params, state),
         "config" | "loadconfig" => rpc_loadconfig(state),
         "saveconfig" => rpc_saveconfig(params, state),
         "configtemplates" => rpc_configtemplates(),
@@ -532,6 +532,21 @@ fn rpc_systemhealth(state: &AppState) -> Result<serde_json::Value, JsonRpcError>
         "Alerts": [],
         "Sections": [],
     }))
+}
+
+fn rpc_resetservervolume(
+    params: &serde_json::Value,
+    state: &AppState,
+) -> Result<serde_json::Value, JsonRpcError> {
+    let arr = params.as_array();
+    let server_id = arr
+        .and_then(|a| a.first())
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0) as u32;
+    if let Some(tracker) = state.stats_tracker() {
+        tracker.reset_volume(server_id);
+    }
+    Ok(serde_json::json!(true))
 }
 
 fn rpc_loadconfig(state: &AppState) -> Result<serde_json::Value, JsonRpcError> {
@@ -1047,6 +1062,7 @@ mod tests {
     use super::*;
     use base64::Engine;
     use nzbg_core::models::Priority;
+    use nzbg_nntp::StatsRecorder;
     use nzbg_queue::QueueCoordinator;
     use std::io::Write;
 
@@ -1539,6 +1555,35 @@ mod tests {
         assert_eq!(result["QueueAvailable"], true);
         assert_eq!(result["Healthy"], true);
         handle.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn dispatch_resetservervolume_returns_true() {
+        let state = AppState::default();
+        let result = dispatch_rpc("resetservervolume", &serde_json::json!([0]), &state)
+            .await
+            .expect("resetservervolume");
+        assert_eq!(result, serde_json::json!(true));
+    }
+
+    #[tokio::test]
+    async fn dispatch_resetservervolume_clears_tracker() {
+        let config_raw = nzbg_config::parse_config("Server1.Host=test\n").expect("parse");
+        let config = nzbg_config::Config::from_raw(config_raw);
+        let tracker = nzbg_scheduler::StatsTracker::from_config(&config);
+        let shared = std::sync::Arc::new(nzbg_scheduler::SharedStatsTracker::new(tracker));
+        shared.record_bytes(1, 1024);
+        let state = AppState::default().with_stats_tracker(shared.clone());
+
+        let result = dispatch_rpc("resetservervolume", &serde_json::json!([1]), &state)
+            .await
+            .expect("resetservervolume");
+        assert_eq!(result, serde_json::json!(true));
+
+        let volumes = shared.snapshot_volumes();
+        let vol = volumes.get(&1).expect("server 1");
+        assert_eq!(vol.bytes_today, 0);
+        assert!(vol.daily_history.is_empty());
     }
 
     #[tokio::test]
