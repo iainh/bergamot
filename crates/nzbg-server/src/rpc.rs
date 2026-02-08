@@ -66,7 +66,7 @@ pub async fn dispatch_rpc(
         "testserver" => rpc_testserver(params).await,
         "editserver" => rpc_editserver(params, state),
         "scheduleresume" => rpc_scheduleresume(params, state),
-        "reload" => Ok(serde_json::json!(true)),
+        "reload" => rpc_reload(state),
         "clearlog" => {
             if let Some(buffer) = state.log_buffer() {
                 buffer.clear();
@@ -532,6 +532,28 @@ fn rpc_systemhealth(state: &AppState) -> Result<serde_json::Value, JsonRpcError>
         "Alerts": [],
         "Sections": [],
     }))
+}
+
+fn rpc_reload(state: &AppState) -> Result<serde_json::Value, JsonRpcError> {
+    let config_arc = state
+        .config()
+        .ok_or_else(|| rpc_error("Config not available"))?;
+    let config_path = state
+        .config_path()
+        .ok_or_else(|| rpc_error("Config path not available"))?;
+
+    let content = std::fs::read_to_string(config_path)
+        .map_err(|e| rpc_error(format!("reading config: {e}")))?;
+    let raw = nzbg_config::parse_config(&content)
+        .map_err(|e| rpc_error(format!("parsing config: {e}")))?;
+    let new_config = nzbg_config::Config::from_raw(raw);
+
+    let mut config = config_arc
+        .write()
+        .map_err(|_| rpc_error("Config lock poisoned"))?;
+    *config = new_config;
+
+    Ok(serde_json::json!(true))
 }
 
 fn rpc_editserver(
@@ -1616,6 +1638,32 @@ mod tests {
         assert_eq!(result["QueueAvailable"], true);
         assert_eq!(result["Healthy"], true);
         handle.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn dispatch_reload_rereads_config_from_disk() {
+        let (state, tmp) = state_with_config();
+        let config_path = tmp.path().join("nzbg.conf");
+        std::fs::write(
+            &config_path,
+            "ControlPort=6789\nMainDir=/tmp/nzbg\nDownloadRate=999\n",
+        )
+        .expect("write");
+
+        let result = dispatch_rpc("reload", &serde_json::json!([]), &state)
+            .await
+            .expect("reload");
+        assert_eq!(result, serde_json::json!(true));
+
+        let config = state.config().unwrap().read().unwrap();
+        assert_eq!(config.download_rate, 999);
+    }
+
+    #[tokio::test]
+    async fn dispatch_reload_no_config_returns_error() {
+        let state = AppState::default();
+        let result = dispatch_rpc("reload", &serde_json::json!([]), &state).await;
+        assert!(result.is_err());
     }
 
     #[tokio::test]
