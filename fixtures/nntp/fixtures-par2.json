@@ -1,0 +1,16 @@
+{
+  "greeting": "200 nzbg test server ready",
+  "groups": {
+    "alt.test": {
+      "article_ids": [
+        "par2-data-1@test",
+        "par2-par2-1@test"
+      ],
+      "missing_articles": [],
+      "articles": {
+        "par2-data-1@test": "=ybegin line=128 size=8 name=payload.dat part=1\n=ypart begin=1 end=8\n~o}~nk~k\n=yend size=8 pcrc32=5fd6aa12",
+        "par2-par2-1@test": {"base64": "PXliZWdpbiBsaW5lPTEyOCBzaXplPTQwMCBuYW1lPXBheWxvYWQucGFyMiBwYXJ0PTEKPXlwYXJ0IGJlZ2luPTEgZW5kPTQwMAp6a3xcKnp1foYqKioqKioqKioqKioqKioqKioqKioqKsPDw8PDw8PDw8PDw8PDw8N6a3xKXFhaKneLk5gqKioqMioqKioqKiorKioq32pGwFIMxUYlh8P6YXbQTnprfFwqenV+rioqKioqKioqKioqKioqKioqKioqKioqw8PDw8PDw8PDw8PDw8PDw3prfEpcWFoqcJOWj26PnY3fakbAUgzFRiWHw/phdtBOGqNaPUkgL/Og+QOr/V+LYCcao1o9SSAv86D5A6v9X4tgJzIqKioqKioqmoujlpmLjliOi54qemt8XCp6dX6OKioqKioqKioqKioqKioqKioqKioqKirDw8PDw8PDw8PDw8PDw8PDemt8SlxYWipzcH1tKioqKt9qRsBSDMVGJYfD+mF20E4ao1o9SSAv86D5A6v9X4tgJzzUPUCJemt8XCp6dX52KioqKioqKioqKioqKioqKioqKioqKirDw8PDw8PDw8PDw8PDw8PDemt8SlxYWiptnI+LnpmcKpikjJFXno+dnioqKgo9eWVuZCBzaXplPTQwMCBwY3JjMzI9ZjBkZjU4ZTE="}
+      }
+    }
+  }
+}

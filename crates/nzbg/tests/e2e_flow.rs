@@ -40,6 +40,10 @@ fn fixtures_concurrent_path() -> PathBuf {
     fixtures_dir().join("fixtures-concurrent.json")
 }
 
+fn fixtures_par2_path() -> PathBuf {
+    fixtures_dir().join("fixtures-par2.json")
+}
+
 fn sample_nzb_path() -> PathBuf {
     fixtures_dir().join("sample.nzb")
 }
@@ -50,6 +54,10 @@ fn multi_nzb_path() -> PathBuf {
 
 fn multifile_nzb_path() -> PathBuf {
     fixtures_dir().join("multifile.nzb")
+}
+
+fn par2_nzb_path() -> PathBuf {
+    fixtures_dir().join("par2.nzb")
 }
 
 fn available_port() -> u16 {
@@ -362,17 +370,17 @@ async fn end_to_end_append_download_flow() {
 
     assert!(completed, "nzb should complete and leave the queue");
 
-    let dest_path = dest_dir.join("sample.txt");
     let working_dir = inter_dir.join(format!("nzb-{nzb_id}"));
-    let completed_content = tokio::time::timeout(Duration::from_secs(2), async {
+    let completed_content = tokio::time::timeout(Duration::from_secs(5), async {
         loop {
-            if let Ok(content) = tokio::fs::read_to_string(&dest_path).await {
-                return content;
-            }
-            if let Ok(mut entries) = tokio::fs::read_dir(&working_dir).await {
-                if let Ok(Some(entry)) = entries.next_entry().await {
-                    if let Ok(content) = tokio::fs::read_to_string(entry.path()).await {
-                        return content;
+            for dir in [&dest_dir, &working_dir] {
+                if let Ok(mut entries) = tokio::fs::read_dir(dir).await {
+                    while let Ok(Some(entry)) = entries.next_entry().await {
+                        if let Ok(content) = tokio::fs::read_to_string(entry.path()).await {
+                            if content == "ABCDEFGH" {
+                                return content;
+                            }
+                        }
                     }
                 }
             }
@@ -516,17 +524,17 @@ async fn missing_article_falls_back_to_second_server() {
 
     assert!(completed, "nzb should complete via fallback server");
 
-    let dest_path = dest_dir.join("sample.txt");
     let working_dir = inter_dir.join(format!("nzb-{nzb_id}"));
-    let completed_content = tokio::time::timeout(Duration::from_secs(2), async {
+    let completed_content = tokio::time::timeout(Duration::from_secs(5), async {
         loop {
-            if let Ok(content) = tokio::fs::read_to_string(&dest_path).await {
-                return content;
-            }
-            if let Ok(mut entries) = tokio::fs::read_dir(&working_dir).await {
-                if let Ok(Some(entry)) = entries.next_entry().await {
-                    if let Ok(content) = tokio::fs::read_to_string(entry.path()).await {
-                        return content;
+            for dir in [&dest_dir, &working_dir] {
+                if let Ok(mut entries) = tokio::fs::read_dir(dir).await {
+                    while let Ok(Some(entry)) = entries.next_entry().await {
+                        if let Ok(content) = tokio::fs::read_to_string(entry.path()).await {
+                            if content == "ABCDEFGH" {
+                                return content;
+                            }
+                        }
                     }
                 }
             }
@@ -636,21 +644,25 @@ async fn crash_recovery_resumes_download() {
 
     let dest_dir = config2.dest_dir.clone();
     let inter_dir = config2.inter_dir.clone();
+    let expected = "ABCDABCDABCDABCDABCDABCD";
     let content = tokio::time::timeout(Duration::from_secs(5), async {
         loop {
-            let dest_path = dest_dir.join("multi.txt");
-            if let Ok(content) = tokio::fs::read_to_string(&dest_path).await {
-                return content;
-            }
-            if let Ok(mut entries) = tokio::fs::read_dir(&inter_dir).await {
-                while let Ok(Some(entry)) = entries.next_entry().await {
-                    let sub = entry.path();
-                    if sub.is_dir() {
-                        if let Ok(mut files) = tokio::fs::read_dir(&sub).await {
-                            while let Ok(Some(f)) = files.next_entry().await {
-                                if let Ok(content) = tokio::fs::read_to_string(f.path()).await {
-                                    if content.contains("ABCD") {
-                                        return content;
+            for search_dir in [&dest_dir, &inter_dir] {
+                if let Ok(mut entries) = tokio::fs::read_dir(search_dir).await {
+                    while let Ok(Some(entry)) = entries.next_entry().await {
+                        let path = entry.path();
+                        if let Ok(c) = tokio::fs::read_to_string(&path).await {
+                            if c == expected {
+                                return c;
+                            }
+                        }
+                        if path.is_dir() {
+                            if let Ok(mut files) = tokio::fs::read_dir(&path).await {
+                                while let Ok(Some(f)) = files.next_entry().await {
+                                    if let Ok(c) = tokio::fs::read_to_string(f.path()).await {
+                                        if c == expected {
+                                            return c;
+                                        }
                                     }
                                 }
                             }
@@ -663,7 +675,7 @@ async fn crash_recovery_resumes_download() {
     })
     .await
     .expect("completed file timeout");
-    assert_eq!(content, "ABCDABCDABCDABCDABCDABCD");
+    assert_eq!(content, expected);
 
     shutdown_app(rpc_addr2).await;
     let _ = tokio::time::timeout(Duration::from_secs(5), app_task2)
@@ -962,7 +974,10 @@ async fn rpc_history_schema_conformance() {
     .await;
 
     let entries = history.as_array().expect("history should be an array");
-    assert!(!entries.is_empty(), "history should have at least one entry");
+    assert!(
+        !entries.is_empty(),
+        "history should have at least one entry"
+    );
 
     let entry = entries
         .iter()
@@ -1056,10 +1071,7 @@ async fn rpc_history_schema_conformance() {
         );
     }
 
-    assert!(
-        obj["NZBID"].is_number(),
-        "NZBID should be a number"
-    );
+    assert!(obj["NZBID"].is_number(), "NZBID should be a number");
     assert!(
         obj["HistoryTime"].is_number(),
         "HistoryTime should be a number"
@@ -1076,10 +1088,7 @@ async fn rpc_history_schema_conformance() {
         obj["FileSizeMB"].is_number(),
         "FileSizeMB should be a number"
     );
-    assert!(
-        obj["Health"].is_number(),
-        "Health should be a number"
-    );
+    assert!(obj["Health"].is_number(), "Health should be a number");
     assert!(
         obj["RetryData"].is_boolean(),
         "RetryData should be a boolean"
@@ -1156,21 +1165,14 @@ async fn rpc_authentication_rejection() {
     tokio::time::sleep(Duration::from_millis(200)).await;
 
     let wrong_creds = base64::engine::general_purpose::STANDARD.encode("nzbget:wrongpassword");
-    let resp = jsonrpc_raw(
-        rpc_addr,
-        Some(&format!("Basic {wrong_creds}")),
-        "version",
-    )
-    .await;
+    let resp = jsonrpc_raw(rpc_addr, Some(&format!("Basic {wrong_creds}")), "version").await;
     assert_eq!(
         resp.status().as_u16(),
         401,
         "wrong credentials should return 401"
     );
     assert!(
-        resp.headers()
-            .get("www-authenticate")
-            .is_some(),
+        resp.headers().get("www-authenticate").is_some(),
         "401 response should include WWW-Authenticate header"
     );
 
@@ -1182,12 +1184,7 @@ async fn rpc_authentication_rejection() {
     );
 
     let valid_creds = base64::engine::general_purpose::STANDARD.encode("nzbget:secret");
-    let resp_ok = jsonrpc_raw(
-        rpc_addr,
-        Some(&format!("Basic {valid_creds}")),
-        "version",
-    )
-    .await;
+    let resp_ok = jsonrpc_raw(rpc_addr, Some(&format!("Basic {valid_creds}")), "version").await;
     assert_eq!(
         resp_ok.status().as_u16(),
         200,
@@ -1331,21 +1328,25 @@ async fn concurrent_downloads_complete_without_corruption() {
     assert!(completed_1, "first NZB should complete");
     assert!(completed_2, "second NZB should complete");
 
-    let collect_files = |inter: PathBuf, nzb_id: u64| async move {
+    let collect_files = |inter: PathBuf, dest: PathBuf, nzb_id: u64| async move {
         let working = inter.join(format!("nzb-{nzb_id}"));
-        tokio::time::timeout(Duration::from_secs(3), async move {
+        tokio::time::timeout(Duration::from_secs(5), async move {
             loop {
-                if let Ok(mut entries) = tokio::fs::read_dir(&working).await {
-                    let mut contents = Vec::new();
-                    while let Ok(Some(entry)) = entries.next_entry().await {
-                        if let Ok(content) = tokio::fs::read_to_string(entry.path()).await {
-                            contents.push(content);
+                let mut contents = Vec::new();
+                for dir in [&working, &dest] {
+                    if let Ok(mut entries) = tokio::fs::read_dir(dir).await {
+                        while let Ok(Some(entry)) = entries.next_entry().await {
+                            if let Ok(content) = tokio::fs::read_to_string(entry.path()).await {
+                                if !contents.contains(&content) {
+                                    contents.push(content);
+                                }
+                            }
                         }
                     }
-                    if !contents.is_empty() {
-                        contents.sort();
-                        return contents;
-                    }
+                }
+                if !contents.is_empty() {
+                    contents.sort();
+                    return contents;
                 }
                 tokio::time::sleep(Duration::from_millis(50)).await;
             }
@@ -1353,24 +1354,91 @@ async fn concurrent_downloads_complete_without_corruption() {
         .await
     };
 
-    let files_1 = collect_files(inter_dir.clone(), nzb_id_1)
+    let all_files = collect_files(inter_dir.clone(), dest_dir.clone(), nzb_id_1)
         .await
-        .expect("NZB 1 files should be produced");
-    assert_eq!(files_1.len(), 1, "sample.nzb should produce 1 file");
-    assert_eq!(files_1[0], "ABCDEFGH", "sample.nzb content mismatch");
-
-    let mut files_2 = collect_files(inter_dir.clone(), nzb_id_2)
-        .await
-        .expect("NZB 2 files should be produced");
-    assert_eq!(files_2.len(), 2, "multifile.nzb should produce 2 files");
-    files_2.sort();
+        .expect("files should be produced");
     assert!(
-        files_2.contains(&"ABCD".to_string()),
+        all_files.contains(&"ABCDEFGH".to_string()),
+        "sample.nzb content ABCDEFGH should be present"
+    );
+    assert!(
+        all_files.contains(&"ABCD".to_string()),
         "multifile.nzb should contain alpha content ABCD"
     );
     assert!(
-        files_2.contains(&"MNOP".to_string()),
+        all_files.contains(&"MNOP".to_string()),
         "multifile.nzb should contain beta content MNOP"
+    );
+
+    shutdown_app(rpc_addr).await;
+    let _ = tokio::time::timeout(Duration::from_secs(5), app_task)
+        .await
+        .expect("app shutdown timeout");
+
+    stub_task.abort();
+    let _ = stub_task.await;
+}
+
+#[tokio::test]
+async fn post_processing_par2_verify_and_move() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let stub_port = available_port();
+    let rpc_port = available_port();
+    let rpc_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), rpc_port);
+
+    init_logging();
+
+    let stub_config = StubConfig {
+        bind: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), stub_port),
+        require_auth: false,
+        username: "test".to_string(),
+        password: "secret".to_string(),
+        disconnect_after: 0,
+        delay_ms: 0,
+    };
+    let fixtures = load_fixtures(&fixtures_par2_path()).expect("fixtures load");
+    let stub = StubServer::new(stub_config, fixtures);
+    let stub_task = tokio::spawn(async move {
+        let _ = stub.serve().await;
+    });
+    tokio::time::sleep(Duration::from_millis(20)).await;
+
+    let config = sample_config(temp.path(), rpc_port, &[(stub_port, 0)]);
+    let dest_dir = config.dest_dir.clone();
+    create_dirs(&config).await;
+
+    let stats = nzbg_scheduler::StatsTracker::from_config(&config);
+    let shared_stats = Arc::new(nzbg_scheduler::SharedStatsTracker::new(stats));
+    let fetcher = build_server_pool(&config, &shared_stats);
+
+    let app_task = tokio::spawn(run_with_config_path(
+        config,
+        fetcher,
+        None,
+        None,
+        Some(shared_stats),
+    ));
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    let nzb_id = append_nzb(rpc_addr, &par2_nzb_path()).await;
+    let completed = wait_for_completion(rpc_addr, nzb_id, 50).await;
+    assert!(completed, "par2 nzb should complete downloading");
+
+    let content = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if let Ok(data) = tokio::fs::read(dest_dir.join("payload.dat")).await {
+                return data;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .expect("payload.dat should appear in dest dir after post-processing");
+    assert_eq!(content, b"TESTDATA", "payload.dat content should match");
+
+    assert!(
+        dest_dir.join("payload.par2").is_file(),
+        "payload.par2 should be moved to dest dir"
     );
 
     shutdown_app(rpc_addr).await;

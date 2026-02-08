@@ -998,7 +998,10 @@ async fn rpc_history(
             m.insert("HistoryTime".into(), serde_json::json!(time_secs));
             m.insert("MinPostTime".into(), serde_json::json!(0));
             m.insert("MaxPostTime".into(), serde_json::json!(0));
-            m.insert("Deleted".into(), serde_json::json!(e.delete_status != nzbg_core::models::DeleteStatus::None));
+            m.insert(
+                "Deleted".into(),
+                serde_json::json!(e.delete_status != nzbg_core::models::DeleteStatus::None),
+            );
             m.insert("DupeKey".into(), serde_json::json!(""));
             m.insert("DupeScore".into(), serde_json::json!(0));
             m.insert("DupeMode".into(), serde_json::json!("SCORE"));

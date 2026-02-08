@@ -764,11 +764,7 @@ impl QueueCoordinator {
                 let notice = NzbCompletionNotice {
                     nzb_id: nzb.id,
                     nzb_name: nzb.name.clone(),
-                    working_dir: if !nzb.dest_dir.as_os_str().is_empty() {
-                        nzb.dest_dir.clone()
-                    } else {
-                        nzb.temp_dir.clone()
-                    },
+                    working_dir: nzb.temp_dir.clone(),
                     category: if nzb.category.is_empty() {
                         None
                     } else {
@@ -2960,6 +2956,7 @@ mod tests {
 
         let mut nzb = sample_nzb(1, "test-nzb");
         nzb.dest_dir = std::path::PathBuf::from("/downloads/test");
+        nzb.temp_dir = std::path::PathBuf::from("/tmp/inter/nzb-1");
         nzb.category = "movies".to_string();
         nzb.total_article_count = 1;
         nzb.file_count = 1;
@@ -3001,7 +2998,7 @@ mod tests {
         assert_eq!(notice.nzb_name, "test-nzb");
         assert_eq!(
             notice.working_dir,
-            std::path::PathBuf::from("/downloads/test")
+            std::path::PathBuf::from("/tmp/inter/nzb-1")
         );
         assert_eq!(notice.category, Some("movies".to_string()));
     }

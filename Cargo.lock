@@ -1398,6 +1398,7 @@ dependencies = [
 name = "nzbg-nntp-stub"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "clap",
  "nzbg-nntp",
  "serde",

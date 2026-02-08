@@ -17,9 +17,33 @@ pub struct FixtureConfig {
 }
 
 #[derive(Debug, Deserialize, Clone)]
+#[serde(untagged)]
+pub enum ArticleBody {
+    Plain(String),
+    Base64 {
+        #[serde(rename = "base64")]
+        data: String,
+    },
+}
+
+impl ArticleBody {
+    pub fn to_bytes(&self) -> Vec<u8> {
+        match self {
+            ArticleBody::Plain(s) => s.as_bytes().to_vec(),
+            ArticleBody::Base64 { data } => {
+                use base64::Engine;
+                base64::engine::general_purpose::STANDARD
+                    .decode(data)
+                    .expect("invalid base64 in fixture")
+            }
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Clone)]
 pub struct GroupConfig {
     pub article_ids: Vec<String>,
-    pub articles: HashMap<String, String>,
+    pub articles: HashMap<String, ArticleBody>,
     pub missing_articles: Option<Vec<String>>,
 }
 
@@ -353,15 +377,16 @@ async fn handle_body(
 }
 
 async fn send_body(
-    body: &str,
+    body: &ArticleBody,
     writer: &mut tokio::net::tcp::OwnedWriteHalf,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    for line in body.split('\n') {
-        let mut line = line.replace('\r', "");
-        if line.starts_with('.') {
-            line.insert(0, '.');
+    let raw = body.to_bytes();
+    for line in raw.split(|&b| b == b'\n') {
+        let line: Vec<u8> = line.iter().copied().filter(|&b| b != b'\r').collect();
+        if line.starts_with(b".") {
+            writer.write_all(b".").await?;
         }
-        writer.write_all(line.as_bytes()).await?;
+        writer.write_all(&line).await?;
         writer.write_all(b"\r\n").await?;
     }
     writer.write_all(b".\r\n").await?;

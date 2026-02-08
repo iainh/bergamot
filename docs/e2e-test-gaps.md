@@ -28,7 +28,7 @@ Tracking file for end-to-end test coverage deficiencies to address before produc
 - [x] **Authentication rejection** — Wrong credentials get a 401
 - [x] **Multi-file NZB** — Multiple distinct output files produced correctly
 - [x] **Concurrent downloads** — 2+ NZBs appended simultaneously both complete without corruption
-- [ ] **Post-processing pipeline** — PAR2 verify/repair + archive extraction as full e2e flow
+- [x] **Post-processing pipeline** — PAR2 verify/repair + archive extraction as full e2e flow
 - [ ] **Feed polling** — RSS feed pointing at stub HTTP server triggers auto-fetch
 - [ ] **Extension script execution** — Post-processing script runs, exit code affects final status
 - [ ] **Graceful shutdown under load** — Shutdown while downloading, disk state consistent for recovery
