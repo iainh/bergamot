@@ -1,0 +1,16 @@
+{
+  "greeting": "200 nzbg test server ready",
+  "groups": {
+    "alt.test": {
+      "article_ids": [
+        "mf-alpha-1@test",
+        "mf-beta-1@test"
+      ],
+      "missing_articles": [],
+      "articles": {
+        "mf-alpha-1@test": "=ybegin line=128 size=4 name=alpha.txt part=1\n=ypart begin=1 end=4\nklmn\n=yend size=4 pcrc32=db1720a5",
+        "mf-beta-1@test": "=ybegin line=128 size=4 name=beta.txt part=1\n=ypart begin=1 end=4\nwxyz\n=yend size=4 pcrc32=2eb4fd08"
+      }
+    }
+  }
+}

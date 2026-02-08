@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE nzb PUBLIC "-//newzBin//DTD NZB 1.1//EN" "http://www.newzbin.com/DTD/2003/nzb.dtd">
+<nzb xmlns="http://www.newzbin.com/DTD/2003/nzb">
+  <file poster="tester" date="1700000000" subject="test &quot;alpha.txt&quot;">
+    <groups>
+      <group>alt.test</group>
+    </groups>
+    <segments>
+      <segment bytes="4" number="1">mf-alpha-1@test</segment>
+    </segments>
+  </file>
+  <file poster="tester" date="1700000000" subject="test &quot;beta.txt&quot;">
+    <groups>
+      <group>alt.test</group>
+    </groups>
+    <segments>
+      <segment bytes="4" number="1">mf-beta-1@test</segment>
+    </segments>
+  </file>
+</nzb>

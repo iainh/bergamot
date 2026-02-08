@@ -32,12 +32,20 @@ fn fixtures_multiseg_path() -> PathBuf {
     fixtures_dir().join("fixtures-multiseg.json")
 }
 
+fn fixtures_multifile_path() -> PathBuf {
+    fixtures_dir().join("fixtures-multifile.json")
+}
+
 fn sample_nzb_path() -> PathBuf {
     fixtures_dir().join("sample.nzb")
 }
 
 fn multi_nzb_path() -> PathBuf {
     fixtures_dir().join("multi.nzb")
+}
+
+fn multifile_nzb_path() -> PathBuf {
+    fixtures_dir().join("multifile.nzb")
 }
 
 fn available_port() -> u16 {
@@ -1181,6 +1189,85 @@ async fn rpc_authentication_rejection() {
         200,
         "correct credentials should return 200"
     );
+
+    shutdown_app(rpc_addr).await;
+    let _ = tokio::time::timeout(Duration::from_secs(5), app_task)
+        .await
+        .expect("app shutdown timeout");
+    let _ = tokio::time::timeout(Duration::from_secs(2), stub_task).await;
+}
+
+#[tokio::test]
+async fn multifile_nzb_produces_all_output_files() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let stub_port = available_port();
+    let rpc_port = available_port();
+    let rpc_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), rpc_port);
+
+    init_logging();
+
+    let stub_task = start_stub(stub_port, fixtures_multifile_path(), 2).await;
+    tokio::time::sleep(Duration::from_millis(20)).await;
+
+    let config = sample_config(temp.path(), rpc_port, &[(stub_port, 0)]);
+    let dest_dir = config.dest_dir.clone();
+    let inter_dir = config.inter_dir.clone();
+    create_dirs(&config).await;
+
+    let stats = nzbg_scheduler::StatsTracker::from_config(&config);
+    let shared_stats = Arc::new(nzbg_scheduler::SharedStatsTracker::new(stats));
+    let fetcher = build_server_pool(&config, &shared_stats);
+
+    let app_task = tokio::spawn(run_with_config_path(
+        config,
+        fetcher,
+        None,
+        None,
+        Some(shared_stats),
+    ));
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    let nzb_id = append_nzb(rpc_addr, &multifile_nzb_path()).await;
+    let completed = wait_for_completion(rpc_addr, nzb_id, 50).await;
+    assert!(completed, "multifile nzb should complete");
+
+    let find_file = |name: &str| {
+        let dest = dest_dir.clone();
+        let inter = inter_dir.clone();
+        let name = name.to_string();
+        async move {
+            tokio::time::timeout(Duration::from_secs(3), async {
+                loop {
+                    if let Ok(content) = tokio::fs::read_to_string(dest.join(&name)).await {
+                        return content;
+                    }
+                    if let Ok(mut entries) = tokio::fs::read_dir(&inter).await {
+                        while let Ok(Some(entry)) = entries.next_entry().await {
+                            let sub = entry.path();
+                            if sub.is_dir() {
+                                let candidate = sub.join(&name);
+                                if let Ok(content) = tokio::fs::read_to_string(&candidate).await {
+                                    return content;
+                                }
+                            }
+                        }
+                    }
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                }
+            })
+            .await
+        }
+    };
+
+    let alpha = find_file("alpha.txt")
+        .await
+        .expect("alpha.txt should be produced");
+    assert_eq!(alpha, "ABCD", "alpha.txt content mismatch");
+
+    let beta = find_file("beta.txt")
+        .await
+        .expect("beta.txt should be produced");
+    assert_eq!(beta, "MNOP", "beta.txt content mismatch");
 
     shutdown_app(rpc_addr).await;
     let _ = tokio::time::timeout(Duration::from_secs(5), app_task)
