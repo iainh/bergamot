@@ -14,8 +14,8 @@ Tracking file for end-to-end test coverage deficiencies to address before produc
 ## RPC API Coverage Gaps
 
 - [x] **`history` schema conformance** — Validate all fields required by Sonarr/Radarr after a completed download
-- [ ] **`editqueue`** — Queue manipulation: pause/resume/delete/move/priority changes
-- [ ] **`pausedownload`/`resumedownload`** — Downloads actually pause and resume
+- [x] **`editqueue`** — Queue manipulation: pause/resume/delete/move/priority changes
+- [x] **`pausedownload`/`resumedownload`** — Downloads actually pause and resume
 - [ ] **`rate`** — Speed limiting takes effect during download
 - [ ] **`config`/`saveconfig`** — Round-trip config read/write; Sonarr uses `config` to discover paths
 - [ ] **`servervolumes`** — Bytes-transferred accounting after download

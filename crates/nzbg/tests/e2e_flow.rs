@@ -1603,3 +1603,289 @@ async fn post_processing_par2_verify_and_move() {
     stub_task.abort();
     let _ = stub_task.await;
 }
+
+#[tokio::test]
+async fn rpc_editqueue_pause_resume_delete_move() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let stub_port = available_port();
+    let rpc_port = available_port();
+    let rpc_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), rpc_port);
+
+    init_logging();
+
+    let stub_config = StubConfig {
+        bind: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), stub_port),
+        require_auth: false,
+        username: "test".to_string(),
+        password: "secret".to_string(),
+        disconnect_after: 0,
+        delay_ms: 500,
+    };
+    let fixtures = load_fixtures(&fixtures_multiseg_path()).expect("fixtures load");
+    let stub = StubServer::new(stub_config, fixtures);
+    let stub_task = tokio::spawn(async move {
+        let _ = stub.serve().await;
+    });
+    tokio::time::sleep(Duration::from_millis(20)).await;
+
+    let config = sample_config(temp.path(), rpc_port, &[(stub_port, 0)]);
+    create_dirs(&config).await;
+
+    let stats = nzbg_scheduler::StatsTracker::from_config(&config);
+    let shared_stats = Arc::new(nzbg_scheduler::SharedStatsTracker::new(stats));
+    let fetcher = build_server_pool(&config, &shared_stats);
+
+    let app_task = tokio::spawn(run_with_config_path(
+        config,
+        fetcher,
+        None,
+        None,
+        Some(shared_stats),
+    ));
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    let nzb_id_1 = append_nzb(rpc_addr, &multi_nzb_path()).await;
+    let nzb_id_2 = append_nzb(rpc_addr, &sample_nzb_path()).await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    let pause_result = jsonrpc_call(
+        rpc_addr,
+        "nzbget:secret",
+        "editqueue",
+        serde_json::json!(["GroupPause", "", [nzb_id_1]]),
+    )
+    .await;
+    assert!(pause_result.as_bool().unwrap_or(false), "GroupPause should succeed");
+
+    let groups = jsonrpc_call(
+        rpc_addr,
+        "nzbget:secret",
+        "listgroups",
+        serde_json::json!([]),
+    )
+    .await;
+    let entries = groups.as_array().expect("listgroups array");
+    let paused_entry = entries
+        .iter()
+        .find(|e| e.get("NZBID").and_then(|v| v.as_u64()) == Some(nzb_id_1))
+        .expect("should find nzb_id_1");
+    let paused_size = paused_entry
+        .get("PausedSizeLo")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    let status = paused_entry
+        .get("Status")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    assert!(
+        status == "PAUSED" || paused_size > 0,
+        "entry should be paused after GroupPause, status={status} paused_size={paused_size}"
+    );
+
+    let resume_result = jsonrpc_call(
+        rpc_addr,
+        "nzbget:secret",
+        "editqueue",
+        serde_json::json!(["GroupResume", "", [nzb_id_1]]),
+    )
+    .await;
+    assert!(resume_result.as_bool().unwrap_or(false), "GroupResume should succeed");
+
+    let groups_after = jsonrpc_call(
+        rpc_addr,
+        "nzbget:secret",
+        "listgroups",
+        serde_json::json!([]),
+    )
+    .await;
+    let entries_after = groups_after.as_array().expect("listgroups array");
+    if let Some(resumed_entry) = entries_after
+        .iter()
+        .find(|e| e.get("NZBID").and_then(|v| v.as_u64()) == Some(nzb_id_1))
+    {
+        let paused_size_after = resumed_entry
+            .get("PausedSizeLo")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(1);
+        assert_eq!(paused_size_after, 0, "paused size should be 0 after resume");
+    }
+
+    let move_result = jsonrpc_call(
+        rpc_addr,
+        "nzbget:secret",
+        "editqueue",
+        serde_json::json!(["GroupMoveTop", "", [nzb_id_2]]),
+    )
+    .await;
+    assert!(move_result.as_bool().unwrap_or(false), "GroupMoveTop should succeed");
+
+    let groups_moved = jsonrpc_call(
+        rpc_addr,
+        "nzbget:secret",
+        "listgroups",
+        serde_json::json!([]),
+    )
+    .await;
+    let moved_entries = groups_moved.as_array().expect("listgroups array");
+    if moved_entries.len() >= 2 {
+        let first_id = moved_entries[0]
+            .get("NZBID")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        assert_eq!(first_id, nzb_id_2, "nzb_id_2 should be first after GroupMoveTop");
+    }
+
+    let delete_result = jsonrpc_call(
+        rpc_addr,
+        "nzbget:secret",
+        "editqueue",
+        serde_json::json!(["GroupDelete", "", [nzb_id_1, nzb_id_2]]),
+    )
+    .await;
+    assert!(delete_result.as_bool().unwrap_or(false), "GroupDelete should succeed");
+
+    let groups_deleted = jsonrpc_call(
+        rpc_addr,
+        "nzbget:secret",
+        "listgroups",
+        serde_json::json!([]),
+    )
+    .await;
+    let remaining = groups_deleted.as_array().expect("listgroups array");
+    let still_present = remaining.iter().any(|e| {
+        let id = e.get("NZBID").and_then(|v| v.as_u64()).unwrap_or(0);
+        id == nzb_id_1 || id == nzb_id_2
+    });
+    assert!(!still_present, "deleted NZBs should no longer appear in listgroups");
+
+    shutdown_app(rpc_addr).await;
+    let _ = tokio::time::timeout(Duration::from_secs(5), app_task)
+        .await
+        .expect("app shutdown timeout");
+
+    stub_task.abort();
+    let _ = stub_task.await;
+}
+
+#[tokio::test]
+async fn rpc_pausedownload_resumedownload() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let stub_port = available_port();
+    let rpc_port = available_port();
+    let rpc_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), rpc_port);
+
+    init_logging();
+
+    let stub_config = StubConfig {
+        bind: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), stub_port),
+        require_auth: false,
+        username: "test".to_string(),
+        password: "secret".to_string(),
+        disconnect_after: 0,
+        delay_ms: 300,
+    };
+    let fixtures = load_fixtures(&fixtures_multiseg_path()).expect("fixtures load");
+    let stub = StubServer::new(stub_config, fixtures);
+    let stub_task = tokio::spawn(async move {
+        let _ = stub.serve().await;
+    });
+    tokio::time::sleep(Duration::from_millis(20)).await;
+
+    let config = sample_config(temp.path(), rpc_port, &[(stub_port, 0)]);
+    create_dirs(&config).await;
+
+    let stats = nzbg_scheduler::StatsTracker::from_config(&config);
+    let shared_stats = Arc::new(nzbg_scheduler::SharedStatsTracker::new(stats));
+    let fetcher = build_server_pool(&config, &shared_stats);
+
+    let app_task = tokio::spawn(run_with_config_path(
+        config,
+        fetcher,
+        None,
+        None,
+        Some(shared_stats),
+    ));
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    let pause_result = jsonrpc_call(
+        rpc_addr,
+        "nzbget:secret",
+        "pausedownload",
+        serde_json::json!([]),
+    )
+    .await;
+    assert!(pause_result.as_bool().unwrap_or(false), "pausedownload should succeed");
+
+    let status_paused = jsonrpc_call(
+        rpc_addr,
+        "nzbget:secret",
+        "status",
+        serde_json::json!([]),
+    )
+    .await;
+    let download_paused = status_paused
+        .get("DownloadPaused")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    assert!(download_paused, "DownloadPaused should be true after pausedownload");
+
+    let nzb_id = append_nzb(rpc_addr, &multi_nzb_path()).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let groups_while_paused = jsonrpc_call(
+        rpc_addr,
+        "nzbget:secret",
+        "listgroups",
+        serde_json::json!([]),
+    )
+    .await;
+    let entries = groups_while_paused.as_array().expect("listgroups array");
+    let nzb_entry = entries
+        .iter()
+        .find(|e| e.get("NZBID").and_then(|v| v.as_u64()) == Some(nzb_id));
+    assert!(nzb_entry.is_some(), "NZB should still be in queue while paused");
+
+    let remaining_before = nzb_entry
+        .unwrap()
+        .get("RemainingSizeLo")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+
+    let resume_result = jsonrpc_call(
+        rpc_addr,
+        "nzbget:secret",
+        "resumedownload",
+        serde_json::json!([]),
+    )
+    .await;
+    assert!(resume_result.as_bool().unwrap_or(false), "resumedownload should succeed");
+
+    let status_resumed = jsonrpc_call(
+        rpc_addr,
+        "nzbget:secret",
+        "status",
+        serde_json::json!([]),
+    )
+    .await;
+    let download_paused_after = status_resumed
+        .get("DownloadPaused")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
+    assert!(!download_paused_after, "DownloadPaused should be false after resumedownload");
+
+    let completed = wait_for_completion(rpc_addr, nzb_id, 80).await;
+    assert!(completed, "NZB should complete after resumedownload");
+
+    assert!(
+        remaining_before > 0,
+        "remaining size should have been > 0 while paused"
+    );
+
+    shutdown_app(rpc_addr).await;
+    let _ = tokio::time::timeout(Duration::from_secs(5), app_task)
+        .await
+        .expect("app shutdown timeout");
+
+    stub_task.abort();
+    let _ = stub_task.await;
+}
