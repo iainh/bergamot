@@ -1,0 +1,24 @@
+{
+  "greeting": "200 nzbg test server ready",
+  "groups": {
+    "alt.test": {
+      "article_ids": [
+        "mseg-1@test",
+        "mseg-2@test",
+        "mseg-3@test",
+        "mseg-4@test",
+        "mseg-5@test",
+        "mseg-6@test"
+      ],
+      "missing_articles": [],
+      "articles": {
+        "mseg-1@test": "=ybegin line=128 size=4 name=multi.txt part=1\n=ypart begin=1 end=4\nklmn\n=yend size=4 pcrc32=db1720a5",
+        "mseg-2@test": "=ybegin line=128 size=4 name=multi.txt part=2\n=ypart begin=5 end=8\nklmn\n=yend size=4 pcrc32=db1720a5",
+        "mseg-3@test": "=ybegin line=128 size=4 name=multi.txt part=3\n=ypart begin=9 end=12\nklmn\n=yend size=4 pcrc32=db1720a5",
+        "mseg-4@test": "=ybegin line=128 size=4 name=multi.txt part=4\n=ypart begin=13 end=16\nklmn\n=yend size=4 pcrc32=db1720a5",
+        "mseg-5@test": "=ybegin line=128 size=4 name=multi.txt part=5\n=ypart begin=17 end=20\nklmn\n=yend size=4 pcrc32=db1720a5",
+        "mseg-6@test": "=ybegin line=128 size=4 name=multi.txt part=6\n=ypart begin=21 end=24\nklmn\n=yend size=4 pcrc32=db1720a5"
+      }
+    }
+  }
+}

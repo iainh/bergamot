@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE nzb PUBLIC "-//newzBin//DTD NZB 1.1//EN" "http://www.newzbin.com/DTD/2003/nzb.dtd">
+<nzb xmlns="http://www.newzbin.com/DTD/2003/nzb">
+  <file poster="tester" date="1700000000" subject="multi.txt">
+    <groups>
+      <group>alt.test</group>
+    </groups>
+    <segments>
+      <segment bytes="4" number="1">mseg-1@test</segment>
+      <segment bytes="4" number="2">mseg-2@test</segment>
+      <segment bytes="4" number="3">mseg-3@test</segment>
+      <segment bytes="4" number="4">mseg-4@test</segment>
+      <segment bytes="4" number="5">mseg-5@test</segment>
+      <segment bytes="4" number="6">mseg-6@test</segment>
+    </segments>
+  </file>
+</nzb>

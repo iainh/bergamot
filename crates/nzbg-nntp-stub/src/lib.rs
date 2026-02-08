@@ -8,6 +8,7 @@ use serde::Deserialize;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex;
+use tokio::task::JoinSet;
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct FixtureConfig {
@@ -65,9 +66,25 @@ impl StubServer {
     }
 
     pub async fn serve_once(self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        self.serve_for(1).await
+    }
+
+    pub async fn serve_for(
+        self,
+        max_connections: usize,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let listener = TcpListener::bind(self.state.config.bind).await?;
-        let (stream, _) = listener.accept().await?;
-        handle_client(stream, Arc::clone(&self.state)).await?;
+        let mut tasks = JoinSet::new();
+        for _ in 0..max_connections {
+            let (stream, _) = listener.accept().await?;
+            let state = Arc::clone(&self.state);
+            tasks.spawn(async move {
+                if let Err(err) = handle_client(stream, state).await {
+                    eprintln!("client error: {err}");
+                }
+            });
+        }
+        while tasks.join_next().await.is_some() {}
         Ok(())
     }
 }
