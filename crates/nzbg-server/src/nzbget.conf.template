@@ -77,13 +77,76 @@ CertCheck=no
 
 ### NEWS-SERVERS ###
 
-# This section defines news servers.
-# For each news server add entries Server1.Host, Server2.Host, etc.
+# Whether this server is used for downloading (yes, no).
+Server1.Active=yes
+
+# Display name for this server.
+Server1.Name=
+
+# Level (priority) of this news server (0-99).
+# Servers with the same level are used simultaneously.
+# Servers with higher levels are used as backup when lower-level servers fail.
+Server1.Level=0
+
+# If set to yes, this server is optional and does not cause download failure (yes, no).
+Server1.Optional=no
+
+# Server group for joint connections (0-99).
+# All servers with the same non-zero group share connection limits.
+Server1.Group=0
+
+# Hostname or IP address of the news server.
+Server1.Host=
+
+# Port number for the news server.
+Server1.Port=119
+
+# Username for authentication on the server.
+Server1.Username=
+
+# Password for authentication on the server.
+Server1.Password=
+
+# Join group on the news server (yes, no).
+Server1.JoinGroup=no
+
+# Use TLS encryption for connections to the server (yes, no).
+Server1.Encryption=no
+
+# TLS cipher to use for encrypted connections.
+Server1.Cipher=
+
+# Maximum number of simultaneous connections to the server (1-999).
+Server1.Connections=8
+
+# Article retention period on the server in days (0 = unlimited).
+Server1.Retention=0
+
+# IP version preference for connections (auto, ipv4, ipv6).
+Server1.IpVersion=auto
+
+# Notes for this server.
+Server1.Notes=
+
+# Certificate verification level (none, minimal, strict).
+Server1.CertVerification=strict
 
 ### CATEGORIES ###
 
-# This section defines categories.
-# For each category add entries Category1.Name, Category2.Name, etc.
+# Category name used to classify downloads.
+Category1.Name=
+
+# Destination directory for this category.
+Category1.DestDir=
+
+# Automatically unpack archives for this category (yes, no).
+Category1.Unpack=yes
+
+# Extensions to run for this category (comma-separated).
+Category1.Extensions=
+
+# Alternative names for this category, comma-separated.
+Category1.Aliases=
 
 ### DOWNLOAD ###
 
@@ -188,10 +251,44 @@ SystemHealthCheck=yes
 
 ### SCHEDULER ###
 
-# This section defines scheduled tasks.
-# For each task add entries Task1.Time, Task2.Time, etc.
+# Time at which to execute the task (HH:MM).
+Task1.Time=
+
+# Days of the week to execute the task (1-7, comma-separated, or empty for every day).
+# 1 = Monday, 7 = Sunday.
+Task1.WeekDays=
+
+# Action to perform (PauseDownload, UnpauseDownload, PauseScan, UnpauseScan, DownloadRate, Script, Process, ActivateServer, DeactivateServer, FetchFeed).
+Task1.Command=
+
+# Parameter for the task command.
+Task1.Param=
 
 ### RSS FEEDS ###
 
-# This section defines RSS feeds.
-# For each feed add entries Feed1.Name, Feed2.Name, etc.
+# Display name for this RSS feed.
+Feed1.Name=
+
+# URL of the RSS feed.
+Feed1.URL=
+
+# Download items from the feed backlog on first fetch (yes, no).
+Feed1.Backlog=no
+
+# Pause NZBs added from this feed (yes, no).
+Feed1.PauseNzb=no
+
+# Filter rules applied to feed items.
+Feed1.Filter=
+
+# Polling interval in minutes (0 = disabled).
+Feed1.Interval=15
+
+# Category assigned to downloads from this feed.
+Feed1.Category=
+
+# Priority for downloads from this feed (-100 to 900).
+Feed1.Priority=0
+
+# Extensions to run for downloads from this feed (comma-separated).
+Feed1.Extensions=

@@ -2202,7 +2202,7 @@ var Config = (new function($)
 
 	function getCertVerifLevel(verifLevel)
 	{
-		var level = verifLevel.toLowerCase();
+		var level = (verifLevel || 'strict').toLowerCase();
 		switch(level)
 		{
 			case "none": return 0;
