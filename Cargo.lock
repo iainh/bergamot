@@ -1326,6 +1326,7 @@ name = "nzbg-nntp-stub"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "nzbg-nntp",
  "serde",
  "serde_json",
  "tokio",
