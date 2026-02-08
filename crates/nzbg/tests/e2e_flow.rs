@@ -906,3 +906,188 @@ async fn rpc_listgroups_schema_during_download() {
     stub_task.abort();
     let _ = stub_task.await;
 }
+
+#[tokio::test]
+async fn rpc_history_schema_conformance() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let stub_port = available_port();
+    let rpc_port = available_port();
+    let rpc_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), rpc_port);
+
+    init_logging();
+
+    let stub_task = start_stub(stub_port, fixtures_complete_path(), 2).await;
+    tokio::time::sleep(Duration::from_millis(20)).await;
+
+    let config = sample_config(temp.path(), rpc_port, &[(stub_port, 0)]);
+    create_dirs(&config).await;
+
+    let stats = nzbg_scheduler::StatsTracker::from_config(&config);
+    let shared_stats = Arc::new(nzbg_scheduler::SharedStatsTracker::new(stats));
+    let fetcher = build_server_pool(&config, &shared_stats);
+
+    let app_task = tokio::spawn(run_with_config_path(
+        config,
+        fetcher,
+        None,
+        None,
+        Some(shared_stats),
+    ));
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    let nzb_id = append_nzb(rpc_addr, &sample_nzb_path()).await;
+    let completed = wait_for_completion(rpc_addr, nzb_id, 50).await;
+    assert!(completed, "nzb should complete before checking history");
+
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let history = jsonrpc_call(
+        rpc_addr,
+        "nzbget:secret",
+        "history",
+        serde_json::json!([false]),
+    )
+    .await;
+
+    let entries = history.as_array().expect("history should be an array");
+    assert!(!entries.is_empty(), "history should have at least one entry");
+
+    let entry = entries
+        .iter()
+        .find(|e| e.get("NZBID").and_then(|v| v.as_u64()) == Some(nzb_id))
+        .expect("should find our NZB in history");
+
+    let obj = entry.as_object().expect("entry should be an object");
+
+    let required_fields = [
+        "NZBID",
+        "ID",
+        "Kind",
+        "NZBFilename",
+        "Name",
+        "NZBName",
+        "URL",
+        "RetryData",
+        "HistoryTime",
+        "DestDir",
+        "FinalDir",
+        "Category",
+        "FileSizeLo",
+        "FileSizeHi",
+        "FileSizeMB",
+        "FileCount",
+        "RemainingFileCount",
+        "MinPostTime",
+        "MaxPostTime",
+        "TotalArticles",
+        "SuccessArticles",
+        "FailedArticles",
+        "Health",
+        "CriticalHealth",
+        "DownloadedSizeLo",
+        "DownloadedSizeHi",
+        "DownloadedSizeMB",
+        "DownloadTimeSec",
+        "PostTotalTimeSec",
+        "ParTimeSec",
+        "RepairTimeSec",
+        "UnpackTimeSec",
+        "MessageCount",
+        "DupeKey",
+        "DupeScore",
+        "DupeMode",
+        "Status",
+        "ParStatus",
+        "UnpackStatus",
+        "MoveStatus",
+        "ScriptStatus",
+        "DeleteStatus",
+        "MarkStatus",
+        "UrlStatus",
+        "ExtraParBlocks",
+        "Parameters",
+        "ServerStats",
+        "ScriptStatuses",
+    ];
+
+    for field in &required_fields {
+        assert!(
+            obj.contains_key(*field),
+            "history entry missing required field: {field}"
+        );
+    }
+
+    let kind = obj["Kind"].as_str().expect("Kind should be a string");
+    assert_eq!(kind, "NZB", "completed download should have Kind=NZB");
+
+    let status = obj["Status"].as_str().expect("Status should be a string");
+    assert!(
+        status.starts_with("SUCCESS"),
+        "completed download should have SUCCESS status, got: {status}"
+    );
+
+    let string_status_fields = [
+        "ParStatus",
+        "UnpackStatus",
+        "MoveStatus",
+        "ScriptStatus",
+        "DeleteStatus",
+        "MarkStatus",
+        "UrlStatus",
+        "DupeMode",
+    ];
+    for field in &string_status_fields {
+        assert!(
+            obj[*field].is_string(),
+            "field {field} should be a string per NZBGet API spec, got: {}",
+            obj[*field]
+        );
+    }
+
+    assert!(
+        obj["NZBID"].is_number(),
+        "NZBID should be a number"
+    );
+    assert!(
+        obj["HistoryTime"].is_number(),
+        "HistoryTime should be a number"
+    );
+    assert!(
+        obj["FileSizeLo"].is_number(),
+        "FileSizeLo should be a number"
+    );
+    assert!(
+        obj["FileSizeHi"].is_number(),
+        "FileSizeHi should be a number"
+    );
+    assert!(
+        obj["FileSizeMB"].is_number(),
+        "FileSizeMB should be a number"
+    );
+    assert!(
+        obj["Health"].is_number(),
+        "Health should be a number"
+    );
+    assert!(
+        obj["RetryData"].is_boolean(),
+        "RetryData should be a boolean"
+    );
+    assert!(
+        obj["Parameters"].is_array(),
+        "Parameters should be an array"
+    );
+    assert!(
+        obj["ServerStats"].is_array(),
+        "ServerStats should be an array"
+    );
+    assert!(
+        obj["ScriptStatuses"].is_array(),
+        "ScriptStatuses should be an array"
+    );
+
+    shutdown_app(rpc_addr).await;
+    let _ = tokio::time::timeout(Duration::from_secs(5), app_task)
+        .await
+        .expect("app shutdown timeout");
+    let _ = tokio::time::timeout(Duration::from_secs(2), stub_task).await;
+}
