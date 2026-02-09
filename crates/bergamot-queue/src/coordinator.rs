@@ -866,6 +866,11 @@ impl QueueCoordinator {
                 return;
             }
 
+            let file_is_par = nzb
+                .files
+                .get(file_idx)
+                .is_some_and(|f| is_par_file(&f.filename));
+
             match result.outcome {
                 crate::command::DownloadOutcome::Success { crc, .. } => {
                     tracing::debug!(nzb_id, file_idx, seg_idx, article_size, "download success");
@@ -882,6 +887,11 @@ impl QueueCoordinator {
                     nzb.remaining_size = nzb.remaining_size.saturating_sub(article_size);
                     nzb.success_article_count += 1;
                     self.session_downloaded += article_size;
+                    if file_is_par {
+                        nzb.par_current_success_size += article_size;
+                        nzb.par_remaining_size =
+                            nzb.par_remaining_size.saturating_sub(article_size);
+                    }
                 }
                 crate::command::DownloadOutcome::Failure { .. } => {
                     tracing::debug!(nzb_id, file_idx, seg_idx, article_size, "download failure");
@@ -896,6 +906,11 @@ impl QueueCoordinator {
                     nzb.failed_size += article_size;
                     nzb.remaining_size = nzb.remaining_size.saturating_sub(article_size);
                     nzb.failed_article_count += 1;
+                    if file_is_par {
+                        nzb.par_failed_size += article_size;
+                        nzb.par_remaining_size =
+                            nzb.par_remaining_size.saturating_sub(article_size);
+                    }
                 }
                 crate::command::DownloadOutcome::Blocked { ref message } => {
                     tracing::warn!(
@@ -930,6 +945,9 @@ impl QueueCoordinator {
         {
             file.completed = true;
             nzb.remaining_file_count = nzb.remaining_file_count.saturating_sub(1);
+            if is_par_file(&file.filename) {
+                nzb.remaining_par_count = nzb.remaining_par_count.saturating_sub(1);
+            }
             tracing::info!("file {} completed for NZB {}", file.filename, nzb.name);
         }
     }
