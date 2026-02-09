@@ -991,7 +991,7 @@ impl QueueCoordinator {
             && let Some(idx) = self.queue.queue.iter().position(|n| n.id == nzb_id)
         {
             let mut nzb = self.queue.queue.remove(idx);
-            let has_par = nzb.par_remaining_size > 0;
+            let has_par = nzb.par_size > 0;
             let health_pct = nzb.health as f64 / 10.0;
             let critical_pct = nzb.critical_health as f64 / 10.0;
             if has_par {
