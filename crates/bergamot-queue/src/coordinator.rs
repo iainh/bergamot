@@ -1203,6 +1203,9 @@ impl QueueCoordinator {
                             .map(|p| (p.name.clone(), p.value.clone()))
                             .collect(),
                         active_downloads,
+                        file_count: nzb.file_count,
+                        remaining_file_count: nzb.remaining_file_count,
+                        remaining_par_count: nzb.remaining_par_count,
                         file_ids: nzb.files.iter().map(|f| f.id).collect(),
                     }
                 })
@@ -1324,6 +1327,16 @@ impl QueueCoordinator {
                 mark_status: h.nzb_info.mark_status,
                 script_status: h.nzb_info.script_status,
                 health: h.nzb_info.health,
+                file_count: h.nzb_info.file_count,
+                remaining_par_count: h.nzb_info.remaining_par_count,
+                total_article_count: h.nzb_info.total_article_count,
+                success_article_count: h.nzb_info.success_article_count,
+                failed_article_count: h.nzb_info.failed_article_count,
+                download_time_sec: h.nzb_info.download_sec,
+                post_total_sec: h.nzb_info.post_total_sec,
+                par_sec: h.nzb_info.par_sec,
+                repair_sec: h.nzb_info.repair_sec,
+                unpack_sec: h.nzb_info.unpack_sec,
             })
             .collect()
     }
@@ -1423,8 +1436,31 @@ impl QueueCoordinator {
     ) -> Result<u32, QueueError> {
         let data = std::fs::read(path)
             .map_err(|e| QueueError::IoError(format!("{}: {e}", path.display())))?;
+
+        if let Ok(xml_str) = std::str::from_utf8(&data) {
+            tracing::debug!(path = %path.display(), "NZB XML content:\n{xml_str}");
+        } else {
+            tracing::debug!(path = %path.display(), bytes = data.len(), "NZB content is binary (gzipped)");
+        }
+
         let parsed =
             bergamot_nzb::parse_nzb_auto(&data).map_err(|e| QueueError::NzbParse(format!("{e}")))?;
+
+        for nzb_file in &parsed.files {
+            tracing::info!(
+                subject = %nzb_file.subject,
+                filename = ?nzb_file.filename,
+                par_status = ?nzb_file.par_status,
+                "NZB file par classification"
+            );
+        }
+        let has_pars = parsed.files.iter().any(|f| f.par_status != bergamot_nzb::ParStatus::NotPar);
+        tracing::info!(
+            path = %path.display(),
+            file_count = parsed.files.len(),
+            has_pars,
+            "NZB par detection summary"
+        );
 
         let id = self.queue.next_nzb_id;
         self.queue.next_nzb_id += 1;

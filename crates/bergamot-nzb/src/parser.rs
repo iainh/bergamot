@@ -270,7 +270,7 @@ pub fn extract_filename(subject: &str) -> Option<String> {
 }
 
 static PAR2_VOL_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?i)\.vol(\d+)\+(\d+)\.par2$").expect("valid regex"));
+    LazyLock::new(|| Regex::new(r"(?i)\.vol[-_]?(\d+)(?:\+(\d+))?\.par2$").expect("valid regex"));
 
 pub fn classify_par(filename: &Option<String>) -> ParStatus {
     let name = match filename {
@@ -503,6 +503,27 @@ mod tests {
             }
         );
         assert_eq!(classify_par(&Some("show.mkv".into())), ParStatus::NotPar);
+        assert_eq!(
+            classify_par(&Some("show.vol-01.par2".into())),
+            ParStatus::RepairVolume {
+                block_offset: 1,
+                block_count: 0,
+            }
+        );
+        assert_eq!(
+            classify_par(&Some("show.vol_03.par2".into())),
+            ParStatus::RepairVolume {
+                block_offset: 3,
+                block_count: 0,
+            }
+        );
+        assert_eq!(
+            classify_par(&Some("show.vol07.par2".into())),
+            ParStatus::RepairVolume {
+                block_offset: 7,
+                block_count: 0,
+            }
+        );
     }
 
     #[test]

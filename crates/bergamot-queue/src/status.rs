@@ -61,6 +61,9 @@ pub struct NzbSnapshotEntry {
     pub failed_article_count: u32,
     pub parameters: Vec<(String, String)>,
     pub active_downloads: u32,
+    pub file_count: u32,
+    pub remaining_file_count: u32,
+    pub remaining_par_count: u32,
     pub file_ids: Vec<u32>,
 }
 
@@ -79,6 +82,16 @@ pub struct HistoryListEntry {
     pub mark_status: bergamot_core::models::MarkStatus,
     pub script_status: bergamot_core::models::ScriptStatus,
     pub health: u32,
+    pub file_count: u32,
+    pub remaining_par_count: u32,
+    pub total_article_count: u32,
+    pub success_article_count: u32,
+    pub failed_article_count: u32,
+    pub download_time_sec: u64,
+    pub post_total_sec: u64,
+    pub par_sec: u64,
+    pub repair_sec: u64,
+    pub unpack_sec: u64,
 }
 
 #[derive(Debug, Clone)]

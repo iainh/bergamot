@@ -268,6 +268,10 @@ async fn rpc_listgroups(state: &AppState) -> Result<serde_json::Value, JsonRpcEr
                 "CriticalHealth": entry.critical_health,
                 "Kind": "NZB",
                 "PostTotalTimeSec": 0,
+                "FileCount": entry.file_count,
+                "RemainingFileCount": entry.remaining_file_count,
+                "RemainingParCount": entry.remaining_par_count,
+                "TotalArticles": entry.total_article_count,
                 "SuccessArticles": entry.success_article_count,
                 "FailedArticles": entry.failed_article_count,
                 "ServerStats": server_stats,
@@ -1050,11 +1054,12 @@ async fn rpc_history(
             m.insert("CriticalHealth".into(), serde_json::json!(0));
             m.insert("Parameters".into(), serde_json::json!([]));
             m.insert("ServerStats".into(), serde_json::json!([]));
-            m.insert("SuccessArticles".into(), serde_json::json!(0));
-            m.insert("FailedArticles".into(), serde_json::json!(0));
-            m.insert("TotalArticles".into(), serde_json::json!(0));
+            m.insert("SuccessArticles".into(), serde_json::json!(e.success_article_count));
+            m.insert("FailedArticles".into(), serde_json::json!(e.failed_article_count));
+            m.insert("TotalArticles".into(), serde_json::json!(e.total_article_count));
             m.insert("RemainingFileCount".into(), serde_json::json!(0));
-            m.insert("FileCount".into(), serde_json::json!(0));
+            m.insert("RemainingParCount".into(), serde_json::json!(e.remaining_par_count));
+            m.insert("FileCount".into(), serde_json::json!(e.file_count));
             m.insert("RetryData".into(), serde_json::json!(false));
             m.insert("FinalDir".into(), serde_json::json!(""));
             m.insert("DestDir".into(), serde_json::json!(""));
@@ -1062,11 +1067,11 @@ async fn rpc_history(
             m.insert("DownloadedSizeMB".into(), serde_json::json!(file_size_mb));
             m.insert("DownloadedSizeLo".into(), serde_json::json!(file_size_lo));
             m.insert("DownloadedSizeHi".into(), serde_json::json!(file_size_hi));
-            m.insert("DownloadTimeSec".into(), serde_json::json!(0));
-            m.insert("PostTotalTimeSec".into(), serde_json::json!(0));
-            m.insert("ParTimeSec".into(), serde_json::json!(0));
-            m.insert("RepairTimeSec".into(), serde_json::json!(0));
-            m.insert("UnpackTimeSec".into(), serde_json::json!(0));
+            m.insert("DownloadTimeSec".into(), serde_json::json!(e.download_time_sec));
+            m.insert("PostTotalTimeSec".into(), serde_json::json!(e.post_total_sec));
+            m.insert("ParTimeSec".into(), serde_json::json!(e.par_sec));
+            m.insert("RepairTimeSec".into(), serde_json::json!(e.repair_sec));
+            m.insert("UnpackTimeSec".into(), serde_json::json!(e.unpack_sec));
             m.insert("MessageCount".into(), serde_json::json!(0));
             m.insert("ScriptStatuses".into(), serde_json::json!([]));
             m.insert("NZBFilename".into(), serde_json::json!(""));
