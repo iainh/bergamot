@@ -1606,6 +1606,8 @@ mod tests {
                     offset: 0,
                     crc: 0xDEAD,
                 },
+                server_id: None,
+                elapsed: None,
             })
             .await
             .expect("report");

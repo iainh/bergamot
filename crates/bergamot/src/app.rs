@@ -484,13 +484,31 @@ pub async fn run_with_config_path(
         .map(|s| s.connections.max(1) as usize)
         .sum::<usize>()
         .max(1);
+
+    // Build a server scheduler from the configured news servers.
+    // Each server becomes a slot in the weighted fair queuing scheduler,
+    // with initial weights proportional to their connection count.
+    // As downloads complete, the scheduler adapts weights using EWMA
+    // throughput estimation.
+    let server_slots: Vec<bergamot_nntp::ServerSlot> = config
+        .servers
+        .iter()
+        .filter(|s| s.active)
+        .map(|s| {
+            bergamot_nntp::ServerSlot::new(s.id, s.name.clone(), s.level, s.connections.max(1))
+        })
+        .collect();
+    let server_scheduler = bergamot_nntp::ServerScheduler::new(server_slots);
+
     let (coordinator, queue_handle, assignment_rx, rate_rx) = bergamot_queue::QueueCoordinator::new(
         total_connections,
         total_connections,
         inter_dir.clone(),
         config.dest_dir.clone(),
     );
-    let mut coordinator = coordinator.with_completion_tx(completion_tx);
+    let mut coordinator = coordinator
+        .with_completion_tx(completion_tx)
+        .with_server_scheduler(server_scheduler);
 
     let mut restored_paused = false;
     match restore_queue(&disk) {

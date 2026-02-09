@@ -89,6 +89,32 @@ impl<F: ConnectionFactory> ServerPool<F> {
         message_id: &str,
         groups: &[String],
     ) -> Result<Vec<u8>, NntpError> {
+        self.fetch_article_targeted(message_id, groups, None).await
+    }
+
+    /// Fetch an article, optionally targeting a specific server first.
+    ///
+    /// # Server Selection Strategy
+    ///
+    /// When `target_server_id` is `Some(id)`:
+    ///   1. Try the targeted server first (chosen by the WFQ scheduler based
+    ///      on throughput-weighted queue depth). This avoids wasting connections
+    ///      on speculative requests to other servers.
+    ///   2. If the target fails with ArticleNotFound, fall back sequentially
+    ///      through remaining servers (ordered by level, then group). Sequential
+    ///      fallback with per-server timeouts prevents a single slow server
+    ///      from blocking the pipeline while still providing redundancy.
+    ///
+    /// When `target_server_id` is `None`:
+    ///   Falls back to the original parallel-blast strategy (try all servers
+    ///   concurrently via FuturesUnordered). This preserves backward
+    ///   compatibility when no scheduler is configured.
+    pub async fn fetch_article_targeted(
+        &self,
+        message_id: &str,
+        groups: &[String],
+        target_server_id: Option<u32>,
+    ) -> Result<Vec<u8>, NntpError> {
         if self.servers.is_empty() {
             return Err(NntpError::NoServersConfigured);
         }
@@ -103,6 +129,20 @@ impl<F: ConnectionFactory> ServerPool<F> {
             return Err(NntpError::ProtocolError("all servers in backoff".into()));
         }
 
+        // When a target server is specified, use sequential fetching:
+        // try the target first, then fall back through remaining servers.
+        // This is more efficient than parallel-blast because:
+        // - The scheduler already picked the optimal server
+        // - Most articles exist on the primary server
+        // - We don't waste connection permits on speculative requests
+        if let Some(target_id) = target_server_id {
+            return self
+                .fetch_article_sequential(message_id, groups, target_id, &available)
+                .await;
+        }
+
+        // Original parallel-blast path: try all servers concurrently.
+        // Used when no server scheduler is configured.
         let futs: FuturesUnordered<_> = available
             .iter()
             .enumerate()
@@ -145,6 +185,87 @@ impl<F: ConnectionFactory> ServerPool<F> {
                     }
                     self.record_failure(state);
                     last_error = err;
+                }
+            }
+        }
+
+        Err(last_error)
+    }
+
+    /// Sequential fetch: try the target server first, then fall through
+    /// remaining servers in priority order. Each attempt has a timeout to
+    /// prevent a single slow server from stalling the pipeline.
+    ///
+    /// This implements the "try primary first, failover sequentially" pattern
+    /// which is optimal when the scheduler has already identified the best
+    /// server. It avoids the connection waste of parallel-blast while still
+    /// providing full redundancy through ordered fallback.
+    async fn fetch_article_sequential(
+        &self,
+        message_id: &str,
+        groups: &[String],
+        target_id: u32,
+        available: &[&Arc<ServerState>],
+    ) -> Result<Vec<u8>, NntpError> {
+        const ARTICLE_TIMEOUT: Duration = Duration::from_secs(60);
+
+        // Build ordered list: target server first, then remaining by level.
+        let mut ordered: Vec<&Arc<ServerState>> = Vec::with_capacity(available.len());
+        if let Some(target) = available.iter().find(|s| s.server.id == target_id) {
+            ordered.push(target);
+        }
+        for s in available {
+            if s.server.id != target_id {
+                ordered.push(s);
+            }
+        }
+
+        let mut last_error = NntpError::ProtocolError("no servers available".into());
+
+        for state in ordered {
+            let permit = match state.semaphore.clone().try_acquire_owned() {
+                Ok(p) => p,
+                Err(_) => continue,
+            };
+
+            let result = tokio::time::timeout(
+                ARTICLE_TIMEOUT,
+                self.try_fetch_from_server(state, message_id, groups),
+            )
+            .await;
+
+            drop(permit);
+
+            match result {
+                Ok(Ok(data)) => {
+                    self.reset_backoff(state);
+                    if let Some(stats) = &self.stats {
+                        stats.record_bytes(state.server.id, data.len() as u64);
+                        stats.record_article_success(state.server.id);
+                    }
+                    return Ok(data);
+                }
+                Ok(Err(NntpError::ArticleNotFound(msg))) => {
+                    if let Some(stats) = &self.stats {
+                        stats.record_article_failure(state.server.id);
+                    }
+                    last_error = NntpError::ArticleNotFound(msg);
+                }
+                Ok(Err(err)) => {
+                    if let Some(stats) = &self.stats {
+                        stats.record_article_failure(state.server.id);
+                    }
+                    self.record_failure(state);
+                    last_error = err;
+                }
+                Err(_timeout) => {
+                    self.record_failure(state);
+                    last_error = NntpError::Timeout;
+                    tracing::debug!(
+                        server_id = state.server.id,
+                        message_id,
+                        "article fetch timed out, trying next server"
+                    );
                 }
             }
         }

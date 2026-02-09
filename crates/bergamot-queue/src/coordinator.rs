@@ -29,11 +29,18 @@ pub struct ArticleAssignment {
     pub groups: Vec<String>,
     pub output_filename: String,
     pub expected_size: u64,
+    /// Which server this article is assigned to by the weighted fair queuing scheduler.
+    /// When `None`, the download worker should use the default server pool behavior.
+    pub server_id: Option<u32>,
 }
 
 #[derive(Debug)]
 struct ActiveDownload {
-    _started: Instant,
+    started: Instant,
+    /// Server this article was assigned to, for throughput tracking on completion.
+    server_id: Option<u32>,
+    /// Expected article size in bytes, needed to update scheduler on completion.
+    expected_size: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -281,6 +288,11 @@ pub struct QueueCoordinator {
     rate_watch_tx: watch::Sender<u64>,
     completion_tx: Option<mpsc::Sender<NzbCompletionNotice>>,
     session_downloaded: u64,
+    /// Optional server scheduler for weighted fair queuing.
+    /// When present, articles are assigned to specific servers based on
+    /// their throughput-weighted capacity. When absent, the download worker
+    /// falls back to the existing ServerPool behavior (try all servers).
+    server_scheduler: Option<bergamot_nntp::ServerScheduler>,
 }
 
 impl QueueCoordinator {
@@ -321,6 +333,7 @@ impl QueueCoordinator {
             assignment_tx,
             rate_watch_tx,
             session_downloaded: 0,
+            server_scheduler: None,
         };
         (coordinator, handle, assignment_rx, rate_watch_rx)
     }
@@ -330,12 +343,42 @@ impl QueueCoordinator {
         self
     }
 
+    /// Attach a server scheduler for weighted fair queuing.
+    /// When set, the coordinator assigns articles to specific servers based
+    /// on their throughput capacity, rather than letting the download worker
+    /// try all servers.
+    pub fn with_server_scheduler(mut self, scheduler: bergamot_nntp::ServerScheduler) -> Self {
+        self.server_scheduler = Some(scheduler);
+        self
+    }
+
+    /// Main coordinator loop.
+    ///
+    /// Uses `tokio::select!` with a periodic refill tick to prevent pipeline
+    /// bubbles. Without this, slots would only be filled when a command
+    /// (e.g., DownloadComplete) arrives, leaving connections idle between
+    /// article completions. The 50ms tick ensures the scheduler recovers
+    /// from missed wakeups and channel backpressure without waiting for
+    /// the next external event.
     pub async fn run(&mut self) {
         self.try_fill_download_slots();
 
-        while let Some(cmd) = self.command_rx.recv().await {
-            self.handle_command(cmd).await;
-            self.try_fill_download_slots();
+        let mut refill_tick = tokio::time::interval(std::time::Duration::from_millis(50));
+        refill_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+        loop {
+            tokio::select! {
+                biased;
+
+                Some(cmd) = self.command_rx.recv() => {
+                    self.handle_command(cmd).await;
+                    self.try_fill_download_slots();
+                }
+
+                _ = refill_tick.tick() => {
+                    self.try_fill_download_slots();
+                }
+            }
 
             if self.shutdown && self.active_downloads.is_empty() {
                 break;
@@ -348,30 +391,75 @@ impl QueueCoordinator {
             return;
         }
 
-        while self.active_downloads.len() < self.max_connections {
-            let Some((article_id, assignment)) = self.next_assignment() else {
+        // Determine the effective connection limit. When a server scheduler
+        // is present, it tracks per-server capacity; the global limit is the
+        // sum of all server connection limits. Without a scheduler, fall back
+        // to the configured max_connections.
+        let max_slots = if let Some(ref sched) = self.server_scheduler {
+            sched.total_max_connections() as usize
+        } else {
+            self.max_connections
+        };
+
+        while self.active_downloads.len() < max_slots {
+            // Check if the server scheduler has capacity before looking for
+            // the next article. This avoids wasting time selecting an article
+            // when all server queues are full.
+            if let Some(ref sched) = self.server_scheduler
+                && sched.total_available_capacity() == 0
+            {
+                break;
+            }
+
+            let Some((article_id, mut assignment)) = self.next_assignment() else {
                 break;
             };
 
+            // If a server scheduler is configured, use WFQ to select the
+            // best server for this article based on throughput-weighted
+            // pending work ratios (see ServerScheduler::select_server).
+            if let Some(ref mut sched) = self.server_scheduler
+                && let Some(sid) = sched.select_server(assignment.expected_size)
+            {
+                assignment.server_id = Some(sid);
+                sched.assign_to_server(sid, assignment.expected_size);
+            }
+
+            let server_id = assignment.server_id;
+            let expected_size = assignment.expected_size;
             match self.assignment_tx.try_send(assignment) {
                 Ok(()) => {
                     tracing::debug!(
                         nzb_id = article_id.nzb_id,
                         file_idx = article_id.file_idx,
                         seg_idx = article_id.seg_idx,
+                        ?server_id,
                         active = self.active_downloads.len() + 1,
-                        max = self.max_connections,
+                        max = max_slots,
                         "dispatched article"
                     );
                     self.mark_segment_status(article_id, SegmentStatus::Downloading);
                     self.active_downloads.insert(
                         article_id,
                         ActiveDownload {
-                            _started: Instant::now(),
+                            started: Instant::now(),
+                            server_id,
+                            expected_size,
                         },
                     );
                 }
-                Err(mpsc::error::TrySendError::Full(_)) => {
+                Err(mpsc::error::TrySendError::Full(rejected)) => {
+                    // Roll back scheduler state if we couldn't send.
+                    if let Some(ref mut sched) = self.server_scheduler
+                        && let Some(sid) = rejected.server_id
+                    {
+                        sched.complete_on_server(
+                            sid,
+                            rejected.expected_size,
+                            std::time::Duration::ZERO,
+                            false,
+                        );
+                    }
                     tracing::debug!("assignment channel full");
                     break;
                 }
@@ -408,6 +496,7 @@ impl QueueCoordinator {
                 groups: file.groups.clone(),
                 output_filename: file.output_filename.clone(),
                 expected_size: segment.size,
+                server_id: None,
             },
         ))
     }
@@ -450,6 +539,18 @@ impl QueueCoordinator {
     where
         F: Fn(&FileInfo) -> bool,
     {
+        // Adaptive per-file cap: when only one file is runnable (common for
+        // large rar sets), allow it to use all available connection slots.
+        // This prevents artificial throttling when there's no contention
+        // between files. When multiple files are runnable, the configured
+        // max_articles_per_file limit ensures fair distribution.
+        let runnable_files = self.count_runnable_files(&file_filter);
+        let effective_per_file_cap = if runnable_files <= 1 {
+            self.max_connections
+        } else {
+            self.max_articles_per_file
+        };
+
         let mut nzbs = self.queue.queue.iter().collect::<Vec<_>>();
         nzbs.sort_by_key(|nzb| nzb.priority);
         for nzb in nzbs.iter().rev() {
@@ -464,7 +565,7 @@ impl QueueCoordinator {
                     continue;
                 }
                 let active_count = self.active_articles_for_file(nzb.id, file_idx as u32);
-                if active_count >= self.max_articles_per_file {
+                if active_count >= effective_per_file_cap {
                     continue;
                 }
                 for (seg_idx, segment) in file.articles.iter().enumerate() {
@@ -486,6 +587,36 @@ impl QueueCoordinator {
             .keys()
             .filter(|id| id.nzb_id == nzb_id && id.file_idx == file_idx)
             .count()
+    }
+
+    /// Count files that have remaining downloadable segments and pass the filter.
+    /// Used to decide whether to relax the per-file concurrency cap.
+    fn count_runnable_files<F>(&self, file_filter: &F) -> usize
+    where
+        F: Fn(&FileInfo) -> bool,
+    {
+        let mut count = 0;
+        for nzb in &self.queue.queue {
+            if nzb.paused && nzb.priority != Priority::Force {
+                continue;
+            }
+            for file in &nzb.files {
+                if file.paused && nzb.priority != Priority::Force {
+                    continue;
+                }
+                if !file_filter(file) {
+                    continue;
+                }
+                if file
+                    .articles
+                    .iter()
+                    .any(|a| a.status == bergamot_core::models::ArticleStatus::Undefined)
+                {
+                    count += 1;
+                }
+            }
+        }
+        count
     }
 
     fn mark_segment_status(&mut self, article_id: ArticleId, status: SegmentStatus) {
@@ -657,7 +788,7 @@ impl QueueCoordinator {
     }
 
     fn handle_download_complete(&mut self, result: crate::command::DownloadResult) {
-        self.active_downloads.remove(&result.article_id);
+        let download_info = self.active_downloads.remove(&result.article_id);
         tracing::debug!(
             nzb_id = result.article_id.nzb_id,
             file_idx = result.article_id.file_idx,
@@ -665,6 +796,31 @@ impl QueueCoordinator {
             active_downloads = self.active_downloads.len(),
             "removed from active downloads"
         );
+
+        // Feed completion data back to the server scheduler for EWMA
+        // throughput estimation. This allows the WFQ algorithm to adapt
+        // server weights based on observed transfer speeds.
+        if let Some(ref mut sched) = self.server_scheduler {
+            let server_id = result
+                .server_id
+                .or_else(|| download_info.as_ref().and_then(|d| d.server_id));
+            let article_size = download_info
+                .as_ref()
+                .map(|d| d.expected_size)
+                .unwrap_or(0);
+            let elapsed = result
+                .elapsed
+                .or_else(|| download_info.as_ref().map(|d| d.started.elapsed()))
+                .unwrap_or_default();
+            let success = matches!(
+                result.outcome,
+                crate::command::DownloadOutcome::Success { .. }
+            );
+            if let Some(sid) = server_id {
+                sched.complete_on_server(sid, article_size, elapsed, success);
+            }
+        }
+
         let nzb_id = result.article_id.nzb_id;
         let file_idx = result.article_id.file_idx as usize;
         let seg_idx = result.article_id.seg_idx as usize;
@@ -732,10 +888,10 @@ impl QueueCoordinator {
                         reason = %message,
                         "download blocked, pausing downloads"
                     );
-                    if let Some(file) = nzb.files.get_mut(file_idx) {
-                        if let Some(seg) = file.articles.get_mut(seg_idx) {
-                            seg.status = ArticleStatus::Undefined;
-                        }
+                    if let Some(file) = nzb.files.get_mut(file_idx)
+                        && let Some(seg) = file.articles.get_mut(seg_idx)
+                    {
+                        seg.status = ArticleStatus::Undefined;
                     }
                     self.paused = true;
                     return;
@@ -1983,6 +2139,8 @@ mod tests {
                 offset: 0,
                 crc: 0xDEADBEEF,
             },
+            server_id: None,
+            elapsed: None,
         });
 
         assert!(coordinator.active_downloads.is_empty());
@@ -2251,6 +2409,8 @@ mod tests {
             outcome: crate::command::DownloadOutcome::Failure {
                 message: "test".to_string(),
             },
+            server_id: None,
+            elapsed: None,
         });
 
         assert_eq!(coordinator.queue.queue[0].health, 900);
@@ -2775,7 +2935,9 @@ mod tests {
         coordinator.active_downloads.insert(
             article_id,
             ActiveDownload {
-                _started: Instant::now(),
+                started: Instant::now(),
+                server_id: None,
+                expected_size: 0,
             },
         );
 
@@ -2786,6 +2948,8 @@ mod tests {
                 offset: 0,
                 crc: 0x1234,
             },
+            server_id: None,
+            elapsed: None,
         });
 
         let nzb = &coordinator.queue.queue[0];
@@ -2808,7 +2972,9 @@ mod tests {
         coordinator.active_downloads.insert(
             article_id,
             ActiveDownload {
-                _started: Instant::now(),
+                started: Instant::now(),
+                server_id: None,
+                expected_size: 0,
             },
         );
 
@@ -2817,6 +2983,8 @@ mod tests {
             outcome: DownloadOutcome::Failure {
                 message: "test".to_string(),
             },
+            server_id: None,
+            elapsed: None,
         });
 
         let nzb = &coordinator.queue.queue[0];
@@ -2842,7 +3010,9 @@ mod tests {
         coordinator.active_downloads.insert(
             article_id,
             ActiveDownload {
-                _started: Instant::now(),
+                started: Instant::now(),
+                server_id: None,
+                expected_size: 0,
             },
         );
         coordinator.handle_download_complete(DownloadResult {
@@ -2852,6 +3022,8 @@ mod tests {
                 offset: 0,
                 crc: 0,
             },
+            server_id: None,
+            elapsed: None,
         });
     }
 
@@ -3011,6 +3183,8 @@ mod tests {
                 offset: 0,
                 crc: 0,
             },
+            server_id: None,
+            elapsed: None,
         });
 
         assert!(coordinator.queue.queue.is_empty());
@@ -3064,6 +3238,8 @@ mod tests {
                 offset: 0,
                 crc: 0,
             },
+            server_id: None,
+            elapsed: None,
         });
 
         assert!(coordinator.queue.queue.is_empty());

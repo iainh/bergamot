@@ -13,7 +13,15 @@ use crate::writer::FileWriterPool;
 
 #[async_trait::async_trait]
 pub trait ArticleFetcher: Send + Sync {
-    async fn fetch_body(&self, message_id: &str, groups: &[String]) -> Result<Vec<u8>>;
+    /// Fetch an article body, optionally targeting a specific server.
+    /// When `target_server_id` is `Some`, the fetcher should try that server
+    /// first (as selected by the WFQ scheduler) before falling back to others.
+    async fn fetch_body(
+        &self,
+        message_id: &str,
+        groups: &[String],
+        target_server_id: Option<u32>,
+    ) -> Result<Vec<u8>>;
 }
 
 pub struct NntpPoolFetcher {
@@ -28,9 +36,14 @@ impl NntpPoolFetcher {
 
 #[async_trait::async_trait]
 impl ArticleFetcher for NntpPoolFetcher {
-    async fn fetch_body(&self, message_id: &str, groups: &[String]) -> Result<Vec<u8>> {
+    async fn fetch_body(
+        &self,
+        message_id: &str,
+        groups: &[String],
+        target_server_id: Option<u32>,
+    ) -> Result<Vec<u8>> {
         self.pool
-            .fetch_article(message_id, groups)
+            .fetch_article_targeted(message_id, groups, target_server_id)
             .await
             .context("fetching article from NNTP pool")
     }
@@ -84,19 +97,25 @@ pub async fn download_worker(
                 }
             }
 
+            let fetch_start = std::time::Instant::now();
+            let server_id = assignment.server_id;
             let result =
                 fetch_and_decode(&fetcher, &assignment, &dir, cache.as_ref(), &writer_pool).await;
+            let elapsed = fetch_start.elapsed();
             let download_result = match result {
                 Ok((data, offset, crc)) => {
                     tracing::debug!(
                         message_id = %assignment.message_id,
                         offset,
                         data_len = data.len(),
+                        elapsed_ms = elapsed.as_millis(),
                         "fetch succeeded"
                     );
                     DownloadResult {
                         article_id: assignment.article_id,
                         outcome: DownloadOutcome::Success { data, offset, crc },
+                        server_id,
+                        elapsed: Some(elapsed),
                     }
                 }
                 Err(err) => {
@@ -114,6 +133,8 @@ pub async fn download_worker(
                             outcome: DownloadOutcome::Blocked {
                                 message: "No news servers configured".to_string(),
                             },
+                            server_id,
+                            elapsed: Some(elapsed),
                         }
                     } else {
                         tracing::debug!(
@@ -126,6 +147,8 @@ pub async fn download_worker(
                             outcome: DownloadOutcome::Failure {
                                 message: format!("{err:#}"),
                             },
+                            server_id,
+                            elapsed: Some(elapsed),
                         }
                     }
                 }
@@ -150,7 +173,7 @@ async fn fetch_and_decode(
     } else {
         tracing::debug!(message_id = %assignment.message_id, "cache miss");
         let fetched = fetcher
-            .fetch_body(&assignment.message_id, &assignment.groups)
+            .fetch_body(&assignment.message_id, &assignment.groups, assignment.server_id)
             .await
             .context("fetching article body")?;
         cache.put(assignment.message_id.clone(), fetched.clone());
@@ -191,7 +214,12 @@ mod tests {
 
     #[async_trait::async_trait]
     impl ArticleFetcher for MockFetcher {
-        async fn fetch_body(&self, _message_id: &str, _groups: &[String]) -> Result<Vec<u8>> {
+        async fn fetch_body(
+            &self,
+            _message_id: &str,
+            _groups: &[String],
+            _target_server_id: Option<u32>,
+        ) -> Result<Vec<u8>> {
             Ok(self.data.clone())
         }
     }
@@ -221,6 +249,7 @@ mod tests {
             groups: vec!["alt.test".to_string()],
             output_filename: "data.rar".to_string(),
             expected_size: 100,
+            server_id: None,
         };
 
         let cache = NoopCache;
@@ -250,6 +279,7 @@ mod tests {
             groups: vec![],
             output_filename: "data.rar".to_string(),
             expected_size: 100,
+            server_id: None,
         };
 
         let cache = NoopCache;
@@ -287,6 +317,7 @@ mod tests {
             groups: vec![],
             output_filename: "data.rar".to_string(),
             expected_size: 100,
+            server_id: None,
         };
 
         let (tx, rx) = tokio::sync::mpsc::channel(1);

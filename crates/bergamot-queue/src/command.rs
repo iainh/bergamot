@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use tokio::sync::oneshot;
 
 use bergamot_core::models::{DupMode, Priority};
@@ -14,6 +16,10 @@ use crate::status::{
 pub struct DownloadResult {
     pub article_id: ArticleId,
     pub outcome: DownloadOutcome,
+    /// Which server handled this article (for scheduler throughput tracking).
+    pub server_id: Option<u32>,
+    /// How long the download took (for EWMA throughput estimation).
+    pub elapsed: Option<Duration>,
 }
 
 #[derive(Debug)]

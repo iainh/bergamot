@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 bergamot-core = { path = "../bergamot-core" }
+bergamot-nntp = { path = "../bergamot-nntp" }
 bergamot-nzb = { path = "../bergamot-nzb" }
 thiserror = "2.0"
 tokio = { version = "1", features = ["macros", "sync", "time", "rt-multi-thread"] }

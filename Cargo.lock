@@ -362,6 +362,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tokio-rustls",
+ "tracing",
  "webpki-roots 0.26.11",
 ]
 
@@ -422,6 +423,7 @@ name = "bergamot-queue"
 version = "0.1.0"
 dependencies = [
  "bergamot-core",
+ "bergamot-nntp",
  "bergamot-nzb",
  "serde_json",
  "tempfile",
