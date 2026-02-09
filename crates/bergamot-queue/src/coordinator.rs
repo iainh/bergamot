@@ -975,7 +975,7 @@ impl QueueCoordinator {
         if let Some(nzb) = self.queue.queue.iter_mut().find(|n| n.id == nzb_id) {
             nzb.health = calculate_health(nzb.total_article_count, nzb.failed_article_count);
             nzb.critical_health =
-                calculate_critical_health(nzb.total_article_count, nzb.par_remaining_size > 0);
+                calculate_critical_health(nzb.total_article_count, nzb.par_size > 0);
         }
     }
 
@@ -2458,6 +2458,7 @@ mod tests {
         );
         let mut nzb = sample_nzb(1, "test");
         nzb.total_article_count = 10;
+        nzb.par_size = 100;
         nzb.par_remaining_size = 100;
         let mut articles = Vec::new();
         for i in 0..10 {
