@@ -239,16 +239,9 @@ impl<F: ConnectionFactory> ServerPool<F> {
             match result {
                 Ok(Ok(data)) => {
                     self.reset_backoff(state);
-                    if let Some(stats) = &self.stats {
-                        stats.record_bytes(state.server.id, data.len() as u64);
-                        stats.record_article_success(state.server.id);
-                    }
                     return Ok(data);
                 }
                 Ok(Err(NntpError::ArticleNotFound(msg))) => {
-                    if let Some(stats) = &self.stats {
-                        stats.record_article_failure(state.server.id);
-                    }
                     last_error = NntpError::ArticleNotFound(msg);
                 }
                 Ok(Err(err)) => {
