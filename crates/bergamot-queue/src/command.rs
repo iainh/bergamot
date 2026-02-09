@@ -26,6 +26,9 @@ pub enum DownloadOutcome {
     Failure {
         message: String,
     },
+    Blocked {
+        message: String,
+    },
 }
 
 #[derive(Debug)]

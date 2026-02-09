@@ -90,7 +90,7 @@ impl<F: ConnectionFactory> ServerPool<F> {
         groups: &[String],
     ) -> Result<Vec<u8>, NntpError> {
         if self.servers.is_empty() {
-            return Err(NntpError::ProtocolError("no servers available".into()));
+            return Err(NntpError::NoServersConfigured);
         }
 
         let available: Vec<_> = self

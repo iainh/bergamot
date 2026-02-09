@@ -726,6 +726,20 @@ impl QueueCoordinator {
                     nzb.remaining_size = nzb.remaining_size.saturating_sub(article_size);
                     nzb.failed_article_count += 1;
                 }
+                crate::command::DownloadOutcome::Blocked { ref message } => {
+                    tracing::warn!(
+                        nzb_id, file_idx, seg_idx,
+                        reason = %message,
+                        "download blocked, pausing downloads"
+                    );
+                    if let Some(file) = nzb.files.get_mut(file_idx) {
+                        if let Some(seg) = file.articles.get_mut(seg_idx) {
+                            seg.status = ArticleStatus::Undefined;
+                        }
+                    }
+                    self.paused = true;
+                    return;
+                }
             }
         }
         self.update_health(nzb_id);

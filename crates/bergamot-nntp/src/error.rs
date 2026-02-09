@@ -34,4 +34,7 @@ pub enum NntpError {
 
     #[error("Quota exceeded")]
     QuotaExceeded,
+
+    #[error("No news servers configured")]
+    NoServersConfigured,
 }

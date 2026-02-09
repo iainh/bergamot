@@ -100,16 +100,33 @@ pub async fn download_worker(
                     }
                 }
                 Err(err) => {
-                    tracing::debug!(
-                        message_id = %assignment.message_id,
-                        error = %format!("{err:#}"),
-                        "fetch failed"
-                    );
-                    DownloadResult {
-                        article_id: assignment.article_id,
-                        outcome: DownloadOutcome::Failure {
-                            message: format!("{err:#}"),
-                        },
+                    let is_no_servers = err
+                        .chain()
+                        .any(|e| e.downcast_ref::<bergamot_nntp::NntpError>()
+                            .is_some_and(|ne| matches!(ne, bergamot_nntp::NntpError::NoServersConfigured)));
+                    if is_no_servers {
+                        tracing::warn!(
+                            message_id = %assignment.message_id,
+                            "no servers configured, blocking download"
+                        );
+                        DownloadResult {
+                            article_id: assignment.article_id,
+                            outcome: DownloadOutcome::Blocked {
+                                message: "No news servers configured".to_string(),
+                            },
+                        }
+                    } else {
+                        tracing::debug!(
+                            message_id = %assignment.message_id,
+                            error = %format!("{err:#}"),
+                            "fetch failed"
+                        );
+                        DownloadResult {
+                            article_id: assignment.article_id,
+                            outcome: DownloadOutcome::Failure {
+                                message: format!("{err:#}"),
+                            },
+                        }
                     }
                 }
             };
