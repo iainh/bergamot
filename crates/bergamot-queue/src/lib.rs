@@ -11,5 +11,5 @@ pub use crate::coordinator::{
 pub use crate::error::QueueError;
 pub use crate::status::{
     FileArticleSnapshot, FileListEntry, HistoryListEntry, NzbCompletionNotice, NzbListEntry,
-    NzbSnapshotEntry, QueueSnapshot, QueueStatus, SegmentStatus,
+    NzbSnapshotEntry, QueueSnapshot, QueueStatus, SchedulerSlotStats, SegmentStatus,
 };

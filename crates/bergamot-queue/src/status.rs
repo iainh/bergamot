@@ -112,3 +112,19 @@ pub struct NzbCompletionNotice {
     pub category: Option<String>,
     pub parameters: Vec<(String, String)>,
 }
+
+#[derive(Debug, Clone)]
+pub struct SchedulerSlotStats {
+    pub server_id: u32,
+    pub server_name: String,
+    pub level: u32,
+    pub max_connections: u32,
+    pub active_count: u32,
+    pub pending_bytes: u64,
+    pub ewma_bytes_per_sec: f64,
+    pub wfq_ratio: f64,
+    pub in_backoff: bool,
+    pub total_bytes_downloaded: u64,
+    pub total_articles_success: u64,
+    pub total_articles_failed: u64,
+}

@@ -203,6 +203,7 @@ var Statistics = new (function ($) {
 	this.update = function () {
 		if (serverVolumesLoaded) {
 			RPC.call("servervolumes", [], servervolumesLoaded);
+			RPC.call("schedulerstats", [], schedulerStatsLoaded);
 		}
 	};
 
@@ -1278,6 +1279,65 @@ var Statistics = new (function ($) {
 		);
 		prevTab.removeClass("btn-active");
 		newTab.addClass("btn-active");
+	}
+
+	function schedulerStatsLoaded(stats) {
+		if (!stats || stats.length === 0) {
+			$("#Scheduler_Stats_Section").hide();
+			return;
+		}
+
+		var $section = $("#Scheduler_Stats_Section");
+		if ($section.length === 0) {
+			$section = $("<div>", { id: "Scheduler_Stats_Section" });
+			$section.append('<h3 style="margin-top: 20px;">Server Scheduler (WFQ)</h3>');
+			var $table = $('<table class="table table-condensed table-bordered table-striped" id="Scheduler_Stats_Table">');
+			$table.append(
+				'<thead><tr>' +
+				'<th>Server</th>' +
+				'<th class="text-right">Level</th>' +
+				'<th class="text-right">Active / Max</th>' +
+				'<th class="text-right">Pending</th>' +
+				'<th class="text-right">Throughput</th>' +
+				'<th class="text-right">WFQ Ratio</th>' +
+				'<th class="text-center">Status</th>' +
+				'<th class="text-right">Downloaded</th>' +
+				'<th class="text-right">Articles (OK/Fail)</th>' +
+				'</tr></thead>'
+			);
+			$table.append('<tbody id="Scheduler_Stats_Body"></tbody>');
+			$section.append($table);
+			$StatisticsTable.append($section);
+		}
+
+		var $body = $("#Scheduler_Stats_Body");
+		$body.empty();
+		$section.show();
+
+		for (var i = 0; i < stats.length; i++) {
+			var s = stats[i];
+			var statusLabel = s.InBackoff
+				? '<span class="label label-warning">Backoff</span>'
+				: '<span class="label label-success">Active</span>';
+			var throughput = Util.formatSpeed(s.EwmaBytesPerSec);
+			var pendingMB = s.PendingBytes / (1024 * 1024);
+			var downloadedMB = s.TotalBytesDownloaded / (1024 * 1024);
+			var ratio = s.WfqRatio === 1.7976931348623157e+308 ? '&mdash;' : Util.round2(s.WfqRatio);
+
+			$body.append(
+				'<tr>' +
+				'<td>' + Util.textToHtml(s.ServerName) + '</td>' +
+				'<td class="text-right">' + s.Level + '</td>' +
+				'<td class="text-right">' + s.ActiveCount + ' / ' + s.MaxConnections + '</td>' +
+				'<td class="text-right">' + Util.formatSizeMB(pendingMB, s.PendingBytes) + '</td>' +
+				'<td class="text-right">' + throughput + '</td>' +
+				'<td class="text-right">' + ratio + '</td>' +
+				'<td class="text-center">' + statusLabel + '</td>' +
+				'<td class="text-right">' + Util.formatSizeMB(downloadedMB, s.TotalBytesDownloaded) + '</td>' +
+				'<td class="text-right">' + s.TotalArticlesSuccess + ' / ' + s.TotalArticlesFailed + '</td>' +
+				'</tr>'
+			);
+		}
 	}
 
 	function makeChart(serieData, curPointData, lineLabels, units, mousearea) {

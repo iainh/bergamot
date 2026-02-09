@@ -46,6 +46,7 @@ pub async fn dispatch_rpc(
         "loadlog" => rpc_loadlog(params, state),
         "log" => rpc_loadlog(params, state),
         "servervolumes" => rpc_servervolumes(state),
+        "schedulerstats" => rpc_schedulerstats(state).await,
         "resetservervolume" => rpc_resetservervolume(params, state),
         "config" | "loadconfig" => rpc_loadconfig(state),
         "saveconfig" => rpc_saveconfig(params, state),
@@ -883,6 +884,31 @@ fn build_server_volume(
         "BytesPerDays": days,
         "ArticlesPerDays": article_days,
     })
+}
+
+async fn rpc_schedulerstats(state: &AppState) -> Result<serde_json::Value, JsonRpcError> {
+    let queue = require_queue(state)?;
+    let stats = queue.get_scheduler_stats().await.map_err(rpc_error)?;
+    let entries: Vec<serde_json::Value> = stats
+        .into_iter()
+        .map(|s| {
+            serde_json::json!({
+                "ServerID": s.server_id,
+                "ServerName": s.server_name,
+                "Level": s.level,
+                "MaxConnections": s.max_connections,
+                "ActiveCount": s.active_count,
+                "PendingBytes": s.pending_bytes,
+                "EwmaBytesPerSec": s.ewma_bytes_per_sec,
+                "WfqRatio": s.wfq_ratio,
+                "InBackoff": s.in_backoff,
+                "TotalBytesDownloaded": s.total_bytes_downloaded,
+                "TotalArticlesSuccess": s.total_articles_success,
+                "TotalArticlesFailed": s.total_articles_failed,
+            })
+        })
+        .collect();
+    Ok(serde_json::json!(entries))
 }
 
 fn size_json(bytes: u64) -> serde_json::Value {

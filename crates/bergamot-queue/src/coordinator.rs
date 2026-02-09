@@ -264,6 +264,17 @@ impl QueueHandle {
         reply_rx.await.map_err(|_| QueueError::Shutdown)
     }
 
+    pub async fn get_scheduler_stats(
+        &self,
+    ) -> Result<Vec<crate::status::SchedulerSlotStats>, QueueError> {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        self.command_tx
+            .send(QueueCommand::GetSchedulerStats { reply: reply_tx })
+            .await
+            .map_err(|_| QueueError::Shutdown)?;
+        reply_rx.await.map_err(|_| QueueError::Shutdown)
+    }
+
     pub async fn shutdown(&self) -> Result<(), QueueError> {
         self.command_tx
             .send(QueueCommand::Shutdown)
@@ -780,6 +791,10 @@ impl QueueCoordinator {
             QueueCommand::SetStrategy { strategy } => {
                 self.strategy = strategy;
             }
+            QueueCommand::GetSchedulerStats { reply } => {
+                let stats = self.build_scheduler_stats();
+                let _ = reply.send(stats);
+            }
             QueueCommand::Shutdown => {
                 self.shutdown = true;
                 self.active_downloads.clear();
@@ -1138,6 +1153,36 @@ impl QueueCoordinator {
             download_paused: self.paused,
             speed_limit: self.download_rate,
         }
+    }
+
+    fn build_scheduler_stats(&self) -> Vec<crate::status::SchedulerSlotStats> {
+        let Some(ref sched) = self.server_scheduler else {
+            return Vec::new();
+        };
+        sched
+            .slots()
+            .iter()
+            .map(|slot| crate::status::SchedulerSlotStats {
+                server_id: slot.server_id,
+                server_name: slot.server_name.clone(),
+                level: slot.level,
+                max_connections: slot.max_connections,
+                active_count: slot.active_count,
+                pending_bytes: slot.pending_bytes,
+                ewma_bytes_per_sec: slot.weight(),
+                wfq_ratio: slot.wfq_ratio(),
+                in_backoff: slot.in_backoff,
+                total_bytes_downloaded: slot
+                    .total_bytes_downloaded
+                    .load(std::sync::atomic::Ordering::Relaxed),
+                total_articles_success: slot
+                    .total_articles_success
+                    .load(std::sync::atomic::Ordering::Relaxed),
+                total_articles_failed: slot
+                    .total_articles_failed
+                    .load(std::sync::atomic::Ordering::Relaxed),
+            })
+            .collect()
     }
 
     fn file_mut(&mut self, nzb_id: u32, file_index: u32) -> Option<&mut FileInfo> {

@@ -127,6 +127,9 @@ pub enum QueueCommand {
     SetStrategy {
         strategy: bergamot_core::models::PostStrategy,
     },
+    GetSchedulerStats {
+        reply: oneshot::Sender<Vec<crate::status::SchedulerSlotStats>>,
+    },
     Shutdown,
 }
 
