@@ -11,5 +11,5 @@ pub use crate::pool::{
     ConnectionFactory, RealConnectionFactory, ServerPool, ServerPoolManager, StatsRecorder,
 };
 pub use crate::protocol::{BodyReader, NntpConnection, NntpIo, NntpStream};
-pub use crate::scheduler::{ServerAssignment, ServerScheduler, ServerSlot};
+pub use crate::scheduler::{ServerScheduler, ServerSlot};
 pub use crate::speed::SpeedLimiter;

@@ -53,7 +53,7 @@
 //! ```
 
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 /// Tracks per-server state for the weighted fair queuing scheduler.
 ///
@@ -268,11 +268,6 @@ impl ServerScheduler {
             .sum()
     }
 
-    /// Total number of articles currently in-flight across all servers.
-    pub fn total_active(&self) -> u32 {
-        self.slots.iter().map(|s| s.active_count).sum()
-    }
-
     /// Total maximum connections across all servers.
     pub fn total_max_connections(&self) -> u32 {
         self.slots.iter().map(|s| s.max_connections).sum()
@@ -324,54 +319,11 @@ impl ServerScheduler {
         self.slots.iter_mut().find(|s| s.server_id == server_id)
     }
 
-    /// Returns all server IDs managed by this scheduler.
-    pub fn server_ids(&self) -> Vec<u32> {
-        self.slots.iter().map(|s| s.server_id).collect()
-    }
-
     /// Returns an iterator over all slots.
     pub fn slots(&self) -> &[ServerSlot] {
         &self.slots
     }
 
-    /// Check for straggling articles using LATE-style detection.
-    ///
-    /// Given a server and how long an article has been downloading, returns
-    /// true if the article is likely straggling. The threshold is:
-    ///   expected_time = article_size / server_ewma_throughput
-    ///   straggling if elapsed > expected_time * STRAGGLER_MULTIPLIER
-    ///
-    /// The multiplier (default 3x) accounts for natural variance in transfer
-    /// times. Only flags truly anomalous slowdowns, not normal jitter.
-    pub fn is_straggling(
-        &self,
-        server_id: u32,
-        article_size: u64,
-        elapsed: Duration,
-    ) -> bool {
-        const STRAGGLER_MULTIPLIER: f64 = 3.0;
-        const MIN_STRAGGLE_SECS: f64 = 5.0;
-
-        let Some(slot) = self.slot(server_id) else {
-            return false;
-        };
-        let weight = slot.weight();
-        if weight <= 0.0 {
-            return false;
-        }
-        let expected_secs = article_size as f64 / weight;
-        let threshold = (expected_secs * STRAGGLER_MULTIPLIER).max(MIN_STRAGGLE_SECS);
-        elapsed.as_secs_f64() > threshold
-    }
-}
-
-/// Assignment from the coordinator: which article goes to which server.
-#[derive(Debug, Clone)]
-pub struct ServerAssignment {
-    /// Which server this article is assigned to.
-    pub server_id: u32,
-    /// When this assignment was created, for straggler detection.
-    pub assigned_at: Instant,
 }
 
 #[cfg(test)]
@@ -511,31 +463,6 @@ mod tests {
         // First observation: 500KB in 1 second = 500KB/s
         slot.update_throughput(500_000, Duration::from_secs(1));
         assert!((slot.ewma_bytes_per_sec - 500_000.0).abs() < 1.0);
-    }
-
-    #[test]
-    fn is_straggling_detects_slow_article() {
-        let mut s1 = make_slot(1, 0, 2);
-        s1.ewma_bytes_per_sec = 1_000_000.0; // 1 MB/s
-
-        let scheduler = ServerScheduler::new(vec![s1]);
-
-        // 100KB article at 1MB/s should take ~0.1s. At 3x threshold (min 5s),
-        // need to exceed 5 seconds.
-        assert!(!scheduler.is_straggling(1, 100_000, Duration::from_secs(4)));
-        assert!(scheduler.is_straggling(1, 100_000, Duration::from_secs(6)));
-    }
-
-    #[test]
-    fn is_straggling_uses_expected_time_for_large_articles() {
-        let mut s1 = make_slot(1, 0, 2);
-        s1.ewma_bytes_per_sec = 100_000.0; // 100 KB/s
-
-        let scheduler = ServerScheduler::new(vec![s1]);
-
-        // 1MB article at 100KB/s → expected 10s, threshold 30s
-        assert!(!scheduler.is_straggling(1, 1_000_000, Duration::from_secs(20)));
-        assert!(scheduler.is_straggling(1, 1_000_000, Duration::from_secs(31)));
     }
 
     #[test]
