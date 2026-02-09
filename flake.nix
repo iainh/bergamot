@@ -12,6 +12,10 @@
       nixpkgs,
       flake-utils,
     }:
+    {
+      nixosModules.default = import ./nix/module.nix { inherit self; };
+    }
+    //
     flake-utils.lib.eachDefaultSystem (
       system:
       let

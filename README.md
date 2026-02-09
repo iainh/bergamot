@@ -42,6 +42,63 @@ The binary is produced at `target/release/nzbg`.
 cargo test --workspace
 ```
 
+### Docker
+
+Build a container image with Nix (Linux only):
+
+```sh
+nix build .#docker
+docker load < result
+```
+
+Or stream directly without writing a tarball:
+
+```sh
+nix run .#docker-stream | docker load
+```
+
+Run the container:
+
+```sh
+docker run -d \
+  -p 6789:6789 \
+  -v /path/to/config:/config \
+  -v /path/to/downloads:/downloads \
+  nzbg:latest
+```
+
+Place your `nzbg.conf` in the `/config` volume. The image includes `unrar`, `7z`, and Python 3 for extension scripts.
+
+### NixOS module
+
+Add nzbg as a flake input and enable the service:
+
+```nix
+# flake.nix
+inputs.nzbg.url = "github:iainh/nzbg";
+
+# configuration.nix
+{ inputs, ... }:
+{
+  imports = [ inputs.nzbg.nixosModules.default ];
+
+  services.nzbg = {
+    enable = true;
+    openFirewall = true;
+    settings = {
+      MainDir = "/data/usenet";
+      DestDir = "/data/usenet/completed";
+      Server1.Host = "news.example.com";
+      Server1.Port = 563;
+      Server1.Encryption = true;
+      Server1.Connections = 8;
+    };
+  };
+}
+```
+
+The module creates a `nzbg` system user, manages the systemd service, and includes `unrar`, `7z`, and Python 3 in the service PATH. State is stored in `/var/lib/nzbg` by default.
+
 ## Usage
 
 ```
