@@ -2327,6 +2327,8 @@ mod tests {
             par_remaining_size: 0,
             par_current_success_size: 0,
             par_failed_size: 0,
+            par_total_article_count: 0,
+            par_failed_article_count: 0,
             file_count: 0,
             remaining_file_count: 0,
             remaining_par_count: 0,

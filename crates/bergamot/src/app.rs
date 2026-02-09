@@ -223,6 +223,8 @@ pub fn restore_queue(disk: &DiskState<JsonFormat>) -> Result<Option<(DownloadQue
             par_remaining_size: 0,
             par_current_success_size: 0,
             par_failed_size: 0,
+            par_total_article_count: 0,
+            par_failed_article_count: 0,
             file_count: files.len() as u32,
             remaining_file_count,
             remaining_par_count: 0,

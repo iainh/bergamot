@@ -910,6 +910,7 @@ impl QueueCoordinator {
                         nzb.par_failed_size += article_size;
                         nzb.par_remaining_size =
                             nzb.par_remaining_size.saturating_sub(article_size);
+                        nzb.par_failed_article_count += 1;
                     }
                 }
                 crate::command::DownloadOutcome::Blocked { ref message } => {
@@ -991,9 +992,18 @@ impl QueueCoordinator {
 
     fn update_health(&mut self, nzb_id: u32) {
         if let Some(nzb) = self.queue.queue.iter_mut().find(|n| n.id == nzb_id) {
-            nzb.health = calculate_health(nzb.total_article_count, nzb.failed_article_count);
-            nzb.critical_health =
-                calculate_critical_health(nzb.total_article_count, nzb.par_size > 0);
+            let data_total = nzb
+                .total_article_count
+                .saturating_sub(nzb.par_total_article_count);
+            let data_failed = nzb
+                .failed_article_count
+                .saturating_sub(nzb.par_failed_article_count);
+            nzb.health = calculate_health(data_total, data_failed);
+            nzb.critical_health = calculate_critical_health(
+                data_total,
+                nzb.par_size,
+                nzb.par_failed_size,
+            );
         }
     }
 
@@ -1439,6 +1449,7 @@ impl QueueCoordinator {
         let mut total_article_count: u32 = 0;
         let mut par_size: u64 = 0;
         let mut par_file_count: u32 = 0;
+        let mut par_article_count: u32 = 0;
 
         for (file_idx, nzb_file) in parsed.files.iter().enumerate() {
             let file_id = self.queue.next_file_id;
@@ -1473,6 +1484,7 @@ impl QueueCoordinator {
             if is_par {
                 par_size += file_size;
                 par_file_count += 1;
+                par_article_count += article_count;
             }
 
             files.push(FileInfo {
@@ -1503,8 +1515,6 @@ impl QueueCoordinator {
         }
 
         let file_count = files.len() as u32;
-        let has_par = par_size > 0;
-
         let nzb = NzbInfo {
             id,
             kind: bergamot_core::models::NzbKind::Nzb,
@@ -1530,6 +1540,8 @@ impl QueueCoordinator {
             par_remaining_size: par_size,
             par_current_success_size: 0,
             par_failed_size: 0,
+            par_total_article_count: par_article_count,
+            par_failed_article_count: 0,
             file_count,
             remaining_file_count: file_count,
             remaining_par_count: par_file_count,
@@ -1560,7 +1572,7 @@ impl QueueCoordinator {
             url_status: bergamot_core::models::UrlStatus::None,
             script_status: bergamot_core::models::ScriptStatus::None,
             health: 1000,
-            critical_health: calculate_critical_health(total_article_count, has_par),
+            critical_health: calculate_critical_health(total_article_count, par_size, 0),
             files,
             completed_files: vec![],
             server_stats: vec![],
@@ -1638,14 +1650,17 @@ pub fn calculate_health(total_articles: u32, failed_articles: u32) -> u32 {
     (1000u64 * success as u64 / total_articles as u64) as u32
 }
 
-pub fn calculate_critical_health(total_articles: u32, has_par: bool) -> u32 {
-    if total_articles == 0 {
+pub fn calculate_critical_health(
+    total_articles: u32,
+    par_size: u64,
+    par_failed_size: u64,
+) -> u32 {
+    if total_articles == 0 || par_size == 0 {
         return 1000;
     }
-    if !has_par {
-        return 1000;
-    }
-    let max_repairable = total_articles / 10;
+    let usable_par = par_size.saturating_sub(par_failed_size);
+    let par_ratio = usable_par as f64 / par_size as f64;
+    let max_repairable = ((total_articles / 10) as f64 * par_ratio) as u32;
     let min_success = total_articles.saturating_sub(max_repairable);
     (1000u64 * min_success as u64 / total_articles as u64) as u32
 }
@@ -1727,6 +1742,8 @@ mod tests {
             par_remaining_size: 0,
             par_current_success_size: 0,
             par_failed_size: 0,
+            par_total_article_count: 0,
+            par_failed_article_count: 0,
             file_count: 0,
             remaining_file_count: 0,
             remaining_par_count: 0,
@@ -1925,6 +1942,8 @@ mod tests {
             par_remaining_size: 0,
             par_current_success_size: 0,
             par_failed_size: 0,
+            par_total_article_count: 0,
+            par_failed_article_count: 0,
             file_count: 0,
             remaining_file_count: 0,
             remaining_par_count: 0,
@@ -2008,6 +2027,8 @@ mod tests {
             par_remaining_size: 0,
             par_current_success_size: 0,
             par_failed_size: 0,
+            par_total_article_count: 0,
+            par_failed_article_count: 0,
             file_count: 0,
             remaining_file_count: 0,
             remaining_par_count: 0,
@@ -2092,6 +2113,8 @@ mod tests {
             par_remaining_size: 0,
             par_current_success_size: 0,
             par_failed_size: 0,
+            par_total_article_count: 0,
+            par_failed_article_count: 0,
             file_count: 0,
             remaining_file_count: 0,
             remaining_par_count: 0,
@@ -2177,6 +2200,8 @@ mod tests {
             par_remaining_size: 0,
             par_current_success_size: 0,
             par_failed_size: 0,
+            par_total_article_count: 0,
+            par_failed_article_count: 0,
             file_count: 0,
             remaining_file_count: 0,
             remaining_par_count: 0,
@@ -2322,14 +2347,25 @@ mod tests {
 
     #[test]
     fn calculate_critical_health_without_par() {
-        assert_eq!(calculate_critical_health(100, false), 1000);
+        assert_eq!(calculate_critical_health(100, 0, 0), 1000);
     }
 
     #[test]
-    fn calculate_critical_health_with_par() {
-        let ch = calculate_critical_health(100, true);
-        assert!(ch < 1000);
+    fn calculate_critical_health_with_no_par_failures() {
+        let ch = calculate_critical_health(100, 500, 0);
         assert_eq!(ch, 900);
+    }
+
+    #[test]
+    fn calculate_critical_health_with_partial_par_failure() {
+        let ch = calculate_critical_health(100, 500, 250);
+        assert!(ch > 900, "partial par failure should reduce repair capacity");
+        assert!(ch < 1000, "partial par failure should still allow some repair");
+    }
+
+    #[test]
+    fn calculate_critical_health_with_all_par_failed() {
+        assert_eq!(calculate_critical_health(100, 500, 500), 1000);
     }
 
     #[test]
@@ -2477,7 +2513,6 @@ mod tests {
         let mut nzb = sample_nzb(1, "test");
         nzb.total_article_count = 10;
         nzb.par_size = 100;
-        nzb.par_remaining_size = 100;
         let mut articles = Vec::new();
         for i in 0..10 {
             articles.push(ArticleInfo {
@@ -2955,7 +2990,7 @@ mod tests {
         assert_eq!(nzb.remaining_file_count, 2);
         assert_eq!(nzb.par_size, 200);
         assert_eq!(nzb.remaining_par_count, 1);
-        assert_eq!(nzb.critical_health, calculate_critical_health(3, true));
+        assert_eq!(nzb.critical_health, calculate_critical_health(3, 200, 0));
     }
 
     #[test]
