@@ -1707,7 +1707,7 @@ mod tests {
         assert_eq!(nzb.dupe_mode, nzbg_core::models::DupMode::All);
         assert_eq!(nzb.added_time, chrono::DateTime::<chrono::Utc>::from(added));
         assert_eq!(
-            nzb.final_dir.as_ref().map(|p| p.as_path()),
+            nzb.final_dir.as_deref(),
             Some(std::path::Path::new("/final"))
         );
         assert_eq!(nzb.post_process_parameters.len(), 2);
@@ -1988,7 +1988,7 @@ mod tests {
         );
         tokio::spawn(async move { coordinator.run().await });
 
-        let mut server = nzbg_nntp::NewsServer {
+        let server = nzbg_nntp::NewsServer {
             id: 1,
             name: "test".to_string(),
             active: false,

@@ -15,6 +15,12 @@ pub struct FileWriterPool {
     writers: Arc<DashMap<PathBuf, mpsc::Sender<WriteRequest>>>,
 }
 
+impl Default for FileWriterPool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FileWriterPool {
     pub fn new() -> Self {
         Self {

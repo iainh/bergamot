@@ -247,14 +247,21 @@ async fn append_nzb(rpc_addr: SocketAddr, nzb_path: &Path) -> u64 {
     let nzb_bytes = tokio::fs::read(nzb_path).await.expect("nzb read");
     let nzb_base64 = base64::engine::general_purpose::STANDARD.encode(&nzb_bytes);
     let filename = nzb_path.file_name().unwrap().to_string_lossy().to_string();
-    let result = jsonrpc_call(
-        rpc_addr,
-        "nzbget:secret",
-        "append",
-        serde_json::json!([filename, nzb_base64, "", 0]),
-    )
-    .await;
-    result.as_u64().expect("nzb id")
+    for attempt in 0..10 {
+        let body = jsonrpc_call_full(
+            rpc_addr,
+            "nzbget:secret",
+            "append",
+            serde_json::json!([filename, nzb_base64, "", 0]),
+        )
+        .await;
+        if let Some(id) = body.get("result").and_then(|v| v.as_u64()) {
+            return id;
+        }
+        tracing::warn!(attempt, ?body, "append_nzb did not return an id, retrying");
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+    panic!("append_nzb failed after 10 retries");
 }
 
 async fn wait_for_completion(rpc_addr: SocketAddr, nzb_id: u64, max_polls: usize) -> bool {
@@ -359,22 +366,13 @@ async fn end_to_end_append_download_flow() {
 
     tokio::time::sleep(Duration::from_millis(200)).await;
 
-    let nzb_bytes = tokio::fs::read(sample_nzb_path()).await.expect("nzb read");
-    let nzb_base64 = base64::engine::general_purpose::STANDARD.encode(&nzb_bytes);
-
-    let result = jsonrpc_call(
-        SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), rpc_port),
-        "nzbget:secret",
-        "append",
-        serde_json::json!(["sample.nzb", nzb_base64, "", 0]),
-    )
-    .await;
-    let nzb_id = result.as_u64().expect("nzb id");
+    let rpc_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), rpc_port);
+    let nzb_id = append_nzb(rpc_addr, &sample_nzb_path()).await;
 
     let mut completed = false;
     for _ in 0..50 {
         let groups = jsonrpc_call(
-            SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), rpc_port),
+            rpc_addr,
             "nzbget:secret",
             "listgroups",
             serde_json::json!([]),
@@ -408,10 +406,10 @@ async fn end_to_end_append_download_flow() {
             for dir in [&dest_dir, &working_dir] {
                 if let Ok(mut entries) = tokio::fs::read_dir(dir).await {
                     while let Ok(Some(entry)) = entries.next_entry().await {
-                        if let Ok(content) = tokio::fs::read_to_string(entry.path()).await {
-                            if content == "ABCDEFGH" {
-                                return content;
-                            }
+                        if let Ok(content) = tokio::fs::read_to_string(entry.path()).await
+                            && content == "ABCDEFGH"
+                        {
+                            return content;
                         }
                     }
                 }
@@ -516,22 +514,13 @@ async fn missing_article_falls_back_to_second_server() {
 
     tokio::time::sleep(Duration::from_millis(200)).await;
 
-    let nzb_bytes = tokio::fs::read(sample_nzb_path()).await.expect("nzb read");
-    let nzb_base64 = base64::engine::general_purpose::STANDARD.encode(&nzb_bytes);
-
-    let result = jsonrpc_call(
-        SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), rpc_port),
-        "nzbget:secret",
-        "append",
-        serde_json::json!(["sample.nzb", nzb_base64, "", 0]),
-    )
-    .await;
-    let nzb_id = result.as_u64().expect("nzb id");
+    let rpc_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), rpc_port);
+    let nzb_id = append_nzb(rpc_addr, &sample_nzb_path()).await;
 
     let mut completed = false;
     for _ in 0..50 {
         let groups = jsonrpc_call(
-            SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), rpc_port),
+            rpc_addr,
             "nzbget:secret",
             "listgroups",
             serde_json::json!([]),
@@ -562,10 +551,10 @@ async fn missing_article_falls_back_to_second_server() {
             for dir in [&dest_dir, &working_dir] {
                 if let Ok(mut entries) = tokio::fs::read_dir(dir).await {
                     while let Ok(Some(entry)) = entries.next_entry().await {
-                        if let Ok(content) = tokio::fs::read_to_string(entry.path()).await {
-                            if content == "ABCDEFGH" {
-                                return content;
-                            }
+                        if let Ok(content) = tokio::fs::read_to_string(entry.path()).await
+                            && content == "ABCDEFGH"
+                        {
+                            return content;
                         }
                     }
                 }
@@ -683,19 +672,19 @@ async fn crash_recovery_resumes_download() {
                 if let Ok(mut entries) = tokio::fs::read_dir(search_dir).await {
                     while let Ok(Some(entry)) = entries.next_entry().await {
                         let path = entry.path();
-                        if let Ok(c) = tokio::fs::read_to_string(&path).await {
-                            if c == expected {
-                                return c;
-                            }
+                        if let Ok(c) = tokio::fs::read_to_string(&path).await
+                            && c == expected
+                        {
+                            return c;
                         }
-                        if path.is_dir() {
-                            if let Ok(mut files) = tokio::fs::read_dir(&path).await {
-                                while let Ok(Some(f)) = files.next_entry().await {
-                                    if let Ok(c) = tokio::fs::read_to_string(f.path()).await {
-                                        if c == expected {
-                                            return c;
-                                        }
-                                    }
+                        if path.is_dir()
+                            && let Ok(mut files) = tokio::fs::read_dir(&path).await
+                        {
+                            while let Ok(Some(f)) = files.next_entry().await {
+                                if let Ok(c) = tokio::fs::read_to_string(f.path()).await
+                                    && c == expected
+                                {
+                                    return c;
                                 }
                             }
                         }
@@ -1368,10 +1357,10 @@ async fn concurrent_downloads_complete_without_corruption() {
                 for dir in [&working, &dest] {
                     if let Ok(mut entries) = tokio::fs::read_dir(dir).await {
                         while let Ok(Some(entry)) = entries.next_entry().await {
-                            if let Ok(content) = tokio::fs::read_to_string(entry.path()).await {
-                                if !contents.contains(&content) {
-                                    contents.push(content);
-                                }
+                            if let Ok(content) = tokio::fs::read_to_string(entry.path()).await
+                                && !contents.contains(&content)
+                            {
+                                contents.push(content);
                             }
                         }
                     }
@@ -1530,19 +1519,19 @@ async fn graceful_shutdown_under_load() {
                 if let Ok(mut entries) = tokio::fs::read_dir(search_dir).await {
                     while let Ok(Some(entry)) = entries.next_entry().await {
                         let path = entry.path();
-                        if let Ok(c) = tokio::fs::read_to_string(&path).await {
-                            if c == expected {
-                                return c;
-                            }
+                        if let Ok(c) = tokio::fs::read_to_string(&path).await
+                            && c == expected
+                        {
+                            return c;
                         }
-                        if path.is_dir() {
-                            if let Ok(mut files) = tokio::fs::read_dir(&path).await {
-                                while let Ok(Some(f)) = files.next_entry().await {
-                                    if let Ok(c) = tokio::fs::read_to_string(f.path()).await {
-                                        if c == expected {
-                                            return c;
-                                        }
-                                    }
+                        if path.is_dir()
+                            && let Ok(mut files) = tokio::fs::read_dir(&path).await
+                        {
+                            while let Ok(Some(f)) = files.next_entry().await {
+                                if let Ok(c) = tokio::fs::read_to_string(f.path()).await
+                                    && c == expected
+                                {
+                                    return c;
                                 }
                             }
                         }

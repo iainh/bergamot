@@ -899,7 +899,6 @@ mod tests {
         struct SlowNotFoundFactory {
             slow_server_id: u32,
             response_body: Vec<u8>,
-            slow_started: AtomicBool,
         }
 
         #[async_trait::async_trait]
@@ -960,7 +959,6 @@ mod tests {
         let factory = Arc::new(SlowNotFoundFactory {
             slow_server_id: 1,
             response_body: b"fast-data".to_vec(),
-            slow_started: AtomicBool::new(false),
         });
         let pool = ServerPool::with_factory(vec![s1, s2], factory);
 

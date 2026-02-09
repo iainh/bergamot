@@ -300,7 +300,7 @@ mod tests {
     fn session_cookie_rejects_tampered_value() {
         let secret = "my-secret-key";
         let cookie = create_session_cookie(AccessLevel::Control, secret);
-        let tampered = format!("tampered.{}", cookie.split('.').last().unwrap_or(""));
+        let tampered = format!("tampered.{}", cookie.split('.').next_back().unwrap_or(""));
         assert_eq!(verify_session_cookie(&tampered, secret), None);
     }
 
