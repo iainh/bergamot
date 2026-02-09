@@ -914,6 +914,7 @@ impl QueueCoordinator {
             }
         }
         self.update_health(nzb_id);
+        self.check_health_failure(nzb_id);
         self.check_file_completion(nzb_id, file_idx);
         self.check_nzb_completion(nzb_id);
     }
@@ -975,6 +976,37 @@ impl QueueCoordinator {
             nzb.health = calculate_health(nzb.total_article_count, nzb.failed_article_count);
             nzb.critical_health =
                 calculate_critical_health(nzb.total_article_count, nzb.par_remaining_size > 0);
+        }
+    }
+
+    fn check_health_failure(&mut self, nzb_id: u32) {
+        let should_fail = self
+            .queue
+            .queue
+            .iter()
+            .find(|n| n.id == nzb_id)
+            .is_some_and(|nzb| nzb.health < nzb.critical_health);
+
+        if should_fail
+            && let Some(idx) = self.queue.queue.iter().position(|n| n.id == nzb_id)
+        {
+            let mut nzb = self.queue.queue.remove(idx);
+            let has_par = nzb.par_remaining_size > 0;
+            let health_pct = nzb.health as f64 / 10.0;
+            let critical_pct = nzb.critical_health as f64 / 10.0;
+            if has_par {
+                tracing::warn!(
+                    "NZB {} health {:.1}% below critical {:.1}%, too many failed articles to repair with par2, marking as failed",
+                    nzb.name, health_pct, critical_pct
+                );
+            } else {
+                tracing::warn!(
+                    "NZB {} health {:.1}% — no par2 files available for repair, marking as failed ({} of {} articles failed)",
+                    nzb.name, health_pct, nzb.failed_article_count, nzb.total_article_count
+                );
+            }
+            nzb.delete_status = bergamot_core::models::DeleteStatus::Health;
+            self.add_to_history(nzb, HistoryKind::Nzb);
         }
     }
 
@@ -2426,6 +2458,7 @@ mod tests {
         );
         let mut nzb = sample_nzb(1, "test");
         nzb.total_article_count = 10;
+        nzb.par_remaining_size = 100;
         let mut articles = Vec::new();
         for i in 0..10 {
             articles.push(ArticleInfo {
@@ -3032,13 +3065,14 @@ mod tests {
             elapsed: None,
         });
 
-        let nzb = &coordinator.queue.queue[0];
+        let nzb = &coordinator.queue.history[0].nzb_info;
         let file = &nzb.files[0];
         assert_eq!(file.failed_size, 500);
         assert_eq!(file.remaining_size, 300);
         assert_eq!(file.failed_articles, 1);
         assert_eq!(nzb.failed_size, 500);
         assert_eq!(nzb.remaining_size, 500);
+        assert_eq!(nzb.delete_status, bergamot_core::models::DeleteStatus::Health);
     }
 
     fn complete_article(
