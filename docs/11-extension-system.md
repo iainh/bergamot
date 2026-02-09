@@ -1,6 +1,6 @@
 # Extension System
 
-Extensions (called "scripts" in nzbget) are external programs invoked at various points in the download lifecycle. nzbg discovers, manages, and executes them as child processes, communicating via environment variables and exit codes.
+Extensions (called "scripts" in nzbget) are external programs invoked at various points in the download lifecycle. bergamot discovers, manages, and executes them as child processes, communicating via environment variables and exit codes.
 
 ## Extension Types
 
@@ -45,7 +45,7 @@ pub enum ExtensionKind {
 
 ### Discovery
 
-On startup (and on `RELOAD` command), nzbg scans the directories listed in `ScriptDir` for executable files. Each file's header comments are parsed for metadata.
+On startup (and on `RELOAD` command), bergamot scans the directories listed in `ScriptDir` for executable files. Each file's header comments are parsed for metadata.
 
 ```
 ScriptDir/
@@ -149,7 +149,7 @@ All extension types share the same execution model:
 
 ```
 ┌──────────┐       env vars        ┌──────────────┐
-│   nzbg   │ ────────────────────► │  Extension   │
+│   bergamot   │ ────────────────────► │  Extension   │
 │          │                       │  (child      │
 │          │ ◄──── stdout/stderr   │   process)   │
 │          │                       │              │
@@ -218,7 +218,7 @@ pub enum ScriptMessage {
 
 ### stdout Protocol
 
-Extensions can send commands to nzbg by writing special lines to stdout:
+Extensions can send commands to bergamot by writing special lines to stdout:
 
 ```
 [NZB] NZBNAME=New Name
@@ -454,5 +454,5 @@ All extension types receive these base variables:
 | `NZBOP_DESTDIR` | Destination directory path |
 | `NZBOP_CATEGORY` | Default category |
 | `NZBOP_NZBDIR` | NZB directory path |
-| `NZBOP_VERSION` | nzbg version string |
+| `NZBOP_VERSION` | bergamot version string |
 | `NZBPO_*` | Extension-specific option values |

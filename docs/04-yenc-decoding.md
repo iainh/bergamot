@@ -256,7 +256,7 @@ fn write_segment_direct(
 
 ### Temporary File Mode
 
-Segments are written to a temporary file (e.g., `filename.nzbg.tmp`) and
+Segments are written to a temporary file (e.g., `filename.bergamot.tmp`) and
 renamed to the final name only after all parts have been received and verified.
 This prevents incomplete files from appearing in the output directory.
 

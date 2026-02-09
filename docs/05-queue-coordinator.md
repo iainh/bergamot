@@ -1,6 +1,6 @@
 # Queue Coordinator
 
-The Queue Coordinator is the central orchestrator of nzbg. It owns the download
+The Queue Coordinator is the central orchestrator of bergamot. It owns the download
 queue, schedules articles to download connections, tracks progress, detects
 file/NZB completion, and enforces speed and quota limits.
 

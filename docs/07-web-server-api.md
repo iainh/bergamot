@@ -210,7 +210,7 @@ fn required_access(method: &str) -> AccessLevel {
 
 ## RPC Protocols
 
-nzbg supports three RPC protocol variants on the same endpoint:
+bergamot supports three RPC protocol variants on the same endpoint:
 
 ### JSON-RPC 2.0
 

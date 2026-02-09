@@ -1,6 +1,6 @@
 # Logging & History
 
-nzbg provides a multi-target logging system and a history system that records the final state of every completed or failed download.
+bergamot provides a multi-target logging system and a history system that records the final state of every completed or failed download.
 
 ## Log Levels
 
@@ -63,7 +63,7 @@ pub struct LogMessage {
 
 ## Structured Logging with `tracing`
 
-nzbg uses the `tracing` crate for structured, async-aware logging. A custom `tracing::Subscriber` layer routes messages to the appropriate targets.
+bergamot uses the `tracing` crate for structured, async-aware logging. A custom `tracing::Subscriber` layer routes messages to the appropriate targets.
 
 ```rust
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
@@ -74,7 +74,7 @@ pub fn init_logging(config: &LogConfig) -> Result<LogHandle> {
         FileLogWriter::new(path, config.rotate_log)
     }).transpose()?;
 
-    let nzbg_layer = NzbgLogLayer {
+    let bergamot_layer = NzbgLogLayer {
         buffer: log_buffer.clone(),
         file_writer,
         targets: config.targets.clone(),
@@ -83,7 +83,7 @@ pub fn init_logging(config: &LogConfig) -> Result<LogHandle> {
     tracing_subscriber::registry()
         .with(EnvFilter::try_from_default_env()
             .unwrap_or_else(|_| EnvFilter::new("info")))
-        .with(nzbg_layer)
+        .with(bergamot_layer)
         .init();
 
     Ok(LogHandle { buffer: log_buffer })

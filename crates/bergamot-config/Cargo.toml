@@ -1,0 +1,13 @@
+[package]
+name = "bergamot-config"
+version = "0.1.0"
+edition = "2024"
+license.workspace = true
+
+[dependencies]
+dirs = "5.0"
+bergamot-core = { path = "../bergamot-core" }
+thiserror = "2.0"
+
+[dev-dependencies]
+tempfile = "3.11"

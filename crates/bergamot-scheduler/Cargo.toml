@@ -1,0 +1,24 @@
+[package]
+name = "bergamot-scheduler"
+version = "0.1.0"
+edition = "2024"
+license.workspace = true
+
+[dependencies]
+anyhow = "1.0"
+async-trait = "0.1"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+fs2 = "0.4"
+bergamot-config = { path = "../bergamot-config" }
+bergamot-core = { path = "../bergamot-core" }
+bergamot-feed = { path = "../bergamot-feed" }
+bergamot-diskstate = { path = "../bergamot-diskstate" }
+bergamot-nntp = { path = "../bergamot-nntp" }
+bergamot-queue = { path = "../bergamot-queue" }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+tokio = { version = "1.35", features = ["fs", "macros", "rt", "sync", "time"] }
+tracing = "0.1"
+
+[dev-dependencies]
+serde_json = "1.0"
+tempfile = "3"

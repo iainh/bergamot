@@ -1,6 +1,6 @@
 # Scheduler and Background Services
 
-nzbg runs several background services alongside the download engine. Each service performs a periodic task — scanning for new NZBs, monitoring disk space, cleaning up connections, maintaining history, and executing scheduled commands.
+bergamot runs several background services alongside the download engine. Each service performs a periodic task — scanning for new NZBs, monitoring disk space, cleaning up connections, maintaining history, and executing scheduled commands.
 
 ## Service Trait
 
@@ -476,7 +476,7 @@ impl Service for HealthChecker {
 
 impl HealthChecker {
     async fn check_disk_write_speed(&self) -> anyhow::Result<()> {
-        let test_path = self.dest_dir.join(".nzbg_health_check");
+        let test_path = self.dest_dir.join(".bergamot_health_check");
         let data = vec![0u8; 1024 * 1024]; // 1 MB
         let start = std::time::Instant::now();
         tokio::fs::write(&test_path, &data).await?;

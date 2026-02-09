@@ -1,8 +1,8 @@
 # 00 — Architecture Overview
 
-## What Is nzbg?
+## What Is bergamot?
 
-**nzbg** is a ground-up Rust reimplementation of
+**bergamot** is a ground-up Rust reimplementation of
 [NZBGet](https://nzbget.com), the efficient Usenet binary downloader
 originally written in C++. NZBGet downloads files described by NZB
 files from Usenet (NNTP) servers, reassembles multi-part articles,
@@ -11,7 +11,7 @@ archive extraction, script execution). It exposes a JSON-RPC / XML-RPC
 API consumed by its built-in web UI and by third-party tools such as
 Sonarr, Radarr, and SABnzbd integrations.
 
-nzbg aims to preserve NZBGet's battle-tested architecture while
+bergamot aims to preserve NZBGet's battle-tested architecture while
 leveraging Rust's type system, ownership model, and async runtime to
 deliver the same (or better) performance with stronger safety
 guarantees.
@@ -25,7 +25,7 @@ guarantees.
 │                        Clients                                      │
 │   ┌───────────┐   ┌──────────┐   ┌──────────────────┐               │
 │   │  Web UI   │   │   CLI    │   │  Third-Party Apps │              │
-│   │ (browser) │   │ (nzbg)   │   │ (Sonarr, etc.)   │               │
+│   │ (browser) │   │ (bergamot)   │   │ (Sonarr, etc.)   │               │
 │   └─────┬─────┘   └─────┬────┘   └─────────┬─────────┘              │
 │         │               │                  │                        │
 └─────────┼───────────────┼──────────────────┼────────────────────────┘
@@ -107,14 +107,14 @@ guarantees.
 
 ## Key Design Principles
 
-These principles are inherited from NZBGet and carry forward into nzbg.
+These principles are inherited from NZBGet and carry forward into bergamot.
 
 ### Performance First
 
 NZBGet was designed to saturate gigabit (and faster) links on hardware
-as modest as a Raspberry Pi. nzbg must match that bar. Hot paths —
+as modest as a Raspberry Pi. bergamot must match that bar. Hot paths —
 yEnc decoding, CRC computation, NNTP I/O — are benchmarked and
-optimised aggressively. Where NZBGet uses hand-tuned C++, nzbg
+optimised aggressively. Where NZBGet uses hand-tuned C++, bergamot
 leverages Rust's zero-cost abstractions, SIMD intrinsics, and
 `tokio`'s work-stealing scheduler.
 
@@ -131,19 +131,19 @@ Downloads can take hours or days. The system must survive:
 
 Memory and CPU budgets must remain predictable. The article cache is
 bounded. Decoded segments are flushed to disk promptly. Connection
-counts are configurable per server. nzbg should be comfortable running
+counts are configurable per server. bergamot should be comfortable running
 under systemd on a NAS with 512 MB of RAM.
 
 ### Extensibility
 
 Users customise behaviour with post-processing and scan scripts
-(Python, Bash, etc.). nzbg preserves the NZBGet extension interface
+(Python, Bash, etc.). bergamot preserves the NZBGet extension interface
 for backward compatibility and may introduce a native Rust plugin API
 in future.
 
 ### Compatibility
 
-nzbg aims for drop-in compatibility with NZBGet's:
+bergamot aims for drop-in compatibility with NZBGet's:
 
 - **Configuration file format** — existing `nzbget.conf` files should
   load with minimal changes.
@@ -180,7 +180,7 @@ documented per module.
 
 ### Modern API Surface
 
-While maintaining backward-compatible JSON-RPC, nzbg also exposes a
+While maintaining backward-compatible JSON-RPC, bergamot also exposes a
 clean REST/JSON API suitable for modern front-end frameworks and
 OpenAPI documentation.
 
@@ -190,17 +190,17 @@ The project is organised as a Cargo workspace with focused crates:
 
 | Crate            | Responsibility                              |
 |------------------|---------------------------------------------|
-| `nzbg`           | Binary entry point, CLI, top-level wiring   |
-| `nzbg-core`      | Data structures, config, error types        |
-| `nzbg-nntp`      | NNTP protocol, connection pooling           |
-| `nzbg-yenc`      | yEnc decoding, CRC-32                       |
-| `nzbg-nzb`       | NZB XML parsing                             |
-| `nzbg-queue`     | Queue coordinator, download orchestration   |
-| `nzbg-postproc`  | PAR2 verification, unpacking, scripts       |
-| `nzbg-server`    | HTTP server, JSON-RPC / XML-RPC handlers    |
-| `nzbg-feed`      | RSS/Atom feed polling & matching            |
-| `nzbg-scheduler` | Cron-like task scheduler                    |
-| `nzbg-diskstate` | On-disk persistence & crash recovery        |
+| `bergamot`           | Binary entry point, CLI, top-level wiring   |
+| `bergamot-core`      | Data structures, config, error types        |
+| `bergamot-nntp`      | NNTP protocol, connection pooling           |
+| `bergamot-yenc`      | yEnc decoding, CRC-32                       |
+| `bergamot-nzb`       | NZB XML parsing                             |
+| `bergamot-queue`     | Queue coordinator, download orchestration   |
+| `bergamot-postproc`  | PAR2 verification, unpacking, scripts       |
+| `bergamot-server`    | HTTP server, JSON-RPC / XML-RPC handlers    |
+| `bergamot-feed`      | RSS/Atom feed polling & matching            |
+| `bergamot-scheduler` | Cron-like task scheduler                    |
+| `bergamot-diskstate` | On-disk persistence & crash recovery        |
 
 Each crate has an independent test suite and can be developed, tested,
 and documented in isolation.

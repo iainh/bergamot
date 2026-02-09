@@ -1,22 +1,22 @@
 [workspace]
 resolver = "2"
 members = [
-  "crates/nzbg",
-  "crates/nzbg-scheduler",
-  "crates/nzbg-feed",
-  "crates/nzbg-extension",
-  "crates/nzbg-diskstate",
-  "crates/nzbg-logging",
-  "crates/nzbg-core",
-  "crates/nzbg-nzb",
-  "crates/nzbg-nntp",
-  "crates/nzbg-nntp-stub",
-  "crates/nzbg-yenc",
-  "crates/nzbg-queue",
-  "crates/nzbg-par2",
-  "crates/nzbg-postproc",
-  "crates/nzbg-server",
-  "crates/nzbg-config",
+  "crates/bergamot",
+  "crates/bergamot-scheduler",
+  "crates/bergamot-feed",
+  "crates/bergamot-extension",
+  "crates/bergamot-diskstate",
+  "crates/bergamot-logging",
+  "crates/bergamot-core",
+  "crates/bergamot-nzb",
+  "crates/bergamot-nntp",
+  "crates/bergamot-nntp-stub",
+  "crates/bergamot-yenc",
+  "crates/bergamot-queue",
+  "crates/bergamot-par2",
+  "crates/bergamot-postproc",
+  "crates/bergamot-server",
+  "crates/bergamot-config",
 ]
 
 [workspace.package]

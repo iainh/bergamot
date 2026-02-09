@@ -2,7 +2,7 @@
 
 ## Pipeline Overview
 
-After a download completes, nzbg runs a multi-stage post-processing pipeline to verify, repair, unpack, and organize the downloaded files.
+After a download completes, bergamot runs a multi-stage post-processing pipeline to verify, repair, unpack, and organize the downloaded files.
 
 ```
 Download Complete
@@ -206,7 +206,7 @@ All match   Mismatch or CRCs unavailable
 
 ### Quick Verification Using Article CRCs
 
-During download, the NNTP server provides a CRC32 for each article. nzbg stores these CRCs alongside the decoded file segments. During quick verification, these stored CRCs are compared against the CRC32 values in the PAR2 file's block checksums — if every block's CRC matches, the file is known good without reading the data back from disk:
+During download, the NNTP server provides a CRC32 for each article. bergamot stores these CRCs alongside the decoded file segments. During quick verification, these stored CRCs are compared against the CRC32 values in the PAR2 file's block checksums — if every block's CRC matches, the file is known good without reading the data back from disk:
 
 ```rust
 pub struct QuickVerifyResult {

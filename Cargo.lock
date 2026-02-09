@@ -244,6 +244,257 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
+name = "bergamot"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "base64",
+ "bergamot-config",
+ "bergamot-core",
+ "bergamot-diskstate",
+ "bergamot-extension",
+ "bergamot-feed",
+ "bergamot-logging",
+ "bergamot-nntp",
+ "bergamot-nntp-stub",
+ "bergamot-nzb",
+ "bergamot-postproc",
+ "bergamot-queue",
+ "bergamot-scheduler",
+ "bergamot-server",
+ "bergamot-yenc",
+ "chrono",
+ "clap",
+ "crc32fast",
+ "dashmap",
+ "dirs",
+ "libc",
+ "reqwest",
+ "rustls",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "bergamot-config"
+version = "0.1.0"
+dependencies = [
+ "bergamot-core",
+ "dirs",
+ "tempfile",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "bergamot-core"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "serde_repr",
+]
+
+[[package]]
+name = "bergamot-diskstate"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bergamot-core",
+ "bergamot-feed",
+ "chrono",
+ "fs2",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "bergamot-extension"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "bergamot-feed"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "bergamot-core",
+ "chrono",
+ "quick-xml",
+ "regex",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "bergamot-logging"
+version = "0.1.0"
+dependencies = [
+ "bergamot-core",
+ "chrono",
+ "serde",
+ "serde_json",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "bergamot-nntp"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "futures",
+ "rustls",
+ "serde",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-rustls",
+ "webpki-roots 0.26.11",
+]
+
+[[package]]
+name = "bergamot-nntp-stub"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "bergamot-nntp",
+ "clap",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "bergamot-nzb"
+version = "0.1.0"
+dependencies = [
+ "flate2",
+ "quick-xml",
+ "regex",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "bergamot-par2"
+version = "0.1.0"
+dependencies = [
+ "crc32fast",
+ "digest",
+ "md-5",
+ "memmap2",
+ "rayon",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tracing",
+]
+
+[[package]]
+name = "bergamot-postproc"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bergamot-core",
+ "bergamot-extension",
+ "bergamot-par2",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "bergamot-queue"
+version = "0.1.0"
+dependencies = [
+ "bergamot-core",
+ "bergamot-nzb",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "bergamot-scheduler"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "bergamot-config",
+ "bergamot-core",
+ "bergamot-diskstate",
+ "bergamot-feed",
+ "bergamot-nntp",
+ "bergamot-queue",
+ "chrono",
+ "fs2",
+ "reqwest",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "bergamot-server"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "axum-server",
+ "base64",
+ "bergamot-config",
+ "bergamot-core",
+ "bergamot-diskstate",
+ "bergamot-feed",
+ "bergamot-logging",
+ "bergamot-nntp",
+ "bergamot-queue",
+ "bergamot-scheduler",
+ "chrono",
+ "fs2",
+ "mime_guess",
+ "percent-encoding",
+ "quick-xml",
+ "reqwest",
+ "ring",
+ "rust-embed",
+ "rustls",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tower",
+ "tower-http 0.5.2",
+]
+
+[[package]]
+name = "bergamot-yenc"
+version = "0.1.0"
+dependencies = [
+ "crc32fast",
+ "hex",
+ "regex",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "bitflags"
 version = "2.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1270,257 +1521,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "071dfc062690e90b734c0b2273ce72ad0ffa95f0c74596bc250dcfd960262841"
 dependencies = [
  "autocfg",
-]
-
-[[package]]
-name = "nzbg"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "base64",
- "chrono",
- "clap",
- "crc32fast",
- "dashmap",
- "dirs",
- "libc",
- "nzbg-config",
- "nzbg-core",
- "nzbg-diskstate",
- "nzbg-extension",
- "nzbg-feed",
- "nzbg-logging",
- "nzbg-nntp",
- "nzbg-nntp-stub",
- "nzbg-nzb",
- "nzbg-postproc",
- "nzbg-queue",
- "nzbg-scheduler",
- "nzbg-server",
- "nzbg-yenc",
- "reqwest",
- "rustls",
- "serde_json",
- "tempfile",
- "tokio",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "nzbg-config"
-version = "0.1.0"
-dependencies = [
- "dirs",
- "nzbg-core",
- "tempfile",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "nzbg-core"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "serde_repr",
-]
-
-[[package]]
-name = "nzbg-diskstate"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chrono",
- "fs2",
- "nzbg-core",
- "nzbg-feed",
- "serde",
- "serde_json",
- "tempfile",
-]
-
-[[package]]
-name = "nzbg-extension"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "serde",
- "serde_json",
- "tokio",
-]
-
-[[package]]
-name = "nzbg-feed"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "chrono",
- "nzbg-core",
- "quick-xml",
- "regex",
- "reqwest",
- "serde",
- "serde_json",
- "tokio",
-]
-
-[[package]]
-name = "nzbg-logging"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "nzbg-core",
- "serde",
- "serde_json",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "nzbg-nntp"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "futures",
- "rustls",
- "serde",
- "thiserror 2.0.18",
- "tokio",
- "tokio-rustls",
- "webpki-roots 0.26.11",
-]
-
-[[package]]
-name = "nzbg-nntp-stub"
-version = "0.1.0"
-dependencies = [
- "base64",
- "clap",
- "nzbg-nntp",
- "serde",
- "serde_json",
- "tokio",
-]
-
-[[package]]
-name = "nzbg-nzb"
-version = "0.1.0"
-dependencies = [
- "flate2",
- "quick-xml",
- "regex",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "nzbg-par2"
-version = "0.1.0"
-dependencies = [
- "crc32fast",
- "digest",
- "md-5",
- "memmap2",
- "rayon",
- "tempfile",
- "thiserror 2.0.18",
- "tracing",
-]
-
-[[package]]
-name = "nzbg-postproc"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "nzbg-core",
- "nzbg-extension",
- "nzbg-par2",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "nzbg-queue"
-version = "0.1.0"
-dependencies = [
- "nzbg-core",
- "nzbg-nzb",
- "serde_json",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "nzbg-scheduler"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "chrono",
- "fs2",
- "nzbg-config",
- "nzbg-core",
- "nzbg-diskstate",
- "nzbg-feed",
- "nzbg-nntp",
- "nzbg-queue",
- "reqwest",
- "serde_json",
- "tempfile",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "nzbg-server"
-version = "0.1.0"
-dependencies = [
- "axum",
- "axum-server",
- "base64",
- "chrono",
- "fs2",
- "mime_guess",
- "nzbg-config",
- "nzbg-core",
- "nzbg-diskstate",
- "nzbg-feed",
- "nzbg-logging",
- "nzbg-nntp",
- "nzbg-queue",
- "nzbg-scheduler",
- "percent-encoding",
- "quick-xml",
- "reqwest",
- "ring",
- "rust-embed",
- "rustls",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tower",
- "tower-http 0.5.2",
-]
-
-[[package]]
-name = "nzbg-yenc"
-version = "0.1.0"
-dependencies = [
- "crc32fast",
- "hex",
- "regex",
- "thiserror 2.0.18",
 ]
 
 [[package]]

@@ -1,6 +1,6 @@
 # 01 — Core Data Structures
 
-This document defines every major data structure in nzbg, their
+This document defines every major data structure in bergamot, their
 relationships, ownership semantics, and Rust representations. These
 structures mirror NZBGet's internal model while adapting to Rust
 idioms.
@@ -433,7 +433,7 @@ pub struct DownloadQueue {
 ```
 
 In NZBGet, this structure is guarded by a global mutex
-(`DownloadQueue::Lock()`). In nzbg, we use a different concurrency
+(`DownloadQueue::Lock()`). In bergamot, we use a different concurrency
 model — see **Thread Safety** below.
 
 ---

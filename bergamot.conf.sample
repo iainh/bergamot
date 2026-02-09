@@ -1,0 +1,173 @@
+# bergamot sample configuration file
+# Copy this file to bergamot.conf and edit to suit your setup.
+# See docs/08-configuration.md for full option reference.
+
+##############################################################################
+# PATHS
+##############################################################################
+
+# Root directory for all other default paths
+MainDir=~/downloads
+
+# Final destination for completed downloads
+DestDir=${MainDir}/completed
+
+# Intermediate directory for post-processing (empty to disable)
+InterDir=${MainDir}/intermediate
+
+# Directory scanned for incoming .nzb files
+NzbDir=${MainDir}/nzb
+
+# Internal queue state directory
+QueueDir=${MainDir}/queue
+
+# Temporary directory for article assembly
+TempDir=${MainDir}/tmp
+
+# Post-processing / extension scripts directory
+ScriptDir=${MainDir}/scripts
+
+# Log file path (empty to disable file logging)
+LogFile=${DestDir}/bergamot.log
+
+##############################################################################
+# SECURITY
+##############################################################################
+
+# IP address to listen on (use 127.0.0.1 for local-only access)
+ControlIP=0.0.0.0
+ControlPort=6789
+
+# Web UI / API credentials
+ControlUsername=nzbget
+ControlPassword=tegbzn6789
+
+# Restricted access (settings are read-only)
+#RestrictedUsername=
+#RestrictedPassword=
+
+# Add-only access (can only add downloads)
+#AddUsername=
+#AddPassword=
+
+# Uncomment to enable HTTPS
+#SecureControl=yes
+#SecurePort=6791
+#SecureCert=/path/to/cert.pem
+#SecureKey=/path/to/key.pem
+
+##############################################################################
+# NEWS SERVERS
+##############################################################################
+
+# Primary server
+Server1.Active=yes
+Server1.Name=Primary
+Server1.Host=news.example.com
+Server1.Port=563
+Server1.Encryption=yes
+Server1.Username=your_username
+Server1.Password=your_password
+Server1.Connections=8
+Server1.Retention=0
+Server1.Level=0
+
+# Uncomment to add a fill/backup server
+#Server2.Active=yes
+#Server2.Name=Fill
+#Server2.Host=fill.example.com
+#Server2.Port=563
+#Server2.Encryption=yes
+#Server2.Username=your_username
+#Server2.Password=your_password
+#Server2.Connections=4
+#Server2.Level=1
+#Server2.Optional=yes
+
+##############################################################################
+# CATEGORIES
+##############################################################################
+
+Category1.Name=Movies
+Category1.DestDir=${MainDir}/movies
+
+Category2.Name=TV
+Category2.DestDir=${MainDir}/tv
+Category2.Aliases=Television, Series
+
+Category3.Name=Software
+Category3.DestDir=${MainDir}/software
+
+##############################################################################
+# DOWNLOAD
+##############################################################################
+
+AppendCategoryDir=yes
+NzbDirInterval=5
+DupeCheck=yes
+ContinuePartial=yes
+ArticleCache=0
+DirectWrite=yes
+DiskSpace=250
+KeepHistory=30
+DownloadRate=0
+
+##############################################################################
+# CONNECTION
+##############################################################################
+
+ArticleRetries=3
+ArticleInterval=10
+ArticleTimeout=60
+
+##############################################################################
+# PAR2 / VERIFICATION
+##############################################################################
+
+CrcCheck=yes
+ParCheck=auto
+ParRepair=yes
+ParRename=yes
+
+##############################################################################
+# UNPACK
+##############################################################################
+
+Unpack=yes
+DirectUnpack=no
+UnpackCleanupDisk=yes
+UnrarCmd=unrar
+SevenZipCmd=7z
+
+##############################################################################
+# LOGGING
+##############################################################################
+
+WriteLog=append
+RotateLog=3
+InfoTarget=both
+WarningTarget=both
+ErrorTarget=both
+DetailTarget=log
+DebugTarget=none
+LogBuffer=1000
+
+##############################################################################
+# SCHEDULED TASKS
+##############################################################################
+
+# Example: pause downloads at 8am on weekdays
+#Task1.Time=08:00
+#Task1.WeekDays=1-5
+#Task1.Command=PauseDownload
+#Task1.Param=
+
+##############################################################################
+# RSS FEEDS
+##############################################################################
+
+# Example: poll an indexer every 15 minutes
+#Feed1.Name=My Indexer
+#Feed1.URL=https://indexer.example.com/rss?apikey=YOUR_API_KEY
+#Feed1.Interval=15
+#Feed1.Filter=size:>100MB

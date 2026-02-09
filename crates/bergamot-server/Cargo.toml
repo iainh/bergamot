@@ -1,0 +1,37 @@
+[package]
+name = "bergamot-server"
+version = "0.1.0"
+edition = "2024"
+license.workspace = true
+
+[dependencies]
+axum = { version = "0.7", features = ["macros"] }
+base64 = "0.22"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+percent-encoding = "2"
+bergamot-config = { path = "../bergamot-config" }
+bergamot-core = { path = "../bergamot-core" }
+bergamot-feed = { path = "../bergamot-feed" }
+bergamot-diskstate = { path = "../bergamot-diskstate" }
+bergamot-logging = { path = "../bergamot-logging" }
+bergamot-nntp = { path = "../bergamot-nntp" }
+bergamot-queue = { path = "../bergamot-queue" }
+bergamot-scheduler = { path = "../bergamot-scheduler" }
+mime_guess = "2"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+rust-embed = "8"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "2.0"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "sync"] }
+tower = { version = "0.5", features = ["util"] }
+tower-http = { version = "0.5", features = ["cors", "compression-gzip", "fs"] }
+axum-server = { version = "0.8.0", features = ["tls-rustls-no-provider"] }
+quick-xml = "0.37"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+ring = "0.17.14"
+fs2 = "0.4"
+
+[dev-dependencies]
+tempfile = "3"
+tower = "0.5"

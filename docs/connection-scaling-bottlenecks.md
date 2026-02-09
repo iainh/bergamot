@@ -6,7 +6,7 @@ When increasing the connection count for both servers from 15 to 50 (100 total),
 
 ### 1. `try_acquire_owned()` fails instantly when busy (Critical)
 
-**File:** `crates/nzbg-nntp/src/pool.rs` (line 92)
+**File:** `crates/bergamot-nntp/src/pool.rs` (line 92)
 
 When both servers' semaphores have 0 permits available, `fetch_article` returns `"no servers available"` immediately instead of waiting. At 100 total connections, this happens frequently — tasks fail in tight loops, creating churn and wasted work instead of waiting for a permit.
 
@@ -14,25 +14,25 @@ The sequential server iteration with a fixed order also biases load toward the f
 
 ### 2. Coordinator polls at 100ms intervals
 
-**File:** `crates/nzbg-queue/src/coordinator.rs` (line 333)
+**File:** `crates/bergamot-queue/src/coordinator.rs` (line 333)
 
 Slots refill only every 100ms. At high concurrency, segments complete faster than the scheduler reacts, leaving connections idle between polling ticks. This creates a sawtooth pattern where slots drain quickly but refill slowly.
 
 ### 3. Assignment channel capacity (64) < total connections (100)
 
-**File:** `crates/nzbg-queue/src/coordinator.rs` (line 299)
+**File:** `crates/bergamot-queue/src/coordinator.rs` (line 299)
 
 `try_fill_download_slots` uses `try_send` and stops dispatching when the channel is full, underutilizing available connections. The coordinator also can't refill until the next 100ms tick, compounding the problem.
 
 ### 4. SpeedLimiter global Mutex
 
-**File:** `crates/nzbg/src/download.rs` (lines 51–86)
+**File:** `crates/bergamot/src/download.rs` (lines 51–86)
 
 Every spawned task locks `Arc<Mutex<SpeedLimiter>>` twice per segment (once for `reserve()`, once for `after_sleep()`). When rate limiting is enabled, this serializes the start of all 100 downloads through a single mutex, causing convoy effects and delaying NNTP commands while connections sit idle.
 
 ### 5. Blocking file I/O in write_segment
 
-**File:** `crates/nzbg/src/writer.rs` (lines 25–33)
+**File:** `crates/bergamot/src/writer.rs` (lines 25–33)
 
 Every segment write performs:
 - `try_clone().await` (extra syscall)
@@ -44,7 +44,7 @@ All of this happens while holding a per-file mutex. This blocks Tokio worker thr
 
 ### 6. Excessive memory copies
 
-**Files:** `crates/nzbg-nntp/src/pool.rs` (lines 148–154), `crates/nzbg/src/download.rs` (lines 37, 101)
+**Files:** `crates/bergamot-nntp/src/pool.rs` (lines 148–154), `crates/bergamot/src/download.rs` (lines 37, 101)
 
 Each article body goes through multiple full-buffer copies:
 1. Lines assembled and joined in `ServerPool` (`body_lines.join`)
@@ -56,13 +56,13 @@ At 100 concurrent tasks this creates superlinear memory and CPU pressure, satura
 
 ### 7. BoundedCache uses std::sync::Mutex
 
-**File:** `crates/nzbg/src/cache.rs`
+**File:** `crates/bergamot/src/cache.rs`
 
 `BoundedCache::get/put` uses a blocking `std::sync::Mutex`. Under Tokio, blocking a runtime worker thread on contention reduces the executor's ability to drive sockets. The `.cloned()` in `get()` also copies the entire cached article buffer, amplifying the cost at scale.
 
 ### 8. ServerPool per-server locks
 
-**File:** `crates/nzbg-nntp/src/pool.rs`
+**File:** `crates/bergamot-nntp/src/pool.rs`
 
 Per server, every fetch touches:
 - `idle_connections: Mutex<Vec<...>>` (lock on acquire and return)

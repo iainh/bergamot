@@ -1,62 +1,62 @@
 # Rust Architecture
 
-This document covers Rust-specific design decisions for nzbg: crate structure, async runtime, concurrency model, error handling, dependencies, testing, and deployment concerns.
+This document covers Rust-specific design decisions for bergamot: crate structure, async runtime, concurrency model, error handling, dependencies, testing, and deployment concerns.
 
 ## Crate / Module Structure
 
-nzbg is organized as a Cargo workspace with focused crates:
+bergamot is organized as a Cargo workspace with focused crates:
 
 ```
-nzbg/
+bergamot/
 ├── Cargo.toml              # workspace root
-├── nzbg/                   # binary crate (main entry point)
+├── bergamot/                   # binary crate (main entry point)
 │   ├── Cargo.toml
 │   └── src/
 │       └── main.rs
-├── nzbg-core/              # shared data structures, config, types
+├── bergamot-core/              # shared data structures, config, types
 │   ├── Cargo.toml
 │   └── src/
 │       ├── lib.rs
 │       ├── config.rs       # configuration parsing & defaults
 │       ├── types.rs        # NzbInfo, FileInfo, ArticleInfo, etc.
 │       └── error.rs        # shared error types
-├── nzbg-nntp/              # NNTP protocol client, connection pool
+├── bergamot-nntp/              # NNTP protocol client, connection pool
 │   ├── Cargo.toml
 │   └── src/
 │       ├── lib.rs
 │       ├── connection.rs   # single NNTP connection
 │       ├── pool.rs         # connection pool per server
 │       └── response.rs     # response parsing
-├── nzbg-nzb/               # NZB XML parser
+├── bergamot-nzb/               # NZB XML parser
 │   ├── Cargo.toml
 │   └── src/
 │       └── lib.rs
-├── nzbg-yenc/              # yEnc decoder
+├── bergamot-yenc/              # yEnc decoder
 │   ├── Cargo.toml
 │   └── src/
 │       └── lib.rs
-├── nzbg-queue/             # queue coordinator, scheduler
+├── bergamot-queue/             # queue coordinator, scheduler
 │   ├── Cargo.toml
 │   └── src/
 │       ├── lib.rs
 │       ├── coordinator.rs  # QueueCoordinator actor
 │       ├── scheduler.rs    # article scheduling
 │       └── disk_state.rs   # persistence
-├── nzbg-post/              # post-processing (PAR2, unpack, move)
+├── bergamot-post/              # post-processing (PAR2, unpack, move)
 │   ├── Cargo.toml
 │   └── src/
 │       ├── lib.rs
 │       ├── par2.rs         # PAR2 verify/repair
 │       ├── unpack.rs       # archive extraction
 │       └── cleanup.rs      # temp file removal, renaming
-├── nzbg-api/               # web server, JSON-RPC, XML-RPC
+├── bergamot-api/               # web server, JSON-RPC, XML-RPC
 │   ├── Cargo.toml
 │   └── src/
 │       ├── lib.rs
 │       ├── jsonrpc.rs
 │       ├── xmlrpc.rs
 │       └── routes.rs
-└── nzbg-cli/               # command-line interface
+└── bergamot-cli/               # command-line interface
     ├── Cargo.toml
     └── src/
         └── lib.rs
@@ -66,48 +66,48 @@ nzbg/
 
 | Crate | Responsibility |
 |-------|----------------|
-| `nzbg` | Binary entry point — wires subsystems, handles signals, runs `main()` |
-| `nzbg-core` | Shared types (`NzbInfo`, `FileInfo`, `ArticleInfo`), configuration parsing, error types, constants |
-| `nzbg-nntp` | NNTP protocol implementation, connection lifecycle, connection pool with server levels/groups |
-| `nzbg-nzb` | Streaming NZB XML parsing via `quick-xml`, filename extraction, PAR2 classification, file reordering |
-| `nzbg-yenc` | yEnc line-by-line decoder, CRC32 verification, header parsing (`=ybegin`/`=ypart`/`=yend`) |
-| `nzbg-queue` | Queue coordinator actor, article scheduling, download slot management, health monitoring, disk-state persistence |
-| `nzbg-post` | Post-processing pipeline: PAR2 verify/repair, archive extraction (RAR/7z/ZIP), cleanup, file move, extension scripts |
-| `nzbg-api` | Axum-based HTTP server, JSON-RPC and XML-RPC endpoints for nzbget API compatibility, REST endpoints |
-| `nzbg-cli` | CLI argument parsing with `clap`, remote server commands (`-L`, `-P`, `-U`), daemon mode |
+| `bergamot` | Binary entry point — wires subsystems, handles signals, runs `main()` |
+| `bergamot-core` | Shared types (`NzbInfo`, `FileInfo`, `ArticleInfo`), configuration parsing, error types, constants |
+| `bergamot-nntp` | NNTP protocol implementation, connection lifecycle, connection pool with server levels/groups |
+| `bergamot-nzb` | Streaming NZB XML parsing via `quick-xml`, filename extraction, PAR2 classification, file reordering |
+| `bergamot-yenc` | yEnc line-by-line decoder, CRC32 verification, header parsing (`=ybegin`/`=ypart`/`=yend`) |
+| `bergamot-queue` | Queue coordinator actor, article scheduling, download slot management, health monitoring, disk-state persistence |
+| `bergamot-post` | Post-processing pipeline: PAR2 verify/repair, archive extraction (RAR/7z/ZIP), cleanup, file move, extension scripts |
+| `bergamot-api` | Axum-based HTTP server, JSON-RPC and XML-RPC endpoints for nzbget API compatibility, REST endpoints |
+| `bergamot-cli` | CLI argument parsing with `clap`, remote server commands (`-L`, `-P`, `-U`), daemon mode |
 
 ### Dependency Graph
 
 ```
-nzbg (binary)
- ├── nzbg-core
- ├── nzbg-nntp ──► nzbg-core
- ├── nzbg-nzb ──► nzbg-core
- ├── nzbg-yenc
- ├── nzbg-queue ──► nzbg-core, nzbg-nntp, nzbg-nzb, nzbg-yenc
- ├── nzbg-post ──► nzbg-core
- ├── nzbg-api ──► nzbg-core, nzbg-queue, nzbg-post
- └── nzbg-cli ──► nzbg-core, nzbg-api
+bergamot (binary)
+ ├── bergamot-core
+ ├── bergamot-nntp ──► bergamot-core
+ ├── bergamot-nzb ──► bergamot-core
+ ├── bergamot-yenc
+ ├── bergamot-queue ──► bergamot-core, bergamot-nntp, bergamot-nzb, bergamot-yenc
+ ├── bergamot-post ──► bergamot-core
+ ├── bergamot-api ──► bergamot-core, bergamot-queue, bergamot-post
+ └── bergamot-cli ──► bergamot-core, bergamot-api
 ```
 
 Design rationale:
 
-- **`nzbg-yenc` has no internal dependencies** — it is a pure data-transformation library, usable and testable in isolation.
-- **`nzbg-queue` depends on `nzbg-nntp`, `nzbg-nzb`, `nzbg-yenc`** — it orchestrates the full download pipeline.
-- **`nzbg-post` depends only on `nzbg-core`** — post-processing operates on files on disk and does not need NNTP or queue internals.
-- **`nzbg-api` depends on `nzbg-queue` and `nzbg-post`** — it sends commands to the coordinator and queries post-processing status.
+- **`bergamot-yenc` has no internal dependencies** — it is a pure data-transformation library, usable and testable in isolation.
+- **`bergamot-queue` depends on `bergamot-nntp`, `bergamot-nzb`, `bergamot-yenc`** — it orchestrates the full download pipeline.
+- **`bergamot-post` depends only on `bergamot-core`** — post-processing operates on files on disk and does not need NNTP or queue internals.
+- **`bergamot-api` depends on `bergamot-queue` and `bergamot-post`** — it sends commands to the coordinator and queries post-processing status.
 
 ---
 
 ## Async Runtime
 
-nzbg uses **tokio** with the multi-threaded runtime:
+bergamot uses **tokio** with the multi-threaded runtime:
 
 ```rust
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let config = nzbg_core::Config::load()?;
-    nzbg::run(config).await
+    let config = bergamot_core::Config::load()?;
+    bergamot::run(config).await
 }
 ```
 
@@ -121,7 +121,7 @@ tokio is chosen because:
 
 ### Runtime Configuration
 
-The runtime is configured with the default multi-threaded settings. Worker thread count defaults to the number of CPU cores, which is appropriate for nzbg's workload — NNTP I/O is the bottleneck on most systems, not CPU.
+The runtime is configured with the default multi-threaded settings. Worker thread count defaults to the number of CPU cores, which is appropriate for bergamot's workload — NNTP I/O is the bottleneck on most systems, not CPU.
 
 For embedded/NAS deployments with limited cores, tokio's work-stealing scheduler still performs well by multiplexing many connections onto a small thread pool.
 
@@ -239,7 +239,7 @@ The coordinator limits total active downloads to the sum of configured connectio
 Each library crate defines its own error types using `thiserror`. This produces well-typed, descriptive errors that callers can match on:
 
 ```rust
-// nzbg-nntp/src/error.rs
+// bergamot-nntp/src/error.rs
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -271,7 +271,7 @@ Each crate's error enum covers that crate's failure modes. `#[from]` conversions
 The binary crate and top-level orchestration use `anyhow` for ergonomic error propagation with context:
 
 ```rust
-// nzbg/src/main.rs
+// bergamot/src/main.rs
 use anyhow::{Context, Result};
 
 async fn run(config: Config) -> Result<()> {
@@ -292,33 +292,33 @@ The boundary is clear: library crates return typed errors via `thiserror`, the b
 | Crate | Version | Purpose | Used By |
 |-------|---------|---------|---------|
 | `tokio` | 1.x | Async runtime, timers, sync primitives, signal handling | all crates |
-| `axum` | 0.8 | HTTP server framework for web UI + API | nzbg-api |
-| `hyper` | 1.x | HTTP/1.1 (used transitively by axum) | nzbg-api |
-| `reqwest` | 0.12 | HTTP client for URL fetches, feed polling | nzbg-queue, nzbg-api |
-| `quick-xml` | 0.37 | Streaming XML parser (NZB, RSS, XML-RPC) | nzbg-nzb, nzbg-api |
+| `axum` | 0.8 | HTTP server framework for web UI + API | bergamot-api |
+| `hyper` | 1.x | HTTP/1.1 (used transitively by axum) | bergamot-api |
+| `reqwest` | 0.12 | HTTP client for URL fetches, feed polling | bergamot-queue, bergamot-api |
+| `quick-xml` | 0.37 | Streaming XML parser (NZB, RSS, XML-RPC) | bergamot-nzb, bergamot-api |
 | `serde` | 1.x | Serialization framework | all crates |
-| `serde_json` | 1.x | JSON serialization (config, state, JSON-RPC) | nzbg-core, nzbg-api, nzbg-queue |
-| `rustls` | 0.23 | TLS implementation (no OpenSSL dependency) | nzbg-nntp |
-| `tokio-rustls` | 0.26 | Tokio integration for rustls | nzbg-nntp |
-| `webpki-roots` | 0.26 | Mozilla CA root certificates | nzbg-nntp |
-| `crc32fast` | 1.x | Hardware-accelerated CRC32 (SSE4.2 / ARMv8) | nzbg-yenc, nzbg-post |
-| `clap` | 4.x | CLI argument parsing with derive macros | nzbg-cli |
+| `serde_json` | 1.x | JSON serialization (config, state, JSON-RPC) | bergamot-core, bergamot-api, bergamot-queue |
+| `rustls` | 0.23 | TLS implementation (no OpenSSL dependency) | bergamot-nntp |
+| `tokio-rustls` | 0.26 | Tokio integration for rustls | bergamot-nntp |
+| `webpki-roots` | 0.26 | Mozilla CA root certificates | bergamot-nntp |
+| `crc32fast` | 1.x | Hardware-accelerated CRC32 (SSE4.2 / ARMv8) | bergamot-yenc, bergamot-post |
+| `clap` | 4.x | CLI argument parsing with derive macros | bergamot-cli |
 | `tracing` | 0.1 | Structured, async-aware logging facade | all crates |
-| `tracing-subscriber` | 0.3 | Logging subscriber implementation, filtering | nzbg (binary) |
-| `thiserror` | 2.x | Derive `Error` impls for library error types | nzbg-core, nzbg-nntp, nzbg-nzb, nzbg-yenc |
-| `anyhow` | 1.x | Ergonomic error handling in binary crate | nzbg (binary) |
-| `chrono` | 0.4 | Date/time handling, log rotation | nzbg-core, nzbg-post |
-| `regex` | 1.x | Filename extraction, feed filter pattern matching | nzbg-nzb, nzbg-queue |
-| `walkdir` | 2.x | Recursive directory scanning (extensions, incoming NZBs) | nzbg-post, nzbg-queue |
-| `flate2` | 1.x | Gzip decompression for `.nzb.gz` files | nzbg-nzb |
-| `proptest` | 1.x | Property-based testing (dev-dependency) | nzbg-yenc, nzbg-nzb |
+| `tracing-subscriber` | 0.3 | Logging subscriber implementation, filtering | bergamot (binary) |
+| `thiserror` | 2.x | Derive `Error` impls for library error types | bergamot-core, bergamot-nntp, bergamot-nzb, bergamot-yenc |
+| `anyhow` | 1.x | Ergonomic error handling in binary crate | bergamot (binary) |
+| `chrono` | 0.4 | Date/time handling, log rotation | bergamot-core, bergamot-post |
+| `regex` | 1.x | Filename extraction, feed filter pattern matching | bergamot-nzb, bergamot-queue |
+| `walkdir` | 2.x | Recursive directory scanning (extensions, incoming NZBs) | bergamot-post, bergamot-queue |
+| `flate2` | 1.x | Gzip decompression for `.nzb.gz` files | bergamot-nzb |
+| `proptest` | 1.x | Property-based testing (dev-dependency) | bergamot-yenc, bergamot-nzb |
 
 ### Why rustls over OpenSSL
 
 - **No system dependency** — statically linked, no `libssl-dev` required at build or runtime.
 - **Memory safety** — pure Rust implementation eliminates a class of vulnerabilities.
 - **Cross-compilation** — works on any target without a C toolchain for OpenSSL.
-- **Performance** — competitive with OpenSSL for the TLS workloads nzbg encounters (long-lived connections, bulk data transfer).
+- **Performance** — competitive with OpenSSL for the TLS workloads bergamot encounters (long-lived connections, bulk data transfer).
 
 ---
 
@@ -362,7 +362,7 @@ async fn test_full_download_flow() {
     server.add_article("article-1@test", yenc_encode(b"hello"));
 
     let config = test_config(server.addr());
-    let app = nzbg::App::new(config).await.unwrap();
+    let app = bergamot::App::new(config).await.unwrap();
 
     let nzb_id = app.add_nzb(test_nzb()).await.unwrap();
     app.wait_for_completion(nzb_id).await;
@@ -414,11 +414,11 @@ proptest! {
 
 ## API Compatibility
 
-nzbg maintains backward compatibility with nzbget's RPC API so that existing tools (Sonarr, Radarr, Lidarr, NZBHydra, etc.) work without modification:
+bergamot maintains backward compatibility with nzbget's RPC API so that existing tools (Sonarr, Radarr, Lidarr, NZBHydra, etc.) work without modification:
 
 ```
 ┌─────────────┐     JSON-RPC       ┌───────────┐
-│  Sonarr     │ ──────────────────► │  nzbg     │
+│  Sonarr     │ ──────────────────► │  bergamot     │
 │  Radarr     │     XML-RPC        │  /jsonrpc  │
 │  NZBHydra   │ ──────────────────► │  /xmlrpc   │
 └─────────────┘                     └───────────┘
@@ -427,7 +427,7 @@ nzbg maintains backward compatibility with nzbget's RPC API so that existing too
 Both JSON-RPC and XML-RPC endpoints implement the same method set. The API layer translates between RPC calls and `QueueCommand` messages sent to the coordinator.
 
 ```rust
-// nzbg-api/src/jsonrpc.rs
+// bergamot-api/src/jsonrpc.rs
 pub async fn handle_jsonrpc(
     State(state): State<AppState>,
     Json(request): Json<JsonRpcRequest>,
@@ -541,10 +541,10 @@ If in-flight downloads do not complete within a configurable timeout (default: 3
 use clap::Parser;
 
 #[derive(Parser)]
-#[command(name = "nzbg", about = "Usenet downloader")]
+#[command(name = "bergamot", about = "Usenet downloader")]
 pub struct Cli {
     /// Path to configuration file
-    #[arg(short, long, default_value = "/etc/nzbg/nzbg.conf")]
+    #[arg(short, long, default_value = "/etc/bergamot/bergamot.conf")]
     pub config: PathBuf,
 
     /// Override data directory
@@ -599,7 +599,7 @@ pub struct Config {
 Environment variables override config file values using the `NZBG_` prefix:
 
 ```
-NZBG_DESTDIR=/downloads nzbg
+NZBG_DESTDIR=/downloads bergamot
 ```
 
 ---

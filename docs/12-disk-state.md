@@ -1,6 +1,6 @@
 # Disk State & Persistence
 
-nzbg persists its runtime state (queue, history, download progress, server statistics, feed state) to disk so that it survives restarts and crashes. This document covers the state directory layout, serialization approach, persistence triggers, partial download resumption, crash-safety strategy, and version migration.
+bergamot persists its runtime state (queue, history, download progress, server statistics, feed state) to disk so that it survives restarts and crashes. This document covers the state directory layout, serialization approach, persistence triggers, partial download resumption, crash-safety strategy, and version migration.
 
 ---
 
@@ -41,7 +41,7 @@ QueueDir/                          # default: $DataDir/queue
 
 ## Serialization Format
 
-nzbget uses custom binary/text formats for state persistence. For nzbg, we use **serde** with **JSON** as the primary format for debuggability, with an option to switch to **bincode** for performance if needed.
+nzbget uses custom binary/text formats for state persistence. For bergamot, we use **serde** with **JSON** as the primary format for debuggability, with an option to switch to **bincode** for performance if needed.
 
 ```rust
 use serde::{Deserialize, Serialize};
@@ -521,7 +521,7 @@ This guarantees that a state file is either the old complete version or the new 
 
 ### Advisory Lock
 
-On startup, nzbg acquires an advisory lock on `diskstate.lock` to prevent two instances from corrupting shared state:
+On startup, bergamot acquires an advisory lock on `diskstate.lock` to prevent two instances from corrupting shared state:
 
 ```rust
 use fs2::FileExt;
@@ -538,7 +538,7 @@ impl StateLock {
         let lock_file = File::create(&lock_path)?;
         lock_file.try_lock_exclusive().map_err(|_| {
             anyhow::anyhow!(
-                "another nzbg instance is already running (lock held on {})",
+                "another bergamot instance is already running (lock held on {})",
                 lock_path.display()
             )
         })?;

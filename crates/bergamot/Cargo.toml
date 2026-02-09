@@ -1,0 +1,39 @@
+[package]
+name = "bergamot"
+version = "0.1.0"
+edition = "2024"
+license.workspace = true
+
+[dependencies]
+anyhow = "1.0"
+libc = "0.2"
+async-trait = "0.1"
+clap = { version = "4", features = ["derive"] }
+bergamot-config = { path = "../bergamot-config" }
+bergamot-core = { path = "../bergamot-core" }
+bergamot-diskstate = { path = "../bergamot-diskstate" }
+bergamot-extension = { path = "../bergamot-extension" }
+bergamot-feed = { path = "../bergamot-feed" }
+bergamot-logging = { path = "../bergamot-logging" }
+bergamot-nntp = { path = "../bergamot-nntp" }
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
+bergamot-nzb = { path = "../bergamot-nzb" }
+bergamot-postproc = { path = "../bergamot-postproc" }
+bergamot-queue = { path = "../bergamot-queue" }
+bergamot-scheduler = { path = "../bergamot-scheduler" }
+bergamot-server = { path = "../bergamot-server" }
+bergamot-yenc = { path = "../bergamot-yenc" }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "fs", "io-util"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+dirs = "5.0"
+dashmap = "6.1.0"
+
+[dev-dependencies]
+chrono = "0.4"
+crc32fast = "1"
+tempfile = "3.11"
+reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
+bergamot-nntp-stub = { path = "../bergamot-nntp-stub" }
+serde_json = "1.0"
+base64 = "0.22"

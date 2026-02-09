@@ -15,7 +15,7 @@ QueueCoordinator → download_worker → ServerPool → NntpConnection → BodyR
 
 ## 1. ServerPool: `try_acquire_owned()` Fails Instantly Instead of Waiting
 
-**File:** `crates/nzbg-nntp/src/pool.rs` line 92  
+**File:** `crates/bergamot-nntp/src/pool.rs` line 92  
 **Type:** Design flaw (non-blocking where it should be async-waiting)  
 **Severity:** Critical  
 
@@ -28,7 +28,7 @@ QueueCoordinator → download_worker → ServerPool → NntpConnection → BodyR
 
 ## 2. ServerPool: Backoff and Fail Count Use `tokio::Mutex` for Simple Scalars
 
-**File:** `crates/nzbg-nntp/src/pool.rs` lines 213–231  
+**File:** `crates/bergamot-nntp/src/pool.rs` lines 213–231  
 **Type:** Unnecessary async lock contention  
 **Severity:** Medium  
 
@@ -41,7 +41,7 @@ QueueCoordinator → download_worker → ServerPool → NntpConnection → BodyR
 
 ## 3. FileWriterPool: Blocking Sync Syscalls on Tokio Worker Threads
 
-**File:** `crates/nzbg/src/writer.rs` lines 25–33  
+**File:** `crates/bergamot/src/writer.rs` lines 25–33  
 **Type:** Blocking I/O in async context  
 **Severity:** High  
 
@@ -61,7 +61,7 @@ These block the Tokio runtime thread, preventing it from polling other sockets. 
 
 ## 4. FileWriterPool: Global Mutex for File Handle Registry
 
-**File:** `crates/nzbg/src/writer.rs` lines 41–65  
+**File:** `crates/bergamot/src/writer.rs` lines 41–65  
 **Type:** Async lock contention  
 **Severity:** Medium  
 
@@ -74,7 +74,7 @@ Every `write_segment` call locks `Mutex<HashMap<PathBuf, ...>>` to look up the f
 
 ## 5. FileWriterPool: Per-File Mutex Serializes All Writes to Same File
 
-**File:** `crates/nzbg/src/writer.rs` lines 23, 36–37  
+**File:** `crates/bergamot/src/writer.rs` lines 23, 36–37  
 **Type:** Lock convoying  
 **Severity:** Medium-High  
 
@@ -87,7 +87,7 @@ Each output file is protected by `Arc<Mutex<tokio::fs::File>>`. All segments for
 
 ## 6. BoundedCache: `std::sync::Mutex` in Async Context
 
-**File:** `crates/nzbg/src/cache.rs` lines 43–53  
+**File:** `crates/bergamot/src/cache.rs` lines 43–53  
 **Type:** Blocking mutex in async code  
 **Severity:** Medium  
 
@@ -101,8 +101,8 @@ Each output file is protected by `Arc<Mutex<tokio::fs::File>>`. All segments for
 ## 7. Data Pipeline: Excessive Buffer Copies
 
 **Files:**
-- `crates/nzbg-nntp/src/pool.rs` line 154
-- `crates/nzbg/src/download.rs` lines 37, 141, 101
+- `crates/bergamot-nntp/src/pool.rs` line 154
+- `crates/bergamot/src/download.rs` lines 37, 141, 101
 
 **Type:** Inefficient memory usage  
 **Severity:** Medium  
@@ -127,7 +127,7 @@ At 100 concurrent tasks with ~500KB articles, this creates ~200MB of redundant a
 
 ## 8. SpeedLimiter: Global `tokio::Mutex` Serializes Download Starts
 
-**File:** `crates/nzbg/src/download.rs` lines 51, 80–87  
+**File:** `crates/bergamot/src/download.rs` lines 51, 80–87  
 **Type:** Async lock contention  
 **Severity:** Medium  
 
@@ -140,7 +140,7 @@ The `SpeedLimiter` is behind `Arc<tokio::Mutex<SpeedLimiter>>`. Every spawned do
 
 ## 9. Download Result: Unnecessary Data Clone
 
-**File:** `crates/nzbg/src/download.rs` line 101  
+**File:** `crates/bergamot/src/download.rs` line 101  
 **Type:** Unnecessary allocation  
 **Severity:** Low  
 

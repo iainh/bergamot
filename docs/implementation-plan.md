@@ -1,4 +1,4 @@
-# nzbg Implementation Plan
+# bergamot Implementation Plan
 
 ## Current State (Post-TDD Audit)
 
@@ -51,11 +51,11 @@ downloader at all.
 
 | # | Gap | Detail | Crates |
 |---|-----|--------|--------|
-| 1 | **NZB ingestion on enqueue** | Read + parse NZB file content using `nzbg-nzb` parser inside `AddNzb` handler. Map parsed `NzbFile`/`Segment` structs into `FileInfo`/`ArticleInfo` on the queue's `NzbInfo`. Populate sizes, article counts, groups. | `nzbg-queue` |
-| 2 | **File/NZB size tracking on download** | `handle_download_complete()` must update `remaining_size`, `success_size`, `failed_size` on both the file and NZB when a segment succeeds/fails. | `nzbg-queue` |
-| 3 | **Completion detection** | Detect when all articles in a file are finished (mark file completed). Detect when all files in an NZB are finished (move NZB to history). | `nzbg-queue` |
-| 4 | **Disk state restore on startup** | Call `disk.load_queue()` on startup and seed the in-memory `QueueCoordinator` with restored state, so partially-downloaded NZBs resume after restart. | `nzbg`, `nzbg-queue` |
-| 5 | **Output filename from NZB metadata** | Use `filename` from parsed NZB (subject extraction) instead of `file-{idx}` when writing segments to disk. | `nzbg` (download.rs) |
+| 1 | **NZB ingestion on enqueue** | Read + parse NZB file content using `bergamot-nzb` parser inside `AddNzb` handler. Map parsed `NzbFile`/`Segment` structs into `FileInfo`/`ArticleInfo` on the queue's `NzbInfo`. Populate sizes, article counts, groups. | `bergamot-queue` |
+| 2 | **File/NZB size tracking on download** | `handle_download_complete()` must update `remaining_size`, `success_size`, `failed_size` on both the file and NZB when a segment succeeds/fails. | `bergamot-queue` |
+| 3 | **Completion detection** | Detect when all articles in a file are finished (mark file completed). Detect when all files in an NZB are finished (move NZB to history). | `bergamot-queue` |
+| 4 | **Disk state restore on startup** | Call `disk.load_queue()` on startup and seed the in-memory `QueueCoordinator` with restored state, so partially-downloaded NZBs resume after restart. | `bergamot`, `bergamot-queue` |
+| 5 | **Output filename from NZB metadata** | Use `filename` from parsed NZB (subject extraction) instead of `file-{idx}` when writing segments to disk. | `bergamot` (download.rs) |
 
 ---
 

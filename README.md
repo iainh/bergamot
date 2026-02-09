@@ -1,8 +1,8 @@
-# nzbg
+# bergamot
 
 A ground-up Rust reimplementation of [NZBGet](https://nzbget.com), the efficient Usenet binary downloader originally written in C++.
 
-nzbg downloads files described by NZB files from Usenet (NNTP) servers, reassembles multi-part articles, decodes yEnc payloads, and orchestrates post-processing (PAR2 repair, archive extraction, script execution). It exposes a JSON-RPC / XML-RPC API consumed by its built-in web UI and by third-party tools such as Sonarr, Radarr, and SABnzbd integrations.
+bergamot downloads files described by NZB files from Usenet (NNTP) servers, reassembles multi-part articles, decodes yEnc payloads, and orchestrates post-processing (PAR2 repair, archive extraction, script execution). It exposes a JSON-RPC / XML-RPC API consumed by its built-in web UI and by third-party tools such as Sonarr, Radarr, and SABnzbd integrations.
 
 ## Features
 
@@ -34,7 +34,7 @@ nix develop
 cargo build --release
 ```
 
-The binary is produced at `target/release/nzbg`.
+The binary is produced at `target/release/bergamot`.
 
 ### Run tests
 
@@ -64,25 +64,25 @@ docker run -d \
   -p 6789:6789 \
   -v /path/to/config:/config \
   -v /path/to/downloads:/downloads \
-  nzbg:latest
+  bergamot:latest
 ```
 
-Place your `nzbg.conf` in the `/config` volume. The image includes `unrar`, `7z`, and Python 3 for extension scripts.
+Place your `bergamot.conf` in the `/config` volume. The image includes `unrar`, `7z`, and Python 3 for extension scripts.
 
 ### NixOS module
 
-Add nzbg as a flake input and enable the service:
+Add bergamot as a flake input and enable the service:
 
 ```nix
 # flake.nix
-inputs.nzbg.url = "github:iainh/nzbg";
+inputs.bergamot.url = "github:iainh/bergamot";
 
 # configuration.nix
 { inputs, ... }:
 {
-  imports = [ inputs.nzbg.nixosModules.default ];
+  imports = [ inputs.bergamot.nixosModules.default ];
 
-  services.nzbg = {
+  services.bergamot = {
     enable = true;
     openFirewall = true;
     settings = {
@@ -97,12 +97,12 @@ inputs.nzbg.url = "github:iainh/nzbg";
 }
 ```
 
-The module creates a `nzbg` system user, manages the systemd service, and includes `unrar`, `7z`, and Python 3 in the service PATH. State is stored in `/var/lib/nzbg` by default.
+The module creates a `bergamot` system user, manages the systemd service, and includes `unrar`, `7z`, and Python 3 in the service PATH. State is stored in `/var/lib/bergamot` by default.
 
 ## Usage
 
 ```
-nzbg [OPTIONS]
+bergamot [OPTIONS]
 
 Options:
   -c, --config <FILE>          Path to configuration file
@@ -138,10 +138,10 @@ Options:
     Server1.Password=secret
     ```
 
-2. Run nzbg:
+2. Run bergamot:
 
     ```sh
-    nzbg --foreground --config nzbg.conf
+    bergamot --foreground --config bergamot.conf
     ```
 
 3. Open the web UI at `http://127.0.0.1:6789` or point your favourite Usenet tool (Sonarr, Radarr, etc.) at the JSON-RPC API.
@@ -152,25 +152,25 @@ See [docs/08-configuration.md](docs/08-configuration.md) for the full list of co
 
 | Crate | Responsibility |
 |---|---|
-| `nzbg` | Binary entry point, CLI, top-level wiring |
-| `nzbg-core` | Shared data structures and error types |
-| `nzbg-config` | Configuration file parsing and validation |
-| `nzbg-nntp` | NNTP protocol and connection pooling |
-| `nzbg-yenc` | yEnc decoding and CRC-32 verification |
-| `nzbg-nzb` | NZB XML parsing |
-| `nzbg-queue` | Queue coordinator and download orchestration |
-| `nzbg-postproc` | PAR2 verification, unpacking, script execution |
-| `nzbg-server` | HTTP server, JSON-RPC / XML-RPC handlers |
-| `nzbg-feed` | RSS/Atom feed polling and matching |
-| `nzbg-scheduler` | Cron-like task scheduler and background services |
-| `nzbg-diskstate` | On-disk persistence and crash recovery |
-| `nzbg-extension` | Extension/script runner interface |
-| `nzbg-logging` | Logging, message buffer, and history tracking |
+| `bergamot` | Binary entry point, CLI, top-level wiring |
+| `bergamot-core` | Shared data structures and error types |
+| `bergamot-config` | Configuration file parsing and validation |
+| `bergamot-nntp` | NNTP protocol and connection pooling |
+| `bergamot-yenc` | yEnc decoding and CRC-32 verification |
+| `bergamot-nzb` | NZB XML parsing |
+| `bergamot-queue` | Queue coordinator and download orchestration |
+| `bergamot-postproc` | PAR2 verification, unpacking, script execution |
+| `bergamot-server` | HTTP server, JSON-RPC / XML-RPC handlers |
+| `bergamot-feed` | RSS/Atom feed polling and matching |
+| `bergamot-scheduler` | Cron-like task scheduler and background services |
+| `bergamot-diskstate` | On-disk persistence and crash recovery |
+| `bergamot-extension` | Extension/script runner interface |
+| `bergamot-logging` | Logging, message buffer, and history tracking |
 
 ## Acknowledgements
 
-nzbg is inspired by and aims for compatibility with [NZBGet](https://nzbget.com), the battle-tested Usenet downloader created by the NZBGet team. Without their years of work building an excellent downloader and documenting its architecture, configuration format, and API, this project would not exist.
+bergamot is inspired by and aims for compatibility with [NZBGet](https://nzbget.com), the battle-tested Usenet downloader created by the NZBGet team. Without their years of work building an excellent downloader and documenting its architecture, configuration format, and API, this project would not exist.
 
 ## License
 
-TBD
+Copyright (C) 2026 Bergamot contributors. Licensed under the GNU General Public License v2.0 or later. See [LICENSE](LICENSE) for details.

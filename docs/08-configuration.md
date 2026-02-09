@@ -1,6 +1,6 @@
 # Configuration System
 
-nzbg uses an INI-style configuration file compatible with nzbget's `nzbget.conf` format. The configuration controls every aspect of the application: paths, security, news servers, categories, download behavior, post-processing, and logging.
+bergamot uses an INI-style configuration file compatible with nzbget's `nzbget.conf` format. The configuration controls every aspect of the application: paths, security, news servers, categories, download behavior, post-processing, and logging.
 
 ## Config File Format
 
@@ -27,7 +27,7 @@ DestDir=${MainDir}/completed    # resolves to ~/downloads/completed
 InterDir=${MainDir}/intermediate
 QueueDir=${MainDir}/queue
 TempDir=${MainDir}/tmp
-LogFile=${DestDir}/nzbg.log
+LogFile=${DestDir}/bergamot.log
 ```
 
 Interpolation is resolved at load time in a single pass. Forward references (referencing an option defined later in the file) resolve against defaults or previously loaded values.
@@ -91,7 +91,7 @@ Numbers must be sequential starting from 1. Gaps are not permitted.
 | `TempDir` | `${MainDir}/tmp` | Temporary directory for article assembly and partial files. |
 | `WebDir` | (built-in) | Path to the web UI static files. Empty uses the embedded UI. |
 | `ScriptDir` | `${MainDir}/scripts` | Directory containing post-processing and other extension scripts. |
-| `LogFile` | `${DestDir}/nzbg.log` | Path to the log file. Empty string disables file logging. |
+| `LogFile` | `${DestDir}/bergamot.log` | Path to the log file. Empty string disables file logging. |
 | `ConfigTemplate` | (built-in) | Path to the config template file used by the web UI for option descriptions. |
 | `RequiredDir` | (empty) | Comma-separated list of directories that must be available before downloading starts. Useful for network mounts. |
 | `CertStore` | (system default) | Path to CA certificate bundle for TLS verification. Empty uses the system store. |

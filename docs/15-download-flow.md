@@ -49,12 +49,12 @@ This document traces the complete lifecycle of a download from NZB acquisition t
 
 ## Stage 1: NZB Acquisition
 
-NZB files enter nzbg through five paths, all converging on the same parsing pipeline:
+NZB files enter bergamot through five paths, all converging on the same parsing pipeline:
 
 | Source | Trigger | Entry Point | Notes |
 |--------|---------|-------------|-------|
 | **File upload** | User uploads via web UI or API | `POST /api/append` (base64-encoded NZB body) | Most common for manual use |
-| **URL fetch** | User or automation provides a URL | `POST /api/appendurl` | nzbg fetches the NZB via HTTP(S) using `reqwest` |
+| **URL fetch** | User or automation provides a URL | `POST /api/appendurl` | bergamot fetches the NZB via HTTP(S) using `reqwest` |
 | **Directory scan** | Daemon polls `NzbDir` at interval | `ScanDir` polling loop | Detects `.nzb` and `.nzb.gz` files, moves to queue dir after parsing |
 | **RSS feed** | Feed coordinator polls RSS/Atom feeds | `FeedCoordinator` scheduler | Matching items have their NZB URLs fetched automatically |
 | **API append** | Raw XML submitted via JSON-RPC/XML-RPC | `append` RPC method | Used by Sonarr, Radarr, NZBHydra |
@@ -75,7 +75,7 @@ NZB files enter nzbg through five paths, all converging on the same parsing pipe
 
 ## Stage 2: NZB Parsing
 
-The raw XML bytes are parsed into an `NzbInfo` structure by `nzbg-nzb` using `quick-xml`'s streaming pull parser.
+The raw XML bytes are parsed into an `NzbInfo` structure by `bergamot-nzb` using `quick-xml`'s streaming pull parser.
 
 ### Processing Steps
 
@@ -296,7 +296,7 @@ When all segments for a file have a terminal status (`Completed` or `Failed`), t
 
 1. **Flush cache** — any remaining in-memory segments for this file are written to disk.
 2. **File-level CRC verify** — if the last segment's `=yend` contained a `crc32` field, the CRC32 of the entire assembled file is computed and compared.
-3. **Rename** — the temporary file (e.g., `filename.nzbg.tmp`) is renamed to its final name within the temp directory.
+3. **Rename** — the temporary file (e.g., `filename.bergamot.tmp`) is renamed to its final name within the temp directory.
 4. **Record completion** — a `CompletedFile` entry is created with status (`Success` or `Failure`), CRC, and size.
 5. **Update NZB counters** — `remaining_file_count`, `success_size`, `failed_size` are updated.
 6. **Health recalculation** — the NZB's health is recomputed. If health drops below `critical_health`, the configured `HealthCheck` action is taken (Park, Delete, or None).

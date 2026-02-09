@@ -1,5 +1,5 @@
 {
-  description = "nzbg – efficient Usenet downloader";
+  description = "bergamot – efficient Usenet downloader";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
@@ -22,8 +22,8 @@
         pkgs = nixpkgs.legacyPackages.${system};
         isLinux = pkgs.stdenv.hostPlatform.isLinux;
 
-        nzbg = pkgs.rustPlatform.buildRustPackage {
-          pname = "nzbg";
+        bergamot = pkgs.rustPlatform.buildRustPackage {
+          pname = "bergamot";
           version = "0.1.0";
           src = pkgs.lib.cleanSource ./.;
           cargoLock.lockFile = ./Cargo.lock;
@@ -36,16 +36,16 @@
         ];
 
         containerConfig = {
-          name = "nzbg";
+          name = "bergamot";
           tag = "latest";
           contents = [
-            nzbg
+            bergamot
             pkgs.cacert
             pkgs.busybox
           ] ++ runtimeDeps;
           config = {
-            Entrypoint = [ "/bin/nzbg" ];
-            Cmd = [ "--foreground" "--config" "/config/nzbg.conf" ];
+            Entrypoint = [ "/bin/bergamot" ];
+            Cmd = [ "--foreground" "--config" "/config/bergamot.conf" ];
             ExposedPorts = {
               "6789/tcp" = { };
             };
@@ -61,7 +61,7 @@
       in
       {
         packages =
-          { default = nzbg; }
+          { default = bergamot; }
           // pkgs.lib.optionalAttrs isLinux {
             docker = pkgs.dockerTools.buildLayeredImage containerConfig;
             docker-stream = pkgs.dockerTools.streamLayeredImage containerConfig;

@@ -1,4 +1,4 @@
-# Production Readiness Gap Analysis: nzbg vs nzbget
+# Production Readiness Gap Analysis: bergamot vs nzbget
 
 ## Current State
 
@@ -45,7 +45,7 @@ requires **exact** NZBGet RPC behavior, not just "a method with that name."
   (`append(name, nzbcontent, category, priority, addToTop, addPaused, dupekey,
   dupescore, dupemode, params...)`) must be supported.
 - **`status` response** — NZBGet exposes many fields (day/month counters,
-  quotas, cache sizes, postproc states). nzbg currently returns month/day
+  quotas, cache sizes, postproc states). bergamot currently returns month/day
   size as zero and likely omits or approximates other fields.
 - **`editqueue` actions** — Several actions are explicitly no-ops: `Split`,
   `Merge`, `SetName`, `SetDupeKey`, `SetDupeScore`, `SetDupeMode`,
@@ -54,7 +54,7 @@ requires **exact** NZBGet RPC behavior, not just "a method with that name."
 - **`listgroups` / `history` / `listfiles` / `postqueue`** — Field names,
   enum values, and defaults must match NZBGet exactly.
 
-**Validation needed:** Run Sonarr/Radarr against nzbg, log every RPC request
+**Validation needed:** Run Sonarr/Radarr against bergamot, log every RPC request
 and response, and diff against NZBGet for the same scenarios.
 
 ### 3. No Bundled Web UI
@@ -87,7 +87,7 @@ Fields exist on `NzbInfo` (`dup_key`, `dup_mode`, `dup_score`) and a
 
 ### Deobfuscation & Smart Rename
 
-nzbg relies mainly on NZB metadata/subject parsing for filenames. NZBGet
+bergamot relies mainly on NZB metadata/subject parsing for filenames. NZBGet
 provides:
 
 - Intelligent detection of obfuscated releases (regex-based hash pattern
@@ -101,7 +101,7 @@ provides:
 
 NZBGet can rename and unpack files as they are downloaded, without waiting for
 the entire NZB to complete. This is a significant usability feature for large
-downloads. Not implemented in nzbg.
+downloads. Not implemented in bergamot.
 
 ### Download Quotas
 
@@ -111,12 +111,12 @@ NZBGet supports daily and monthly download quotas with:
 - Automatic pause when quota is reached
 - Day/month download counters in `status` response
 
-nzbg's `status()` returns day/month counters as zero. No quota enforcement
+bergamot's `status()` returns day/month counters as zero. No quota enforcement
 exists.
 
 ### Extension Manager Lifecycle
 
-nzbg can *run* extension scripts but lacks:
+bergamot can *run* extension scripts but lacks:
 
 - Install/remove/update extensions from the UI or API
 - `loadextensions` / `downloadextension` / `updateextension` /
@@ -134,7 +134,7 @@ NZBGet supports three access levels with different permissions:
 | **Restricted** | Can view status and queue but cannot change config |
 | **Add** | Can only add downloads (for automated tools) |
 
-nzbg appears to have single-role authentication only.
+bergamot appears to have single-role authentication only.
 
 ### PAR Strategy (Par-First Downloading)
 
@@ -145,16 +145,16 @@ NZBGet intelligently prioritizes PAR2 file downloads:
 - Supports multiple PAR strategies (quick/full/force)
 - Can pause the queue during PAR verification
 
-nzbg has PAR2 verify/repair in post-processing but no smart download ordering.
+bergamot has PAR2 verify/repair in post-processing but no smart download ordering.
 
 ### Windows Service Support
 
 NZBGet supports running as a Windows service with install/remove commands.
-nzbg only supports POSIX daemon mode.
+bergamot only supports POSIX daemon mode.
 
 ### Update Checking
 
-NZBGet can check for new versions and notify users. Not implemented in nzbg.
+NZBGet can check for new versions and notify users. Not implemented in bergamot.
 
 ### Testing Tools (Built-in Diagnostics)
 
@@ -166,7 +166,7 @@ NZBGet provides built-in testing RPC methods:
 - `testnetworkspeed` — measure network throughput
 - `testextension` — validate extension script execution
 
-None of these are implemented in nzbg.
+None of these are implemented in bergamot.
 
 ---
 
@@ -189,7 +189,7 @@ pipeline:
 - Golden tests: given an RPC request, assert the response matches NZBGet's
   schema exactly (including optional fields, types, enum values)
 - Client emulator tests: run Sonarr/Radarr's NZBGet integration flows against
-  nzbg in CI (even smoke-level)
+  bergamot in CI (even smoke-level)
 
 ### No Crash/Restart Recovery Tests
 
@@ -254,7 +254,7 @@ Build a production readiness test matrix covering:
 
 ## Feature Parity Summary
 
-| Feature | nzbget | nzbg | Status |
+| Feature | nzbget | bergamot | Status |
 |---------|--------|------|--------|
 | NZB parsing | ✅ | ✅ | Complete |
 | NNTP download | ✅ | ✅ | Implemented, untested e2e |

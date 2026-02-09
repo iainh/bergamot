@@ -1,0 +1,18 @@
+[package]
+name = "bergamot-postproc"
+version = "0.1.0"
+edition = "2024"
+license.workspace = true
+
+[dependencies]
+async-trait = "0.1"
+bergamot-core = { path = "../bergamot-core" }
+bergamot-extension = { path = "../bergamot-extension" }
+bergamot-par2 = { path = "../bergamot-par2" }
+thiserror = "2.0"
+tokio = { version = "1", features = ["fs", "macros", "process", "sync", "rt-multi-thread"] }
+tracing = "0.1"
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1", features = ["fs", "macros", "rt-multi-thread", "time"] }
