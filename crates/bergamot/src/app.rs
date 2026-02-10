@@ -580,6 +580,7 @@ pub async fn run_with_config_path(
         rate_rx,
         cache,
         worker_writer_pool,
+        crate::download::MAX_CONCURRENT_DOWNLOADS,
     ));
 
     let feed_configs: Vec<bergamot_feed::FeedConfig> = bergamot_config::extract_feeds(config.raw())

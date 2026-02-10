@@ -11,6 +11,8 @@ use bergamot_yenc::YencDecoder;
 use crate::cache::ArticleCache;
 use crate::writer::FileWriterPool;
 
+pub const MAX_CONCURRENT_DOWNLOADS: usize = 64;
+
 #[async_trait::async_trait]
 pub trait ArticleFetcher: Send + Sync {
     /// Fetch an article body, optionally targeting a specific server.
@@ -49,6 +51,7 @@ impl ArticleFetcher for NntpPoolFetcher {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn download_worker(
     mut assignment_rx: tokio::sync::mpsc::Receiver<ArticleAssignment>,
     queue_handle: QueueHandle,
@@ -57,6 +60,7 @@ pub async fn download_worker(
     rate_rx: watch::Receiver<u64>,
     cache: Arc<dyn ArticleCache>,
     writer_pool: Arc<FileWriterPool>,
+    max_concurrent: usize,
 ) {
     let initial_rate = *rate_rx.borrow();
     let limiter = SpeedLimiterHandle::new(initial_rate);
@@ -72,6 +76,8 @@ pub async fn download_worker(
 
     tracing::debug!("download worker started");
 
+    let concurrency = Arc::new(tokio::sync::Semaphore::new(max_concurrent));
+
     while let Some(assignment) = assignment_rx.recv().await {
         tracing::debug!(
             message_id = %assignment.message_id,
@@ -80,6 +86,11 @@ pub async fn download_worker(
             seg_idx = assignment.article_id.seg_idx,
             "received assignment"
         );
+        let permit = concurrency
+            .clone()
+            .acquire_owned()
+            .await
+            .expect("semaphore closed");
         let fetcher = fetcher.clone();
         let handle = queue_handle.clone();
         let dir = inter_dir.clone();
@@ -87,6 +98,7 @@ pub async fn download_worker(
         let cache = cache.clone();
         let writer_pool = writer_pool.clone();
         tokio::spawn(async move {
+            let _permit = permit;
             limiter.acquire(assignment.expected_size).await;
 
             let fetch_start = std::time::Instant::now();
@@ -335,9 +347,95 @@ mod tests {
             rate_rx,
             cache,
             writer_pool,
+            MAX_CONCURRENT_DOWNLOADS,
         ));
 
         worker_handle.await.expect("worker");
+    }
+
+    #[tokio::test]
+    async fn download_worker_bounds_concurrent_tasks() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let peak = Arc::new(AtomicUsize::new(0));
+        let current = Arc::new(AtomicUsize::new(0));
+
+        struct SlowFetcher {
+            data: Vec<u8>,
+            current: Arc<AtomicUsize>,
+            peak: Arc<AtomicUsize>,
+        }
+
+        #[async_trait::async_trait]
+        impl ArticleFetcher for SlowFetcher {
+            async fn fetch_body(
+                &self,
+                _message_id: &str,
+                _groups: &[String],
+                _target_server_id: Option<u32>,
+            ) -> Result<Vec<u8>> {
+                let c = self.current.fetch_add(1, Ordering::SeqCst) + 1;
+                self.peak.fetch_max(c, Ordering::SeqCst);
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                self.current.fetch_sub(1, Ordering::SeqCst);
+                Ok(self.data.clone())
+            }
+        }
+
+        let fetcher: Arc<dyn ArticleFetcher> = Arc::new(SlowFetcher {
+            data: yenc_test_body(),
+            current: current.clone(),
+            peak: peak.clone(),
+        });
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let (_coordinator, handle, _assignment_rx, _rate_rx) =
+            bergamot_queue::QueueCoordinator::new(
+                2,
+                1,
+                std::path::PathBuf::from("/tmp/inter"),
+                std::path::PathBuf::from("/tmp/dest"),
+            );
+
+        let (tx, rx) = tokio::sync::mpsc::channel(20);
+        for i in 0..10 {
+            tx.send(ArticleAssignment {
+                article_id: ArticleId {
+                    nzb_id: 1,
+                    file_idx: 0,
+                    seg_idx: i,
+                },
+                message_id: format!("test{i}@example"),
+                groups: vec![],
+                output_filename: "data.rar".to_string(),
+                expected_size: 100,
+                server_id: None,
+            })
+            .await
+            .expect("send");
+        }
+        drop(tx);
+
+        let (_rate_tx, rate_rx) = tokio::sync::watch::channel(0u64);
+        let cache: Arc<dyn ArticleCache> = Arc::new(NoopCache);
+        let writer_pool = Arc::new(FileWriterPool::new());
+        let worker_handle = tokio::spawn(download_worker(
+            rx,
+            handle.clone(),
+            fetcher,
+            tmp.path().to_path_buf(),
+            rate_rx,
+            cache,
+            writer_pool,
+            4,
+        ));
+
+        worker_handle.await.expect("worker");
+
+        let peak_val = peak.load(Ordering::SeqCst);
+        assert!(
+            peak_val <= 4,
+            "peak concurrency {peak_val} should not exceed max_concurrent=4"
+        );
     }
 
     #[tokio::test]
