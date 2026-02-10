@@ -273,20 +273,16 @@ async fn wait_for_completion(rpc_addr: SocketAddr, nzb_id: u64, max_polls: usize
             serde_json::json!([]),
         )
         .await;
-        if let Some(entry) = groups.as_array().and_then(|entries| {
+        if groups.as_array().and_then(|entries| {
             entries
                 .iter()
                 .find(|entry| entry.get("NZBID").and_then(|v| v.as_u64()) == Some(nzb_id))
-        }) {
-            let status = entry.get("Status").and_then(|v| v.as_str()).unwrap_or("");
-            if status == "QUEUED" || status == "DOWNLOADING" {
-                tokio::time::sleep(Duration::from_millis(200)).await;
-                continue;
-            }
+        }).is_some() {
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            continue;
         } else {
             return true;
         }
-        tokio::time::sleep(Duration::from_millis(200)).await;
     }
     false
 }

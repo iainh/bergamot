@@ -243,6 +243,35 @@ impl QueueHandle {
             .map_err(|_| QueueError::Shutdown)
     }
 
+    pub async fn update_post_stage(
+        &self,
+        nzb_id: u32,
+        stage: bergamot_core::models::PostStage,
+    ) -> Result<(), QueueError> {
+        self.command_tx
+            .send(QueueCommand::UpdatePostStage { nzb_id, stage })
+            .await
+            .map_err(|_| QueueError::Shutdown)
+    }
+
+    pub async fn finish_post_processing(
+        &self,
+        nzb_id: u32,
+        par_status: bergamot_core::models::ParStatus,
+        unpack_status: bergamot_core::models::UnpackStatus,
+        move_status: bergamot_core::models::MoveStatus,
+    ) -> Result<(), QueueError> {
+        self.command_tx
+            .send(QueueCommand::FinishPostProcessing {
+                nzb_id,
+                par_status,
+                unpack_status,
+                move_status,
+            })
+            .await
+            .map_err(|_| QueueError::Shutdown)
+    }
+
     pub async fn set_strategy(
         &self,
         strategy: bergamot_core::models::PostStrategy,
@@ -565,6 +594,9 @@ impl QueueCoordinator {
         let mut nzbs = self.queue.queue.iter().collect::<Vec<_>>();
         nzbs.sort_by_key(|nzb| nzb.priority);
         for nzb in nzbs.iter().rev() {
+            if nzb.post_info.is_some() {
+                continue;
+            }
             if nzb.paused && nzb.priority != Priority::Force {
                 continue;
             }
@@ -608,6 +640,9 @@ impl QueueCoordinator {
     {
         let mut count = 0;
         for nzb in &self.queue.queue {
+            if nzb.post_info.is_some() {
+                continue;
+            }
             if nzb.paused && nzb.priority != Priority::Force {
                 continue;
             }
@@ -783,6 +818,17 @@ impl QueueCoordinator {
                 move_status,
             } => {
                 self.update_post_status(nzb_id, par_status, unpack_status, move_status);
+            }
+            QueueCommand::UpdatePostStage { nzb_id, stage } => {
+                self.update_post_stage(nzb_id, stage);
+            }
+            QueueCommand::FinishPostProcessing {
+                nzb_id,
+                par_status,
+                unpack_status,
+                move_status,
+            } => {
+                self.finish_post_processing(nzb_id, par_status, unpack_status, move_status);
             }
             QueueCommand::GetAllFileArticleStates { reply } => {
                 let states = self.build_all_file_article_states();
@@ -961,9 +1007,27 @@ impl QueueCoordinator {
             .find(|n| n.id == nzb_id)
             .is_some_and(|nzb| nzb.files.iter().all(|f| f.completed));
 
-        if all_complete && let Some(idx) = self.queue.queue.iter().position(|n| n.id == nzb_id) {
-            let nzb = self.queue.queue.remove(idx);
-            tracing::info!("NZB {} completed, moving to history", nzb.name);
+        if !all_complete {
+            return;
+        }
+
+        let has_completion_tx = self.completion_tx.is_some();
+
+        if let Some(nzb) = self.queue.queue.iter_mut().find(|n| n.id == nzb_id) {
+            tracing::info!("NZB {} completed download, starting post-processing", nzb.name);
+
+            let now = std::time::SystemTime::now();
+            nzb.post_info = Some(bergamot_core::models::PostInfo {
+                nzb_id: nzb.id,
+                stage: bergamot_core::models::PostStage::Queued,
+                progress_label: String::new(),
+                file_progress: 0.0,
+                stage_progress: 0.0,
+                start_time: now,
+                stage_time: now,
+                working: true,
+                messages: Vec::new(),
+            });
 
             if let Some(tx) = &self.completion_tx {
                 let notice = NzbCompletionNotice {
@@ -985,7 +1049,13 @@ impl QueueCoordinator {
                     tracing::warn!("postproc channel full or closed for NZB {}", nzb.name);
                 }
             }
+        }
 
+        if !has_completion_tx
+            && let Some(idx) = self.queue.queue.iter().position(|n| n.id == nzb_id)
+        {
+            let nzb = self.queue.queue.remove(idx);
+            tracing::info!("NZB {} completed (no post-processor), moved to history", nzb.name);
             self.add_to_history(nzb, HistoryKind::Nzb);
         }
     }
@@ -1207,6 +1277,7 @@ impl QueueCoordinator {
                         remaining_file_count: nzb.remaining_file_count,
                         remaining_par_count: nzb.remaining_par_count,
                         file_ids: nzb.files.iter().map(|f| f.id).collect(),
+                        post_stage: nzb.post_info.as_ref().map(|pi| pi.stage),
                     }
                 })
                 .collect(),
@@ -1663,6 +1734,43 @@ impl QueueCoordinator {
             if let Some(status) = move_status {
                 nzb.move_status = status;
             }
+        }
+    }
+
+    fn update_post_stage(&mut self, nzb_id: u32, stage: bergamot_core::models::PostStage) {
+        if let Some(nzb) = self.queue.queue.iter_mut().find(|n| n.id == nzb_id) {
+            let now = std::time::SystemTime::now();
+            let info = nzb.post_info.get_or_insert_with(|| bergamot_core::models::PostInfo {
+                nzb_id,
+                stage,
+                progress_label: String::new(),
+                file_progress: 0.0,
+                stage_progress: 0.0,
+                start_time: now,
+                stage_time: now,
+                working: true,
+                messages: Vec::new(),
+            });
+            info.stage = stage;
+            info.stage_time = now;
+        }
+    }
+
+    fn finish_post_processing(
+        &mut self,
+        nzb_id: u32,
+        par_status: bergamot_core::models::ParStatus,
+        unpack_status: bergamot_core::models::UnpackStatus,
+        move_status: bergamot_core::models::MoveStatus,
+    ) {
+        if let Some(idx) = self.queue.queue.iter().position(|n| n.id == nzb_id) {
+            let mut nzb = self.queue.queue.remove(idx);
+            nzb.par_status = par_status;
+            nzb.unpack_status = unpack_status;
+            nzb.move_status = move_status;
+            nzb.post_info = None;
+            tracing::info!(nzb = %nzb.name, "post-processing finished, moving to history");
+            self.add_to_history(nzb, HistoryKind::Nzb);
         }
     }
 
@@ -3356,7 +3464,13 @@ mod tests {
             elapsed: None,
         });
 
-        assert!(coordinator.queue.queue.is_empty());
+        assert_eq!(coordinator.queue.queue.len(), 1);
+        assert!(coordinator.queue.queue[0].post_info.is_some());
+        assert_eq!(
+            coordinator.queue.queue[0].post_info.as_ref().unwrap().stage,
+            bergamot_core::models::PostStage::Queued
+        );
+        assert!(coordinator.queue.history.is_empty());
         let notice = completion_rx.try_recv().expect("should receive notice");
         assert_eq!(notice.nzb_id, 1);
         assert_eq!(notice.nzb_name, "test-nzb");

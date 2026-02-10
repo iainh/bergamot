@@ -135,6 +135,77 @@ impl PostProcessor {
 }
 ```
 
+## Status Reporting Flow
+
+When a download completes, the NZB stays in the download queue while
+post-processing runs. The `PostProcessor` reports each stage back to the
+`QueueCoordinator` via a `PostStatusReporter` trait, and the web UI sees
+the current PP status through `listgroups`.
+
+```mermaid
+sequenceDiagram
+    participant DW as Download Worker
+    participant QC as QueueCoordinator
+    participant PP as PostProcessor
+    participant Reporter as QueuePostReporter
+    participant UI as Web UI (listgroups)
+
+    DW->>QC: DownloadComplete (last article)
+    QC->>QC: check_nzb_completion()
+    Note over QC: Keep NZB in queue<br/>Set post_info.stage = Queued
+    QC->>PP: NzbCompletionNotice
+    UI->>QC: listgroups
+    QC-->>UI: Status: "PP_QUEUED"
+
+    PP->>Reporter: report_stage(ParVerifying)
+    Reporter->>QC: update_post_stage()
+    UI->>QC: listgroups
+    QC-->>UI: Status: "VERIFYING_SOURCES"
+
+    PP->>Reporter: report_stage(Unpacking)
+    Reporter->>QC: update_post_stage()
+    UI->>QC: listgroups
+    QC-->>UI: Status: "UNPACKING"
+
+    PP->>Reporter: report_stage(Moving)
+    Reporter->>QC: update_post_stage()
+
+    PP->>Reporter: report_done(par, unpack, move)
+    Reporter->>QC: finish_post_processing()
+    Note over QC: Remove from queue<br/>Add to history with<br/>par/unpack/move status
+    UI->>QC: listgroups
+    Note over UI: NZB gone from downloads
+```
+
+### Key Components
+
+- **`PostStatusReporter` trait** (`crates/bergamot-postproc/src/processor.rs`):
+  Defines `report_stage()` and `report_done()` so the post-processor can
+  report progress without depending on the queue crate.
+- **`QueuePostReporter`** (`crates/bergamot/src/app.rs`):
+  Implements the trait by forwarding calls to `QueueHandle`, bridging the
+  two crates without a circular dependency.
+- **`QueueCoordinator`** (`crates/bergamot-queue/src/coordinator.rs`):
+  Stores `post_info` on the NZB while PP is active. `finish_post_processing()`
+  removes the NZB from the queue and creates a history entry with final statuses.
+- **`rpc_listgroups`** (`crates/bergamot-server/src/rpc.rs`):
+  Maps `post_info.stage` to status strings (PP_QUEUED, VERIFYING_SOURCES,
+  UNPACKING, MOVING, etc.) that the web UI already understands.
+
+### Status String Mapping
+
+| PostStage      | listgroups Status    | Web UI Label   |
+|----------------|----------------------|----------------|
+| Queued         | PP_QUEUED            | PP-QUEUED      |
+| ParLoading     | LOADING_PARS         | CHECKING       |
+| ParRenaming    | RENAMING             | RENAMING       |
+| ParVerifying   | VERIFYING_SOURCES    | CHECKING       |
+| ParRepairing   | REPAIRING            | REPAIRING      |
+| Unpacking      | UNPACKING            | UNPACKING      |
+| Moving         | MOVING               | MOVING         |
+| Executing      | EXECUTING_SCRIPT     | PROCESSING     |
+| Finished       | PP_FINISHED          | FINISHED       |
+
 ## PostStrategy
 
 Controls how aggressively post-processing runs relative to downloading:

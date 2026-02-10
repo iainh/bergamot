@@ -121,6 +121,16 @@ pub enum QueueCommand {
         unpack_status: Option<bergamot_core::models::UnpackStatus>,
         move_status: Option<bergamot_core::models::MoveStatus>,
     },
+    UpdatePostStage {
+        nzb_id: u32,
+        stage: bergamot_core::models::PostStage,
+    },
+    FinishPostProcessing {
+        nzb_id: u32,
+        par_status: bergamot_core::models::ParStatus,
+        unpack_status: bergamot_core::models::UnpackStatus,
+        move_status: bergamot_core::models::MoveStatus,
+    },
     GetAllFileArticleStates {
         reply: oneshot::Sender<Vec<FileArticleSnapshot>>,
     },

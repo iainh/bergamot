@@ -14,7 +14,9 @@ use bergamot_extension::{
     build_nzbpp_env,
 };
 use bergamot_logging::{BufferLayer, LogBuffer};
-use bergamot_postproc::{ExtensionContext, ExtensionExecutor, PostProcessRequest, PostProcessor};
+use bergamot_postproc::{
+    ExtensionContext, ExtensionExecutor, PostProcessRequest, PostProcessor, PostStatusReporter,
+};
 use bergamot_queue::NzbCompletionNotice;
 use bergamot_server::{
     AppState, ServerConfig as WebServerConfig, ShutdownHandle, WebServer, spawn_stats_updater,
@@ -341,6 +343,30 @@ impl<R: ProcessRunner + 'static> ExtensionExecutor for PostProcessExtensionExecu
     }
 }
 
+struct QueuePostReporter {
+    queue: bergamot_queue::QueueHandle,
+}
+
+#[async_trait::async_trait]
+impl PostStatusReporter for QueuePostReporter {
+    async fn report_stage(&self, nzb_id: u32, stage: bergamot_core::models::PostStage) {
+        let _ = self.queue.update_post_stage(nzb_id, stage).await;
+    }
+
+    async fn report_done(
+        &self,
+        nzb_id: u32,
+        par: bergamot_core::models::ParStatus,
+        unpack: bergamot_core::models::UnpackStatus,
+        mv: bergamot_core::models::MoveStatus,
+    ) {
+        let _ = self
+            .queue
+            .finish_post_processing(nzb_id, par, unpack, mv)
+            .await;
+    }
+}
+
 fn scan_script_dir(script_dir: &Path) -> Vec<ExtensionInfo> {
     let entries = match std::fs::read_dir(script_dir) {
         Ok(e) => e,
@@ -467,19 +493,6 @@ pub async fn run_with_config_path(
     let (completion_tx, completion_rx) = tokio::sync::mpsc::channel::<NzbCompletionNotice>(16);
     let (postproc_tx, postproc_rx) = tokio::sync::mpsc::channel::<PostProcessRequest>(16);
 
-    let pp_config = Arc::new(postproc_config(&config));
-    let par2 = Arc::new(bergamot_postproc::NativePar2Engine);
-    let unpacker = Arc::new(bergamot_postproc::CommandLineUnpacker);
-    let history = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let mut postprocessor = PostProcessor::new(postproc_rx, pp_config, history, par2, unpacker);
-    if let Some(executor) = build_extension_executor(&config) {
-        postprocessor = postprocessor.with_extensions(executor);
-    }
-    let postproc_handle = tokio::spawn(async move {
-        postprocessor.run().await;
-    });
-    let forward_handle = forward_completions(completion_rx, postproc_tx.clone());
-
     let total_connections = config
         .servers
         .iter()
@@ -529,6 +542,23 @@ pub async fn run_with_config_path(
     let coordinator_handle = tokio::spawn(async move {
         coordinator.run().await;
     });
+
+    let pp_config = Arc::new(postproc_config(&config));
+    let par2 = Arc::new(bergamot_postproc::NativePar2Engine);
+    let unpacker = Arc::new(bergamot_postproc::CommandLineUnpacker);
+    let history = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let mut postprocessor = PostProcessor::new(postproc_rx, pp_config, history, par2, unpacker);
+    if let Some(executor) = build_extension_executor(&config) {
+        postprocessor = postprocessor.with_extensions(executor);
+    }
+    let reporter = Arc::new(QueuePostReporter {
+        queue: queue_handle.clone(),
+    });
+    postprocessor = postprocessor.with_reporter(reporter);
+    let postproc_handle = tokio::spawn(async move {
+        postprocessor.run().await;
+    });
+    let forward_handle = forward_completions(completion_rx, postproc_tx.clone());
 
     let worker_writer_pool = writer_pool.clone();
     let worker_handle = tokio::spawn(crate::download::download_worker(

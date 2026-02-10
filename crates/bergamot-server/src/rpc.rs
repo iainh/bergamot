@@ -227,7 +227,19 @@ async fn rpc_listgroups(state: &AppState) -> Result<serde_json::Value, JsonRpcEr
             let remaining_size_mb = remaining_size / (1024 * 1024);
             let remaining_size_lo = (remaining_size & 0xFFFF_FFFF) as u32;
 
-            let status = if entry.paused {
+            let status = if let Some(stage) = entry.post_stage {
+                match stage {
+                    bergamot_core::models::PostStage::Queued => "PP_QUEUED",
+                    bergamot_core::models::PostStage::ParLoading => "LOADING_PARS",
+                    bergamot_core::models::PostStage::ParRenaming => "RENAMING",
+                    bergamot_core::models::PostStage::ParVerifying => "VERIFYING_SOURCES",
+                    bergamot_core::models::PostStage::ParRepairing => "REPAIRING",
+                    bergamot_core::models::PostStage::Unpacking => "UNPACKING",
+                    bergamot_core::models::PostStage::Moving => "MOVING",
+                    bergamot_core::models::PostStage::Executing => "EXECUTING_SCRIPT",
+                    bergamot_core::models::PostStage::Finished => "PP_FINISHED",
+                }
+            } else if entry.paused {
                 "PAUSED"
             } else if entry.active_downloads > 0 {
                 "DOWNLOADING"

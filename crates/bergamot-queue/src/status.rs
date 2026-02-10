@@ -65,6 +65,7 @@ pub struct NzbSnapshotEntry {
     pub remaining_file_count: u32,
     pub remaining_par_count: u32,
     pub file_ids: Vec<u32>,
+    pub post_stage: Option<bergamot_core::models::PostStage>,
 }
 
 #[derive(Debug, Clone)]

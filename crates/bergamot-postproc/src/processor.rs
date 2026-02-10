@@ -25,6 +25,18 @@ pub trait ExtensionExecutor: Send + Sync {
     async fn run_post_process(&self, ctx: &ExtensionContext) -> Result<(), PostProcessError>;
 }
 
+#[async_trait::async_trait]
+pub trait PostStatusReporter: Send + Sync {
+    async fn report_stage(&self, nzb_id: u32, stage: bergamot_core::models::PostStage);
+    async fn report_done(
+        &self,
+        nzb_id: u32,
+        par: bergamot_core::models::ParStatus,
+        unpack: bergamot_core::models::UnpackStatus,
+        mv: bergamot_core::models::MoveStatus,
+    );
+}
+
 #[derive(Debug, Clone)]
 pub struct PostProcessRequest {
     pub nzb_id: i64,
@@ -77,6 +89,7 @@ pub struct PostProcessor<E: Par2Engine, U: Unpacker> {
     par2: Arc<E>,
     unpacker: Arc<U>,
     extensions: Option<Arc<dyn ExtensionExecutor>>,
+    reporter: Option<Arc<dyn PostStatusReporter>>,
 }
 
 impl<E: Par2Engine, U: Unpacker> PostProcessor<E, U> {
@@ -94,11 +107,17 @@ impl<E: Par2Engine, U: Unpacker> PostProcessor<E, U> {
             par2,
             unpacker,
             extensions: None,
+            reporter: None,
         }
     }
 
     pub fn with_extensions(mut self, executor: Arc<dyn ExtensionExecutor>) -> Self {
         self.extensions = Some(executor);
+        self
+    }
+
+    pub fn with_reporter(mut self, reporter: Arc<dyn PostStatusReporter>) -> Self {
+        self.reporter = Some(reporter);
         self
     }
 
@@ -109,11 +128,19 @@ impl<E: Par2Engine, U: Unpacker> PostProcessor<E, U> {
     }
 
     async fn process(&self, req: PostProcessRequest) {
+        let nzb_id = req.nzb_id as u32;
         let mut ctx = PostProcessContext::new(req);
         tracing::info!(nzb = %ctx.request.nzb_name, "post-processing started");
 
+        if let Some(reporter) = &self.reporter {
+            reporter.report_stage(nzb_id, bergamot_core::models::PostStage::Queued).await;
+        }
+
         ctx.set_stage(PostStage::ParRenaming);
         ctx.set_stage(PostStage::ParVerifying);
+        if let Some(reporter) = &self.reporter {
+            reporter.report_stage(nzb_id, bergamot_core::models::PostStage::ParVerifying).await;
+        }
         tracing::info!(nzb = %ctx.request.nzb_name, "par2 verify starting");
         match self.par_verify(&ctx).await {
             Ok(result) => {
@@ -127,6 +154,9 @@ impl<E: Par2Engine, U: Unpacker> PostProcessor<E, U> {
 
         if matches!(ctx.par_result, Some(Par2Result::RepairNeeded { .. })) {
             ctx.set_stage(PostStage::ParRepairing);
+            if let Some(reporter) = &self.reporter {
+                reporter.report_stage(nzb_id, bergamot_core::models::PostStage::ParRepairing).await;
+            }
             tracing::info!(nzb = %ctx.request.nzb_name, "par2 repair starting");
             match self.par_repair(&ctx).await {
                 Ok(result) => {
@@ -140,7 +170,16 @@ impl<E: Par2Engine, U: Unpacker> PostProcessor<E, U> {
         }
 
         ctx.set_stage(PostStage::Unpacking);
-        let _ = self.unpack(&ctx).await;
+        if let Some(reporter) = &self.reporter {
+            reporter.report_stage(nzb_id, bergamot_core::models::PostStage::Unpacking).await;
+        }
+        let unpack_status = match self.unpack(&ctx).await {
+            Ok(()) => bergamot_core::models::UnpackStatus::Success,
+            Err(PostProcessError::Unpack { ref message }) if message.contains("password") => {
+                bergamot_core::models::UnpackStatus::Password
+            }
+            Err(_) => bergamot_core::models::UnpackStatus::Failure,
+        };
 
         if self.config.unpack_cleanup_disk {
             ctx.set_stage(PostStage::Cleanup);
@@ -148,15 +187,24 @@ impl<E: Par2Engine, U: Unpacker> PostProcessor<E, U> {
         }
 
         ctx.set_stage(PostStage::Moving);
+        if let Some(reporter) = &self.reporter {
+            reporter.report_stage(nzb_id, bergamot_core::models::PostStage::Moving).await;
+        }
         let dest = resolve_dest_dir(
             &self.config.dest_dir,
             ctx.request.category.as_deref(),
             self.config.append_category_dir,
         );
-        let _ = move_to_destination(&ctx.request.working_dir, &dest).await;
+        let move_status = match move_to_destination(&ctx.request.working_dir, &dest).await {
+            Ok(()) => bergamot_core::models::MoveStatus::Success,
+            Err(_) => bergamot_core::models::MoveStatus::Failure,
+        };
 
         if let Some(executor) = &self.extensions {
             ctx.set_stage(PostStage::Extensions);
+            if let Some(reporter) = &self.reporter {
+                reporter.report_stage(nzb_id, bergamot_core::models::PostStage::Executing).await;
+            }
             let par_status_str = match ctx.par_result {
                 Some(Par2Result::AllFilesOk) | Some(Par2Result::RepairComplete) => "SUCCESS",
                 Some(Par2Result::RepairNeeded { .. }) | Some(Par2Result::RepairFailed { .. }) => {
@@ -176,6 +224,20 @@ impl<E: Par2Engine, U: Unpacker> PostProcessor<E, U> {
             if let Err(err) = executor.run_post_process(&ext_ctx).await {
                 tracing::warn!("extension execution failed: {err}");
             }
+        }
+
+        let par_status = match ctx.par_result {
+            Some(Par2Result::AllFilesOk) | Some(Par2Result::RepairComplete) => {
+                bergamot_core::models::ParStatus::Success
+            }
+            Some(Par2Result::RepairNeeded { .. }) | Some(Par2Result::RepairFailed { .. }) => {
+                bergamot_core::models::ParStatus::Failure
+            }
+            None => bergamot_core::models::ParStatus::None,
+        };
+
+        if let Some(reporter) = &self.reporter {
+            reporter.report_done(nzb_id, par_status, unpack_status, move_status).await;
         }
 
         ctx.set_stage(PostStage::Finished);
