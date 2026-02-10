@@ -324,6 +324,7 @@ impl QueueHandle {
 pub struct QueueCoordinator {
     queue: DownloadQueue,
     active_downloads: HashMap<ArticleId, ActiveDownload>,
+    active_per_file: HashMap<(u32, u32), usize>,
     max_connections: usize,
     max_articles_per_file: usize,
     download_rate: u64,
@@ -370,6 +371,7 @@ impl QueueCoordinator {
                 next_file_id: 1,
             },
             active_downloads: HashMap::new(),
+            active_per_file: HashMap::new(),
             max_connections,
             max_articles_per_file,
             download_rate: 0,
@@ -488,6 +490,7 @@ impl QueueCoordinator {
                         "dispatched article"
                     );
                     self.mark_segment_status(article_id, SegmentStatus::Downloading);
+                    self.increment_active_per_file((article_id.nzb_id, article_id.file_idx));
                     self.active_downloads.insert(
                         article_id,
                         ActiveDownload {
@@ -635,10 +638,24 @@ impl QueueCoordinator {
     }
 
     fn active_articles_for_file(&self, nzb_id: u32, file_idx: u32) -> usize {
-        self.active_downloads
-            .keys()
-            .filter(|id| id.nzb_id == nzb_id && id.file_idx == file_idx)
-            .count()
+        self.active_per_file_count((nzb_id, file_idx))
+    }
+
+    fn active_per_file_count(&self, key: (u32, u32)) -> usize {
+        self.active_per_file.get(&key).copied().unwrap_or(0)
+    }
+
+    fn increment_active_per_file(&mut self, key: (u32, u32)) {
+        *self.active_per_file.entry(key).or_insert(0) += 1;
+    }
+
+    fn decrement_active_per_file(&mut self, key: (u32, u32)) {
+        if let Some(count) = self.active_per_file.get_mut(&key) {
+            *count = count.saturating_sub(1);
+            if *count == 0 {
+                self.active_per_file.remove(&key);
+            }
+        }
     }
 
     /// Count files that have remaining downloadable segments and pass the filter.
@@ -863,11 +880,14 @@ impl QueueCoordinator {
             QueueCommand::Shutdown => {
                 self.shutdown = true;
                 self.active_downloads.clear();
+                self.active_per_file.clear();
             }
         }
     }
 
     fn handle_download_complete(&mut self, result: crate::command::DownloadResult) {
+        let article_id = &result.article_id;
+        self.decrement_active_per_file((article_id.nzb_id, article_id.file_idx));
         let download_info = self.active_downloads.remove(&result.article_id);
         tracing::debug!(
             nzb_id = result.article_id.nzb_id,
@@ -3729,6 +3749,98 @@ mod tests {
         assert!(states.is_empty());
 
         handle.shutdown().await.expect("shutdown");
+    }
+
+    fn sample_file_with_articles(name: &str, count: usize) -> FileInfo {
+        let articles: Vec<ArticleInfo> = (0..count)
+            .map(|i| ArticleInfo {
+                part_number: i as u32 + 1,
+                message_id: format!("<seg{i}@test>"),
+                size: 100,
+                status: ArticleStatus::Undefined,
+                segment_offset: 0,
+                segment_size: 100,
+                crc: 0,
+            })
+            .collect();
+        FileInfo {
+            id: 1,
+            nzb_id: 1,
+            filename: name.to_string(),
+            subject: "subject".to_string(),
+            output_filename: name.to_string(),
+            groups: vec![],
+            articles,
+            size: count as u64 * 100,
+            remaining_size: count as u64 * 100,
+            success_size: 0,
+            failed_size: 0,
+            missed_size: 0,
+            total_articles: count as u32,
+            missing_articles: 0,
+            failed_articles: 0,
+            success_articles: 0,
+            paused: false,
+            completed: false,
+            priority: Priority::Normal,
+            time: std::time::SystemTime::UNIX_EPOCH,
+            active_downloads: 0,
+            crc: 0,
+            server_stats: vec![],
+        }
+    }
+
+    #[test]
+    fn cursor_skips_already_dispatched_segments() {
+        let (mut coordinator, _handle, _rx, _rate_rx) = QueueCoordinator::new(
+            10,
+            10,
+            std::path::PathBuf::from("/tmp/inter"),
+            std::path::PathBuf::from("/tmp/dest"),
+        );
+        let mut nzb = sample_nzb(1, "cursor-test");
+        nzb.files = vec![sample_file_with_articles("data.rar", 5)];
+        coordinator.queue.queue.push(nzb);
+
+        let a1 = coordinator.next_article().unwrap();
+        assert_eq!(a1.seg_idx, 0);
+        coordinator.mark_segment_status(a1, SegmentStatus::Downloading);
+        coordinator.active_downloads.insert(
+            a1,
+            ActiveDownload {
+                started: std::time::Instant::now(),
+                server_id: None,
+                expected_size: 100,
+            },
+        );
+
+        let a2 = coordinator.next_article().unwrap();
+        assert_eq!(a2.seg_idx, 1);
+    }
+
+    #[test]
+    fn active_per_file_counter_increments_and_decrements() {
+        let (mut coordinator, _handle, _rx, _rate_rx) = QueueCoordinator::new(
+            10,
+            2,
+            std::path::PathBuf::from("/tmp/inter"),
+            std::path::PathBuf::from("/tmp/dest"),
+        );
+        let mut nzb = sample_nzb(1, "counter-test");
+        nzb.files = vec![sample_file_with_articles("data.rar", 5)];
+        coordinator.queue.queue.push(nzb);
+
+        let key = (1u32, 0u32);
+        assert_eq!(coordinator.active_per_file_count(key), 0);
+
+        coordinator.increment_active_per_file(key);
+        assert_eq!(coordinator.active_per_file_count(key), 1);
+
+        coordinator.increment_active_per_file(key);
+        assert_eq!(coordinator.active_per_file_count(key), 2);
+
+        coordinator.decrement_active_per_file(key);
+        assert_eq!(coordinator.active_per_file_count(key), 1);
     }
 
     #[test]
