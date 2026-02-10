@@ -11,6 +11,7 @@ struct WriteRequest {
     reply: oneshot::Sender<Result<()>>,
 }
 
+#[derive(Clone)]
 pub struct FileWriterPool {
     writers: Arc<DashMap<PathBuf, mpsc::Sender<WriteRequest>>>,
 }
@@ -26,6 +27,29 @@ impl FileWriterPool {
         Self {
             writers: Arc::new(DashMap::new()),
         }
+    }
+
+    #[allow(dead_code)]
+    pub async fn pre_allocate(&self, path: &Path, size: u64) -> Result<()> {
+        if let Some(parent) = path.parent() {
+            tokio::fs::create_dir_all(parent)
+                .await
+                .context("creating output directory")?;
+        }
+        let file = tokio::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .read(true)
+            .open(path)
+            .await
+            .context("opening file for pre-allocation")?;
+        file.set_len(size).await.context("pre-allocating file")?;
+
+        let (tx, rx) = mpsc::channel::<WriteRequest>(64);
+        tokio::spawn(writer_task(file, rx, size));
+        self.writers.entry(path.to_path_buf()).or_insert(tx);
+        Ok(())
     }
 
     pub async fn write_segment(&self, path: &Path, offset: u64, data: &[u8]) -> Result<()> {
@@ -64,7 +88,8 @@ impl FileWriterPool {
             .context("opening output file")?;
 
         let (tx, rx) = mpsc::channel::<WriteRequest>(64);
-        tokio::spawn(writer_task(file, rx));
+        let initial_len = file.metadata().await.map(|m| m.len()).unwrap_or(0);
+        tokio::spawn(writer_task(file, rx, initial_len));
 
         self.writers.entry(path.to_path_buf()).or_insert(tx.clone());
         Ok(tx)
@@ -82,24 +107,50 @@ impl FileWriterPool {
     }
 }
 
-async fn writer_task(mut file: tokio::fs::File, mut rx: mpsc::Receiver<WriteRequest>) {
+async fn writer_task(
+    mut file: tokio::fs::File,
+    mut rx: mpsc::Receiver<WriteRequest>,
+    pre_allocated: u64,
+) {
     use tokio::io::{AsyncSeekExt, AsyncWriteExt};
 
-    let mut allocated_len = file.metadata().await.map(|m| m.len()).unwrap_or(0);
+    let mut allocated_len = pre_allocated;
 
-    while let Some(req) = rx.recv().await {
-        let result = async {
-            let target_len = req.offset + req.data.len() as u64;
-            if allocated_len < target_len {
-                file.set_len(target_len).await?;
-                allocated_len = target_len;
-            }
-            file.seek(std::io::SeekFrom::Start(req.offset)).await?;
-            file.write_all(&req.data).await?;
-            Ok(())
+    while let Some(first) = rx.recv().await {
+        let mut batch = vec![first];
+        while let Ok(req) = rx.try_recv() {
+            batch.push(req);
         }
-        .await;
-        let _ = req.reply.send(result);
+
+        batch.sort_by_key(|r| r.offset);
+
+        let max_end = batch
+            .iter()
+            .map(|r| r.offset + r.data.len() as u64)
+            .max()
+            .unwrap_or(0);
+        if allocated_len < max_end {
+            if let Err(e) = file.set_len(max_end).await {
+                let msg = e.to_string();
+                for req in batch {
+                    let _ = req
+                        .reply
+                        .send(Err(anyhow::anyhow!("set_len failed: {msg}")));
+                }
+                continue;
+            }
+            allocated_len = max_end;
+        }
+
+        for req in batch {
+            let result = async {
+                file.seek(std::io::SeekFrom::Start(req.offset)).await?;
+                file.write_all(&req.data).await?;
+                Ok(())
+            }
+            .await;
+            let _ = req.reply.send(result);
+        }
     }
 
     let _ = tokio::io::AsyncWriteExt::flush(&mut file).await;
@@ -177,6 +228,61 @@ mod tests {
         assert_eq!(content.len(), 13);
         assert_eq!(&content[0..3], b"abc");
         assert_eq!(&content[10..13], b"xyz");
+    }
+
+    #[tokio::test]
+    async fn writer_pool_pre_allocates_file() {
+        let pool = FileWriterPool::new();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let path = tmp.path().join("prealloc.bin");
+
+        pool.pre_allocate(&path, 1024).await.expect("pre_allocate");
+        let meta = tokio::fs::metadata(&path).await.expect("metadata");
+        assert_eq!(meta.len(), 1024);
+
+        pool.write_segment(&path, 100, b"data")
+            .await
+            .expect("write");
+        pool.flush_all().await.expect("flush");
+
+        let meta = tokio::fs::metadata(&path)
+            .await
+            .expect("metadata after write");
+        assert_eq!(meta.len(), 1024);
+    }
+
+    #[tokio::test]
+    async fn writer_pool_batches_writes() {
+        let pool = FileWriterPool::new();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let path = tmp.path().join("batch.bin");
+
+        pool.pre_allocate(&path, 100).await.expect("pre_allocate");
+
+        let mut handles = Vec::new();
+        for i in 0..10u64 {
+            let p = pool.clone();
+            let path = path.clone();
+            handles.push(tokio::spawn(async move {
+                p.write_segment(&path, i * 5, &[b'a' + i as u8; 5])
+                    .await
+                    .expect("write");
+            }));
+        }
+        for h in handles {
+            h.await.expect("join");
+        }
+        pool.flush_all().await.expect("flush");
+
+        let content = tokio::fs::read(&path).await.expect("read");
+        for i in 0..10u64 {
+            let start = (i * 5) as usize;
+            assert_eq!(
+                &content[start..start + 5],
+                &[b'a' + i as u8; 5],
+                "segment at offset {start}"
+            );
+        }
     }
 
     #[tokio::test]
