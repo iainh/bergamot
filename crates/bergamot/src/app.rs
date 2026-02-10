@@ -359,10 +359,17 @@ impl PostStatusReporter for QueuePostReporter {
         par: bergamot_core::models::ParStatus,
         unpack: bergamot_core::models::UnpackStatus,
         mv: bergamot_core::models::MoveStatus,
+        timings: bergamot_postproc::PostTimings,
     ) {
+        let qt = bergamot_queue::PostProcessTimings {
+            post_total_sec: timings.total_sec,
+            par_sec: timings.par_sec,
+            repair_sec: timings.repair_sec,
+            unpack_sec: timings.unpack_sec,
+        };
         let _ = self
             .queue
-            .finish_post_processing(nzb_id, par, unpack, mv)
+            .finish_post_processing(nzb_id, par, unpack, mv, qt)
             .await;
     }
 }

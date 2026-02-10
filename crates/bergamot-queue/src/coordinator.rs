@@ -260,6 +260,7 @@ impl QueueHandle {
         par_status: bergamot_core::models::ParStatus,
         unpack_status: bergamot_core::models::UnpackStatus,
         move_status: bergamot_core::models::MoveStatus,
+        timings: crate::command::PostProcessTimings,
     ) -> Result<(), QueueError> {
         self.command_tx
             .send(QueueCommand::FinishPostProcessing {
@@ -267,6 +268,7 @@ impl QueueHandle {
                 par_status,
                 unpack_status,
                 move_status,
+                timings,
             })
             .await
             .map_err(|_| QueueError::Shutdown)
@@ -827,8 +829,9 @@ impl QueueCoordinator {
                 par_status,
                 unpack_status,
                 move_status,
+                timings,
             } => {
-                self.finish_post_processing(nzb_id, par_status, unpack_status, move_status);
+                self.finish_post_processing(nzb_id, par_status, unpack_status, move_status, timings);
             }
             QueueCommand::GetAllFileArticleStates { reply } => {
                 let states = self.build_all_file_article_states();
@@ -920,6 +923,9 @@ impl QueueCoordinator {
             match result.outcome {
                 crate::command::DownloadOutcome::Success { crc, .. } => {
                     tracing::debug!(nzb_id, file_idx, seg_idx, article_size, "download success");
+                    if nzb.download_start_time.is_none() {
+                        nzb.download_start_time = Some(std::time::SystemTime::now());
+                    }
                     if let Some(file) = nzb.files.get_mut(file_idx) {
                         if let Some(seg) = file.articles.get_mut(seg_idx) {
                             seg.status = ArticleStatus::Finished;
@@ -1016,6 +1022,10 @@ impl QueueCoordinator {
         if let Some(nzb) = self.queue.queue.iter_mut().find(|n| n.id == nzb_id) {
             tracing::info!("NZB {} completed download, starting post-processing", nzb.name);
 
+            if let Some(start) = nzb.download_start_time {
+                nzb.download_sec = start.elapsed().map(|d| d.as_secs()).unwrap_or(0);
+            }
+
             let now = std::time::SystemTime::now();
             nzb.post_info = Some(bergamot_core::models::PostInfo {
                 nzb_id: nzb.id,
@@ -1054,7 +1064,10 @@ impl QueueCoordinator {
         if !has_completion_tx
             && let Some(idx) = self.queue.queue.iter().position(|n| n.id == nzb_id)
         {
-            let nzb = self.queue.queue.remove(idx);
+            let mut nzb = self.queue.queue.remove(idx);
+            if let Some(start) = nzb.download_start_time {
+                nzb.download_sec = start.elapsed().map(|d| d.as_secs()).unwrap_or(0);
+            }
             tracing::info!("NZB {} completed (no post-processor), moved to history", nzb.name);
             self.add_to_history(nzb, HistoryKind::Nzb);
         }
@@ -1762,12 +1775,17 @@ impl QueueCoordinator {
         par_status: bergamot_core::models::ParStatus,
         unpack_status: bergamot_core::models::UnpackStatus,
         move_status: bergamot_core::models::MoveStatus,
+        timings: crate::command::PostProcessTimings,
     ) {
         if let Some(idx) = self.queue.queue.iter().position(|n| n.id == nzb_id) {
             let mut nzb = self.queue.queue.remove(idx);
             nzb.par_status = par_status;
             nzb.unpack_status = unpack_status;
             nzb.move_status = move_status;
+            nzb.post_total_sec = timings.post_total_sec;
+            nzb.par_sec = timings.par_sec;
+            nzb.repair_sec = timings.repair_sec;
+            nzb.unpack_sec = timings.unpack_sec;
             nzb.post_info = None;
             tracing::info!(nzb = %nzb.name, "post-processing finished, moving to history");
             self.add_to_history(nzb, HistoryKind::Nzb);

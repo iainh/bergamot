@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use tokio::sync::mpsc;
 
@@ -25,6 +26,13 @@ pub trait ExtensionExecutor: Send + Sync {
     async fn run_post_process(&self, ctx: &ExtensionContext) -> Result<(), PostProcessError>;
 }
 
+pub struct PostTimings {
+    pub total_sec: u64,
+    pub par_sec: u64,
+    pub repair_sec: u64,
+    pub unpack_sec: u64,
+}
+
 #[async_trait::async_trait]
 pub trait PostStatusReporter: Send + Sync {
     async fn report_stage(&self, nzb_id: u32, stage: bergamot_core::models::PostStage);
@@ -34,6 +42,7 @@ pub trait PostStatusReporter: Send + Sync {
         par: bergamot_core::models::ParStatus,
         unpack: bergamot_core::models::UnpackStatus,
         mv: bergamot_core::models::MoveStatus,
+        timings: PostTimings,
     );
 }
 
@@ -130,6 +139,7 @@ impl<E: Par2Engine, U: Unpacker> PostProcessor<E, U> {
     async fn process(&self, req: PostProcessRequest) {
         let nzb_id = req.nzb_id as u32;
         let mut ctx = PostProcessContext::new(req);
+        let pp_start = Instant::now();
         tracing::info!(nzb = %ctx.request.nzb_name, "post-processing started");
 
         if let Some(reporter) = &self.reporter {
@@ -141,6 +151,7 @@ impl<E: Par2Engine, U: Unpacker> PostProcessor<E, U> {
         if let Some(reporter) = &self.reporter {
             reporter.report_stage(nzb_id, bergamot_core::models::PostStage::ParVerifying).await;
         }
+        let par_start = Instant::now();
         tracing::info!(nzb = %ctx.request.nzb_name, "par2 verify starting");
         match self.par_verify(&ctx).await {
             Ok(result) => {
@@ -151,12 +162,15 @@ impl<E: Par2Engine, U: Unpacker> PostProcessor<E, U> {
                 tracing::warn!(nzb = %ctx.request.nzb_name, error = %err, "par2 verify failed");
             }
         }
+        let par_elapsed = par_start.elapsed();
 
+        let mut repair_elapsed = std::time::Duration::ZERO;
         if matches!(ctx.par_result, Some(Par2Result::RepairNeeded { .. })) {
             ctx.set_stage(PostStage::ParRepairing);
             if let Some(reporter) = &self.reporter {
                 reporter.report_stage(nzb_id, bergamot_core::models::PostStage::ParRepairing).await;
             }
+            let repair_start = Instant::now();
             tracing::info!(nzb = %ctx.request.nzb_name, "par2 repair starting");
             match self.par_repair(&ctx).await {
                 Ok(result) => {
@@ -167,12 +181,14 @@ impl<E: Par2Engine, U: Unpacker> PostProcessor<E, U> {
                     tracing::warn!(nzb = %ctx.request.nzb_name, error = %err, "par2 repair failed");
                 }
             }
+            repair_elapsed = repair_start.elapsed();
         }
 
         ctx.set_stage(PostStage::Unpacking);
         if let Some(reporter) = &self.reporter {
             reporter.report_stage(nzb_id, bergamot_core::models::PostStage::Unpacking).await;
         }
+        let unpack_start = Instant::now();
         let unpack_status = match self.unpack(&ctx).await {
             Ok(()) => bergamot_core::models::UnpackStatus::Success,
             Err(PostProcessError::Unpack { ref message }) if message.contains("password") => {
@@ -180,6 +196,7 @@ impl<E: Par2Engine, U: Unpacker> PostProcessor<E, U> {
             }
             Err(_) => bergamot_core::models::UnpackStatus::Failure,
         };
+        let unpack_elapsed = unpack_start.elapsed();
 
         if self.config.unpack_cleanup_disk {
             ctx.set_stage(PostStage::Cleanup);
@@ -236,8 +253,14 @@ impl<E: Par2Engine, U: Unpacker> PostProcessor<E, U> {
             None => bergamot_core::models::ParStatus::None,
         };
 
+        let timings = PostTimings {
+            total_sec: pp_start.elapsed().as_secs(),
+            par_sec: par_elapsed.as_secs(),
+            repair_sec: repair_elapsed.as_secs(),
+            unpack_sec: unpack_elapsed.as_secs(),
+        };
         if let Some(reporter) = &self.reporter {
-            reporter.report_done(nzb_id, par_status, unpack_status, move_status).await;
+            reporter.report_done(nzb_id, par_status, unpack_status, move_status, timings).await;
         }
 
         ctx.set_stage(PostStage::Finished);

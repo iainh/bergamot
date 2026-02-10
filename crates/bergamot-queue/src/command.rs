@@ -12,6 +12,14 @@ use crate::status::{
     FileArticleSnapshot, FileListEntry, HistoryListEntry, NzbListEntry, QueueSnapshot, QueueStatus,
 };
 
+#[derive(Debug, Clone, Copy, Default)]
+pub struct PostProcessTimings {
+    pub post_total_sec: u64,
+    pub par_sec: u64,
+    pub repair_sec: u64,
+    pub unpack_sec: u64,
+}
+
 #[derive(Debug)]
 pub struct DownloadResult {
     pub article_id: ArticleId,
@@ -130,6 +138,7 @@ pub enum QueueCommand {
         par_status: bergamot_core::models::ParStatus,
         unpack_status: bergamot_core::models::UnpackStatus,
         move_status: bergamot_core::models::MoveStatus,
+        timings: PostProcessTimings,
     },
     GetAllFileArticleStates {
         reply: oneshot::Sender<Vec<FileArticleSnapshot>>,
