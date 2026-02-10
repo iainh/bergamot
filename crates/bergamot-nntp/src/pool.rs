@@ -310,13 +310,17 @@ impl<F: ConnectionFactory> ServerPool<F> {
         }
 
         let mut reader = conn.fetch_body(message_id).await?;
-        let mut body_lines = Vec::new();
+        let mut data = Vec::new();
+        let mut first = true;
         while let Some(line) = reader.read_line().await? {
-            body_lines.push(line);
+            if !first {
+                data.push(b'\n');
+            }
+            data.extend_from_slice(&line);
+            first = false;
         }
 
         self.return_connection(state, conn).await;
-        let data = body_lines.join(&b'\n');
         if let Some(stats) = &self.stats {
             stats.record_bytes(state.server.id, data.len() as u64);
             stats.record_article_success(state.server.id);
@@ -614,7 +618,7 @@ mod tests {
             .await;
         assert!(result.is_ok());
         let data = result.unwrap();
-        assert!(!data.is_empty());
+        assert_eq!(data, b"line1\nline2");
     }
 
     #[tokio::test]

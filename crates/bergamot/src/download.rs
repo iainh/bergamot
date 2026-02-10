@@ -174,8 +174,9 @@ async fn fetch_and_decode(
             )
             .await
             .context("fetching article body")?;
-        cache.put(assignment.message_id.clone(), fetched.clone());
-        std::sync::Arc::new(fetched)
+        let arc = std::sync::Arc::new(fetched);
+        cache.put_arc(assignment.message_id.clone(), arc.clone());
+        arc
     };
 
     let mut decoder = YencDecoder::new();

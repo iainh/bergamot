@@ -4,6 +4,9 @@ use std::sync::{Arc, Mutex};
 pub trait ArticleCache: Send + Sync {
     fn get(&self, message_id: &str) -> Option<Arc<Vec<u8>>>;
     fn put(&self, message_id: String, data: Vec<u8>);
+    fn put_arc(&self, message_id: String, data: Arc<Vec<u8>>) {
+        self.put(message_id, (*data).clone());
+    }
 }
 
 pub struct NoopCache;
@@ -46,6 +49,10 @@ impl ArticleCache for BoundedCache {
     }
 
     fn put(&self, message_id: String, data: Vec<u8>) {
+        self.put_arc(message_id, Arc::new(data));
+    }
+
+    fn put_arc(&self, message_id: String, data: Arc<Vec<u8>>) {
         let data_len = data.len();
         if data_len > self.max_bytes {
             return;
@@ -65,7 +72,7 @@ impl ArticleCache for BoundedCache {
         }
         inner.current_bytes += data_len;
         inner.order.push_back(message_id.clone());
-        inner.entries.insert(message_id, Arc::new(data));
+        inner.entries.insert(message_id, data);
     }
 }
 
