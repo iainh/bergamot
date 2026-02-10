@@ -1,5 +1,8 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+
+use dashmap::DashMap;
 
 pub trait ArticleCache: Send + Sync {
     fn get(&self, message_id: &str) -> Option<Arc<Vec<u8>>>;
@@ -20,32 +23,25 @@ impl ArticleCache for NoopCache {
 
 pub struct BoundedCache {
     max_bytes: usize,
-    inner: Mutex<CacheInner>,
-}
-
-struct CacheInner {
-    entries: HashMap<String, Arc<Vec<u8>>>,
-    order: VecDeque<String>,
-    current_bytes: usize,
+    entries: DashMap<String, Arc<Vec<u8>>>,
+    eviction: Mutex<VecDeque<String>>,
+    current_bytes: AtomicUsize,
 }
 
 impl BoundedCache {
     pub fn new(max_bytes: usize) -> Self {
         Self {
             max_bytes,
-            inner: Mutex::new(CacheInner {
-                entries: HashMap::new(),
-                order: VecDeque::new(),
-                current_bytes: 0,
-            }),
+            entries: DashMap::new(),
+            eviction: Mutex::new(VecDeque::new()),
+            current_bytes: AtomicUsize::new(0),
         }
     }
 }
 
 impl ArticleCache for BoundedCache {
     fn get(&self, message_id: &str) -> Option<Arc<Vec<u8>>> {
-        let inner = self.inner.lock().unwrap();
-        inner.entries.get(message_id).cloned()
+        self.entries.get(message_id).map(|r| r.value().clone())
     }
 
     fn put(&self, message_id: String, data: Vec<u8>) {
@@ -57,22 +53,23 @@ impl ArticleCache for BoundedCache {
         if data_len > self.max_bytes {
             return;
         }
-        let mut inner = self.inner.lock().unwrap();
-        if inner.entries.contains_key(&message_id) {
+        if self.entries.contains_key(&message_id) {
             return;
         }
-        while inner.current_bytes + data_len > self.max_bytes {
-            if let Some(oldest) = inner.order.pop_front() {
-                if let Some(old_data) = inner.entries.remove(&oldest) {
-                    inner.current_bytes -= old_data.len();
+        let mut order = self.eviction.lock().unwrap();
+        while self.current_bytes.load(Ordering::Relaxed) + data_len > self.max_bytes {
+            if let Some(oldest) = order.pop_front() {
+                if let Some((_, old_data)) = self.entries.remove(&oldest) {
+                    self.current_bytes
+                        .fetch_sub(old_data.len(), Ordering::Relaxed);
                 }
             } else {
                 break;
             }
         }
-        inner.current_bytes += data_len;
-        inner.order.push_back(message_id.clone());
-        inner.entries.insert(message_id, data);
+        self.current_bytes.fetch_add(data_len, Ordering::Relaxed);
+        order.push_back(message_id.clone());
+        self.entries.insert(message_id, data);
     }
 }
 
@@ -116,5 +113,28 @@ mod tests {
         cache.put("msg".to_string(), vec![1, 2, 3]);
         cache.put("msg".to_string(), vec![4, 5, 6]);
         assert_eq!(cache.get("msg").as_deref(), Some(&vec![1, 2, 3]));
+    }
+
+    #[test]
+    fn bounded_cache_concurrent_access() {
+        use std::thread;
+
+        let cache = Arc::new(BoundedCache::new(10_000));
+        let mut handles = Vec::new();
+
+        for t in 0..4 {
+            let c = cache.clone();
+            handles.push(thread::spawn(move || {
+                for i in 0..100 {
+                    let key = format!("t{t}-msg{i}");
+                    c.put(key.clone(), vec![t as u8; 10]);
+                    c.get(&key);
+                }
+            }));
+        }
+
+        for h in handles {
+            h.join().unwrap();
+        }
     }
 }
