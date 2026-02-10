@@ -253,11 +253,20 @@ impl<E: Par2Engine, U: Unpacker> PostProcessor<E, U> {
             None => bergamot_core::models::ParStatus::None,
         };
 
+        let total_elapsed = pp_start.elapsed();
+        tracing::info!(
+            nzb = %ctx.request.nzb_name,
+            total_ms = total_elapsed.as_millis() as u64,
+            par_ms = par_elapsed.as_millis() as u64,
+            repair_ms = repair_elapsed.as_millis() as u64,
+            unpack_ms = unpack_elapsed.as_millis() as u64,
+            "post-processing timings"
+        );
         let timings = PostTimings {
-            total_sec: pp_start.elapsed().as_secs(),
-            par_sec: par_elapsed.as_secs(),
-            repair_sec: repair_elapsed.as_secs(),
-            unpack_sec: unpack_elapsed.as_secs(),
+            total_sec: total_elapsed.as_secs(),
+            par_sec: par_elapsed.as_secs_f64().round() as u64,
+            repair_sec: repair_elapsed.as_secs_f64().round() as u64,
+            unpack_sec: unpack_elapsed.as_secs_f64().round() as u64,
         };
         if let Some(reporter) = &self.reporter {
             reporter.report_done(nzb_id, par_status, unpack_status, move_status, timings).await;
@@ -271,7 +280,10 @@ impl<E: Par2Engine, U: Unpacker> PostProcessor<E, U> {
     async fn par_verify(&self, ctx: &PostProcessContext) -> Result<Par2Result, PostProcessError> {
         let par2_file = match find_par2_file(&ctx.request.working_dir, &ctx.request.nzb_name) {
             Some(path) => path,
-            None => return Ok(Par2Result::AllFilesOk),
+            None => {
+                tracing::info!(nzb = %ctx.request.nzb_name, "no par2 file found, skipping verification");
+                return Ok(Par2Result::AllFilesOk);
+            }
         };
         let result = self
             .par2
@@ -294,6 +306,11 @@ impl<E: Par2Engine, U: Unpacker> PostProcessor<E, U> {
 
     async fn unpack(&self, ctx: &PostProcessContext) -> Result<(), PostProcessError> {
         let archives = detect_archives(&ctx.request.working_dir);
+        if archives.is_empty() {
+            tracing::info!(nzb = %ctx.request.nzb_name, "no archives found, skipping unpack");
+            return Ok(());
+        }
+        tracing::info!(nzb = %ctx.request.nzb_name, count = archives.len(), "unpacking archives");
         for (_, archive_path) in &archives {
             let result = self
                 .unpacker
@@ -315,12 +332,7 @@ impl<E: Par2Engine, U: Unpacker> PostProcessor<E, U> {
     }
 }
 
-pub fn find_par2_file(working_dir: &std::path::Path, nzb_name: &str) -> Option<std::path::PathBuf> {
-    let exact = working_dir.join(format!("{nzb_name}.par2"));
-    if exact.is_file() {
-        return Some(exact);
-    }
-
+pub fn find_par2_file(working_dir: &std::path::Path, _nzb_name: &str) -> Option<std::path::PathBuf> {
     let mut candidates: Vec<std::path::PathBuf> = std::fs::read_dir(working_dir)
         .ok()?
         .filter_map(|e| e.ok())
@@ -329,15 +341,15 @@ pub fn find_par2_file(working_dir: &std::path::Path, nzb_name: &str) -> Option<s
             p.is_file()
                 && p.extension()
                     .is_some_and(|ext| ext.eq_ignore_ascii_case("par2"))
-                && !p
-                    .file_name()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .contains(".vol")
         })
         .collect();
 
     candidates.sort();
+    if let Some(found) = candidates.first() {
+        tracing::debug!(path = %found.display(), "found par2 file");
+    } else {
+        tracing::debug!(dir = %working_dir.display(), "no par2 files found");
+    }
     candidates.into_iter().next()
 }
 
@@ -448,12 +460,12 @@ mod tests {
     }
 
     #[test]
-    fn find_par2_skips_vol_files_in_fallback() {
+    fn find_par2_finds_vol_files() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("data.vol00+01.par2"), b"vol").unwrap();
 
         let result = find_par2_file(dir.path(), "example");
-        assert!(result.is_none());
+        assert_eq!(result, Some(dir.path().join("data.vol00+01.par2")));
     }
 
     #[test]
