@@ -208,6 +208,7 @@ impl<F: ConnectionFactory> ServerPool<F> {
         available: &[&Arc<ServerState>],
     ) -> Result<Vec<u8>, NntpError> {
         const ARTICLE_TIMEOUT: Duration = Duration::from_secs(60);
+        const PERMIT_WAIT_TIMEOUT: Duration = Duration::from_millis(500);
 
         // Build ordered list: target server first, then remaining by level.
         let mut ordered: Vec<&Arc<ServerState>> = Vec::with_capacity(available.len());
@@ -222,10 +223,25 @@ impl<F: ConnectionFactory> ServerPool<F> {
 
         let mut last_error = NntpError::ProtocolError("no servers available".into());
 
-        for state in ordered {
-            let permit = match state.semaphore.clone().try_acquire_owned() {
-                Ok(p) => p,
-                Err(_) => continue,
+        for (i, state) in ordered.iter().enumerate() {
+            let is_target = i == 0 && state.server.id == target_id;
+
+            let permit = if is_target {
+                match tokio::time::timeout(
+                    PERMIT_WAIT_TIMEOUT,
+                    state.semaphore.clone().acquire_owned(),
+                )
+                .await
+                {
+                    Ok(Ok(p)) => p,
+                    Ok(Err(_)) => continue,
+                    Err(_) => continue,
+                }
+            } else {
+                match state.semaphore.clone().try_acquire_owned() {
+                    Ok(p) => p,
+                    Err(_) => continue,
+                }
             };
 
             let result = tokio::time::timeout(
@@ -1103,5 +1119,39 @@ mod tests {
 
         let idle = pool.servers[0].idle_connections.lock().await;
         assert_eq!(idle.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn sequential_fetch_waits_for_target_server_permit() {
+        let server = test_server(1, 0, 0, 1);
+        let factory = Arc::new(FakeFactory::new(b"waited-data"));
+        let pool = Arc::new(ServerPool::with_factory(vec![server], factory));
+
+        let permit = pool.servers[0]
+            .semaphore
+            .clone()
+            .acquire_owned()
+            .await
+            .unwrap();
+
+        let pool_clone = pool.clone();
+        let fetch_task = tokio::spawn(async move {
+            pool_clone
+                .fetch_article_targeted("test@example", &["alt.test".into()], Some(1))
+                .await
+        });
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(
+            !fetch_task.is_finished(),
+            "fetch should be waiting for permit"
+        );
+
+        drop(permit);
+        let result = tokio::time::timeout(Duration::from_secs(5), fetch_task)
+            .await
+            .expect("fetch should complete")
+            .expect("task should not panic");
+        assert!(result.is_ok(), "fetch should succeed after permit released");
     }
 }
