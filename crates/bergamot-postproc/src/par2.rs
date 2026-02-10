@@ -1,4 +1,6 @@
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use tokio::process::Command;
@@ -20,8 +22,24 @@ pub enum Par2Result {
 
 #[async_trait]
 pub trait Par2Engine: Send + Sync {
-    async fn verify(&self, par2_file: &Path, working_dir: &Path) -> Result<Par2Result, Par2Error>;
-    async fn repair(&self, par2_file: &Path, working_dir: &Path) -> Result<Par2Result, Par2Error>;
+    async fn verify(&self, par2_file: &Path, working_dir: &Path) -> Result<Par2Result, Par2Error> {
+        self.verify_with_progress(par2_file, working_dir, None).await
+    }
+    async fn repair(&self, par2_file: &Path, working_dir: &Path) -> Result<Par2Result, Par2Error> {
+        self.repair_with_progress(par2_file, working_dir, None).await
+    }
+    async fn verify_with_progress(
+        &self,
+        par2_file: &Path,
+        working_dir: &Path,
+        progress: Option<Arc<AtomicU32>>,
+    ) -> Result<Par2Result, Par2Error>;
+    async fn repair_with_progress(
+        &self,
+        par2_file: &Path,
+        working_dir: &Path,
+        progress: Option<Arc<AtomicU32>>,
+    ) -> Result<Par2Result, Par2Error>;
 }
 
 #[derive(Debug, Clone)]
@@ -31,7 +49,12 @@ pub struct Par2CommandLine {
 
 #[async_trait]
 impl Par2Engine for Par2CommandLine {
-    async fn verify(&self, par2_file: &Path, working_dir: &Path) -> Result<Par2Result, Par2Error> {
+    async fn verify_with_progress(
+        &self,
+        par2_file: &Path,
+        working_dir: &Path,
+        _progress: Option<Arc<AtomicU32>>,
+    ) -> Result<Par2Result, Par2Error> {
         let output = Command::new(&self.par2_path)
             .arg("verify")
             .arg(par2_file)
@@ -45,7 +68,12 @@ impl Par2Engine for Par2CommandLine {
         parse_par2_output(&output.stdout, &output.stderr, output.status.code())
     }
 
-    async fn repair(&self, par2_file: &Path, working_dir: &Path) -> Result<Par2Result, Par2Error> {
+    async fn repair_with_progress(
+        &self,
+        par2_file: &Path,
+        working_dir: &Path,
+        _progress: Option<Arc<AtomicU32>>,
+    ) -> Result<Par2Result, Par2Error> {
         let output = Command::new(&self.par2_path)
             .arg("repair")
             .arg(par2_file)
@@ -99,18 +127,28 @@ pub struct NativePar2Engine;
 
 #[async_trait]
 impl Par2Engine for NativePar2Engine {
-    async fn verify(&self, _par2_file: &Path, working_dir: &Path) -> Result<Par2Result, Par2Error> {
+    async fn verify_with_progress(
+        &self,
+        _par2_file: &Path,
+        working_dir: &Path,
+        progress: Option<Arc<AtomicU32>>,
+    ) -> Result<Par2Result, Par2Error> {
         let working_dir = working_dir.to_path_buf();
-        tokio::task::spawn_blocking(move || native_verify(&working_dir))
+        tokio::task::spawn_blocking(move || native_verify(&working_dir, progress.as_ref()))
             .await
             .map_err(|e| Par2Error::CommandFailed {
                 message: e.to_string(),
             })?
     }
 
-    async fn repair(&self, _par2_file: &Path, working_dir: &Path) -> Result<Par2Result, Par2Error> {
+    async fn repair_with_progress(
+        &self,
+        _par2_file: &Path,
+        working_dir: &Path,
+        progress: Option<Arc<AtomicU32>>,
+    ) -> Result<Par2Result, Par2Error> {
         let working_dir = working_dir.to_path_buf();
-        tokio::task::spawn_blocking(move || native_repair(&working_dir))
+        tokio::task::spawn_blocking(move || native_repair(&working_dir, progress.as_ref()))
             .await
             .map_err(|e| Par2Error::CommandFailed {
                 message: e.to_string(),
@@ -118,11 +156,14 @@ impl Par2Engine for NativePar2Engine {
     }
 }
 
-fn native_verify(working_dir: &Path) -> Result<Par2Result, Par2Error> {
+fn native_verify(working_dir: &Path, progress: Option<&Arc<AtomicU32>>) -> Result<Par2Result, Par2Error> {
     tracing::debug!(dir = %working_dir.display(), "parsing par2 recovery set");
     let rs = bergamot_par2::parse_recovery_set(working_dir).map_err(|e| Par2Error::CommandFailed {
         message: e.to_string(),
     })?;
+    if let Some(p) = progress {
+        p.store(100, Ordering::Relaxed);
+    }
     tracing::debug!(
         files = rs.files.len(),
         recovery_slices = rs.recovery_slices.len(),
@@ -130,7 +171,7 @@ fn native_verify(working_dir: &Path) -> Result<Par2Result, Par2Error> {
         "parsed par2 recovery set"
     );
 
-    let result = bergamot_par2::verify_recovery_set(&rs, working_dir);
+    let result = bergamot_par2::verify_recovery_set_with_progress_range(&rs, working_dir, progress.cloned().as_ref(), 100, 1000);
 
     if result.all_ok() {
         tracing::info!(dir = %working_dir.display(), "par2 verify: all files OK");
@@ -151,13 +192,16 @@ fn native_verify(working_dir: &Path) -> Result<Par2Result, Par2Error> {
     }
 }
 
-fn native_repair(working_dir: &Path) -> Result<Par2Result, Par2Error> {
+fn native_repair(working_dir: &Path, progress: Option<&Arc<AtomicU32>>) -> Result<Par2Result, Par2Error> {
     tracing::debug!(dir = %working_dir.display(), "parsing par2 recovery set for repair");
     let rs = bergamot_par2::parse_recovery_set(working_dir).map_err(|e| Par2Error::CommandFailed {
         message: e.to_string(),
     })?;
+    if let Some(p) = progress {
+        p.store(50, Ordering::Relaxed);
+    }
 
-    let verify = bergamot_par2::verify_recovery_set(&rs, working_dir);
+    let verify = bergamot_par2::verify_recovery_set_with_progress_range(&rs, working_dir, progress.cloned().as_ref(), 50, 100);
 
     if verify.all_ok() {
         tracing::info!(dir = %working_dir.display(), "par2 repair: all files already OK");
@@ -171,7 +215,7 @@ fn native_repair(working_dir: &Path) -> Result<Par2Result, Par2Error> {
         "par2 repair: starting"
     );
 
-    match bergamot_par2::repair_recovery_set(&rs, &verify, working_dir) {
+    match bergamot_par2::repair_recovery_set_with_progress(&rs, &verify, working_dir, progress.cloned().as_ref()) {
         Ok(report) => {
             tracing::debug!(
                 repaired_slices = report.repaired_slices,

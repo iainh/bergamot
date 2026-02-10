@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -36,6 +37,7 @@ pub struct PostTimings {
 #[async_trait::async_trait]
 pub trait PostStatusReporter: Send + Sync {
     async fn report_stage(&self, nzb_id: u32, stage: bergamot_core::models::PostStage);
+    async fn report_progress(&self, nzb_id: u32, progress: u32);
     async fn report_done(
         &self,
         nzb_id: u32,
@@ -153,7 +155,16 @@ impl<E: Par2Engine, U: Unpacker> PostProcessor<E, U> {
         }
         let par_start = Instant::now();
         tracing::info!(nzb = %ctx.request.nzb_name, "par2 verify starting");
-        match self.par_verify(&ctx).await {
+        let progress = Arc::new(AtomicU32::new(0));
+        let verify_result = {
+            let reporter = self.reporter.clone();
+            let progress = progress.clone();
+            let poller = spawn_progress_poller(nzb_id, progress.clone(), reporter);
+            let result = self.par_verify(&ctx, Some(progress)).await;
+            poller.abort();
+            result
+        };
+        match verify_result {
             Ok(result) => {
                 tracing::info!(nzb = %ctx.request.nzb_name, result = ?result, "par2 verify finished");
                 ctx.par_result = Some(result);
@@ -172,7 +183,16 @@ impl<E: Par2Engine, U: Unpacker> PostProcessor<E, U> {
             }
             let repair_start = Instant::now();
             tracing::info!(nzb = %ctx.request.nzb_name, "par2 repair starting");
-            match self.par_repair(&ctx).await {
+            let progress = Arc::new(AtomicU32::new(0));
+            let repair_result = {
+                let reporter = self.reporter.clone();
+                let progress = progress.clone();
+                let poller = spawn_progress_poller(nzb_id, progress.clone(), reporter);
+                let result = self.par_repair(&ctx, Some(progress)).await;
+                poller.abort();
+                result
+            };
+            match repair_result {
                 Ok(result) => {
                     tracing::info!(nzb = %ctx.request.nzb_name, result = ?result, "par2 repair finished");
                     ctx.par_result = Some(result);
@@ -277,7 +297,11 @@ impl<E: Par2Engine, U: Unpacker> PostProcessor<E, U> {
         history.push(ctx.request.nzb_name.clone());
     }
 
-    async fn par_verify(&self, ctx: &PostProcessContext) -> Result<Par2Result, PostProcessError> {
+    async fn par_verify(
+        &self,
+        ctx: &PostProcessContext,
+        progress: Option<Arc<AtomicU32>>,
+    ) -> Result<Par2Result, PostProcessError> {
         let par2_file = match find_par2_file(&ctx.request.working_dir, &ctx.request.nzb_name) {
             Some(path) => path,
             None => {
@@ -287,19 +311,23 @@ impl<E: Par2Engine, U: Unpacker> PostProcessor<E, U> {
         };
         let result = self
             .par2
-            .verify(&par2_file, &ctx.request.working_dir)
+            .verify_with_progress(&par2_file, &ctx.request.working_dir, progress)
             .await?;
         Ok(result)
     }
 
-    async fn par_repair(&self, ctx: &PostProcessContext) -> Result<Par2Result, PostProcessError> {
+    async fn par_repair(
+        &self,
+        ctx: &PostProcessContext,
+        progress: Option<Arc<AtomicU32>>,
+    ) -> Result<Par2Result, PostProcessError> {
         let par2_file = match find_par2_file(&ctx.request.working_dir, &ctx.request.nzb_name) {
             Some(path) => path,
             None => return Ok(Par2Result::AllFilesOk),
         };
         let result = self
             .par2
-            .repair(&par2_file, &ctx.request.working_dir)
+            .repair_with_progress(&par2_file, &ctx.request.working_dir, progress)
             .await?;
         Ok(result)
     }
@@ -330,6 +358,26 @@ impl<E: Par2Engine, U: Unpacker> PostProcessor<E, U> {
         }
         Ok(())
     }
+}
+
+fn spawn_progress_poller(
+    nzb_id: u32,
+    progress: Arc<AtomicU32>,
+    reporter: Option<Arc<dyn PostStatusReporter>>,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut last = u32::MAX;
+        loop {
+            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+            let val = progress.load(Ordering::Relaxed);
+            if val != last {
+                last = val;
+                if let Some(reporter) = &reporter {
+                    reporter.report_progress(nzb_id, val).await;
+                }
+            }
+        }
+    })
 }
 
 pub fn find_par2_file(working_dir: &std::path::Path, _nzb_name: &str) -> Option<std::path::PathBuf> {
@@ -365,18 +413,20 @@ mod tests {
 
     #[async_trait]
     impl Par2Engine for FakePar2 {
-        async fn verify(
+        async fn verify_with_progress(
             &self,
             _par2_file: &Path,
             _working_dir: &Path,
+            _progress: Option<Arc<AtomicU32>>,
         ) -> Result<Par2Result, crate::error::Par2Error> {
             Ok(Par2Result::AllFilesOk)
         }
 
-        async fn repair(
+        async fn repair_with_progress(
             &self,
             _par2_file: &Path,
             _working_dir: &Path,
+            _progress: Option<Arc<AtomicU32>>,
         ) -> Result<Par2Result, crate::error::Par2Error> {
             Ok(Par2Result::RepairComplete)
         }

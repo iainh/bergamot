@@ -353,6 +353,10 @@ impl PostStatusReporter for QueuePostReporter {
         let _ = self.queue.update_post_stage(nzb_id, stage).await;
     }
 
+    async fn report_progress(&self, nzb_id: u32, progress: u32) {
+        let _ = self.queue.update_post_progress(nzb_id, progress).await;
+    }
+
     async fn report_done(
         &self,
         nzb_id: u32,

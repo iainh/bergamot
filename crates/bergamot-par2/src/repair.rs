@@ -1,5 +1,7 @@
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Arc;
 
 use rayon::prelude::*;
 
@@ -50,6 +52,15 @@ pub fn repair_recovery_set(
     verify: &VerifyResult,
     working_dir: &Path,
 ) -> Result<RepairReport, Par2RepairError> {
+    repair_recovery_set_with_progress(rs, verify, working_dir, None)
+}
+
+pub fn repair_recovery_set_with_progress(
+    rs: &RecoverySet,
+    verify: &VerifyResult,
+    working_dir: &Path,
+    progress: Option<&Arc<AtomicU32>>,
+) -> Result<RepairReport, Par2RepairError> {
     if verify.all_ok() {
         return Ok(RepairReport {
             repaired_slices: 0,
@@ -78,6 +89,21 @@ pub fn repair_recovery_set(
         });
     }
 
+    let present_count = global_slices.len() - k;
+    let total_units = k + present_count + k + k;
+    let mut done_units: usize = 0;
+
+    let update_progress = |done: usize| {
+        if let Some(prog) = progress
+            && total_units > 0
+        {
+            prog.store(
+                ((done as u64 * 1000) / total_units as u64).min(1000) as u32,
+                Ordering::Relaxed,
+            );
+        }
+    };
+
     let selected_recovery = &rs.recovery_slices[..k];
 
     let mut recovery_data: Vec<Vec<u8>> = Vec::with_capacity(k);
@@ -88,6 +114,8 @@ pub fn repair_recovery_set(
         let read_len = rslice.data_len.min(slice_size);
         file.read_exact(&mut buf[..read_len])?;
         recovery_data.push(buf);
+        done_units += 1;
+        update_progress(done_units);
     }
 
     let exponents: Vec<u32> = selected_recovery.iter().map(|r| r.exponent).collect();
@@ -146,6 +174,9 @@ pub fn repair_recovery_set(
                         let coeff = galois::pow(base_j, exp);
                         galois::muladd(row, &slice_buf, coeff);
                     });
+
+                done_units += 1;
+                update_progress(done_units);
             }
             let _ = file_idx;
         }
@@ -154,6 +185,8 @@ pub fn repair_recovery_set(
     }
 
     gauss_eliminate(&mut matrix, &mut recovery_data, k, slice_size)?;
+    done_units += k;
+    update_progress(done_units);
 
     let mut repaired_files = std::collections::HashSet::new();
     for (col, &gi) in missing_globals.iter().enumerate() {
@@ -175,6 +208,13 @@ pub fn repair_recovery_set(
         file.write_all(&recovery_data[col][..gs.write_len])?;
 
         repaired_files.insert(entry.filename.clone());
+
+        done_units += 1;
+        update_progress(done_units);
+    }
+
+    if let Some(prog) = progress {
+        prog.store(1000, Ordering::Relaxed);
     }
 
     Ok(RepairReport {

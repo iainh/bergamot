@@ -254,6 +254,13 @@ impl QueueHandle {
             .map_err(|_| QueueError::Shutdown)
     }
 
+    pub async fn update_post_progress(&self, nzb_id: u32, progress: u32) -> Result<(), QueueError> {
+        self.command_tx
+            .send(QueueCommand::UpdatePostProgress { nzb_id, progress })
+            .await
+            .map_err(|_| QueueError::Shutdown)
+    }
+
     pub async fn finish_post_processing(
         &self,
         nzb_id: u32,
@@ -824,6 +831,9 @@ impl QueueCoordinator {
             QueueCommand::UpdatePostStage { nzb_id, stage } => {
                 self.update_post_stage(nzb_id, stage);
             }
+            QueueCommand::UpdatePostProgress { nzb_id, progress } => {
+                self.update_post_progress(nzb_id, progress);
+            }
             QueueCommand::FinishPostProcessing {
                 nzb_id,
                 par_status,
@@ -1291,6 +1301,14 @@ impl QueueCoordinator {
                         remaining_par_count: nzb.remaining_par_count,
                         file_ids: nzb.files.iter().map(|f| f.id).collect(),
                         post_stage: nzb.post_info.as_ref().map(|pi| pi.stage),
+                        post_stage_progress: nzb.post_info.as_ref().map(|pi| (pi.stage_progress * 1000.0) as u32).unwrap_or(0),
+                        post_info_text: nzb.post_info.as_ref().map(|pi| pi.progress_label.clone()).unwrap_or_default(),
+                        post_stage_time_sec: nzb.post_info.as_ref().map(|pi| {
+                            pi.stage_time.elapsed().map(|d| d.as_secs()).unwrap_or(0)
+                        }).unwrap_or(0),
+                        post_total_time_sec: nzb.post_info.as_ref().map(|pi| {
+                            pi.start_time.elapsed().map(|d| d.as_secs()).unwrap_or(0)
+                        }).unwrap_or(0),
                     }
                 })
                 .collect(),
@@ -1766,6 +1784,26 @@ impl QueueCoordinator {
             });
             info.stage = stage;
             info.stage_time = now;
+            info.stage_progress = 0.0;
+            info.progress_label = match stage {
+                bergamot_core::models::PostStage::Queued => "Queued".to_string(),
+                bergamot_core::models::PostStage::ParLoading => "Loading par2 files".to_string(),
+                bergamot_core::models::PostStage::ParRenaming => "Renaming".to_string(),
+                bergamot_core::models::PostStage::ParVerifying => "Verifying".to_string(),
+                bergamot_core::models::PostStage::ParRepairing => "Repairing".to_string(),
+                bergamot_core::models::PostStage::Unpacking => "Unpacking".to_string(),
+                bergamot_core::models::PostStage::Moving => "Moving".to_string(),
+                bergamot_core::models::PostStage::Executing => "Executing script".to_string(),
+                bergamot_core::models::PostStage::Finished => "Finished".to_string(),
+            };
+        }
+    }
+
+    fn update_post_progress(&mut self, nzb_id: u32, progress: u32) {
+        if let Some(nzb) = self.queue.queue.iter_mut().find(|n| n.id == nzb_id)
+            && let Some(info) = &mut nzb.post_info
+        {
+            info.stage_progress = progress as f32 / 1000.0;
         }
     }
 

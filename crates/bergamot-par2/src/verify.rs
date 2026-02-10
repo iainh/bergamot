@@ -1,4 +1,6 @@
 use std::path::Path;
+use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
+use std::sync::Arc;
 
 use rayon::prelude::*;
 
@@ -7,19 +9,73 @@ use crate::model::{FileVerifyResult, FileVerifyStatus, Par2FileEntry, RecoverySe
 const MMAP_THRESHOLD: u64 = 1024 * 1024;
 
 pub fn verify_recovery_set(rs: &RecoverySet, working_dir: &Path) -> VerifyResult {
+    verify_recovery_set_with_progress(rs, working_dir, None)
+}
+
+pub fn verify_recovery_set_with_progress(
+    rs: &RecoverySet,
+    working_dir: &Path,
+    progress: Option<&Arc<AtomicU32>>,
+) -> VerifyResult {
+    verify_recovery_set_with_progress_range(rs, working_dir, progress, 0, 1000)
+}
+
+pub fn verify_recovery_set_with_progress_range(
+    rs: &RecoverySet,
+    working_dir: &Path,
+    progress: Option<&Arc<AtomicU32>>,
+    range_start: u32,
+    range_end: u32,
+) -> VerifyResult {
+    let total_slices: usize = rs.files.iter().map(|f| f.slice_checksums.len()).sum();
+    let done = Arc::new(AtomicUsize::new(0));
+
+    let progress_ctx = progress.map(|p| ProgressCtx {
+        progress: p.clone(),
+        done: done.clone(),
+        total: total_slices * 2,
+        range_start,
+        range_end,
+    });
+
     let files: Vec<FileVerifyResult> = rs
         .files
         .par_iter()
-        .map(|entry| verify_one_entry(entry, rs.slice_size, working_dir))
+        .map(|entry| verify_one_entry(entry, rs.slice_size, working_dir, progress_ctx.as_ref()))
         .collect();
 
+    if let Some(prog) = progress {
+        prog.store(range_end, Ordering::Relaxed);
+    }
+
     VerifyResult { files }
+}
+
+struct ProgressCtx {
+    progress: Arc<AtomicU32>,
+    done: Arc<AtomicUsize>,
+    total: usize,
+    range_start: u32,
+    range_end: u32,
+}
+
+impl ProgressCtx {
+    fn advance(&self, count: usize) {
+        let done = self.done.fetch_add(count, Ordering::Relaxed) + count;
+        if self.total > 0 {
+            let fraction = (done as u64 * 1000) / self.total as u64;
+            let range = self.range_end - self.range_start;
+            let value = self.range_start + ((fraction as u32 * range) / 1000).min(range);
+            self.progress.store(value, Ordering::Relaxed);
+        }
+    }
 }
 
 fn verify_one_entry(
     entry: &Par2FileEntry,
     slice_size: u64,
     working_dir: &Path,
+    progress: Option<&ProgressCtx>,
 ) -> FileVerifyResult {
     let slice_count = if slice_size > 0 {
         entry.length.div_ceil(slice_size) as u32
@@ -30,6 +86,9 @@ fn verify_one_entry(
     let file_path = working_dir.join(&entry.filename);
 
     if !file_path.is_file() {
+        if let Some(ctx) = progress {
+            ctx.advance(entry.slice_checksums.len() * 2);
+        }
         return FileVerifyResult {
             file_id: entry.file_id,
             filename: entry.filename.clone(),
@@ -38,11 +97,16 @@ fn verify_one_entry(
         };
     }
 
-    let status = match verify_file(&file_path, entry, slice_size) {
+    let status = match verify_file(&file_path, entry, slice_size, progress) {
         Ok(s) => s,
-        Err(_) => FileVerifyStatus::Damaged {
-            bad_slices: (0..slice_count).collect(),
-        },
+        Err(_) => {
+            if let Some(ctx) = progress {
+                ctx.advance(entry.slice_checksums.len() * 2);
+            }
+            FileVerifyStatus::Damaged {
+                bad_slices: (0..slice_count).collect(),
+            }
+        }
     };
 
     FileVerifyResult {
@@ -57,9 +121,13 @@ fn verify_file(
     path: &Path,
     entry: &crate::model::Par2FileEntry,
     slice_size: u64,
+    progress: Option<&ProgressCtx>,
 ) -> Result<FileVerifyStatus, std::io::Error> {
     let metadata = std::fs::metadata(path)?;
     if metadata.len() != entry.length {
+        if let Some(ctx) = progress {
+            ctx.advance(entry.slice_checksums.len() * 2);
+        }
         let slice_count = if slice_size > 0 {
             entry.length.div_ceil(slice_size) as u32
         } else {
@@ -71,9 +139,9 @@ fn verify_file(
     }
 
     if entry.length >= MMAP_THRESHOLD {
-        verify_file_mmap(path, entry, slice_size)
+        verify_file_mmap(path, entry, slice_size, progress)
     } else {
-        verify_file_sequential(path, entry, slice_size)
+        verify_file_sequential(path, entry, slice_size, progress)
     }
 }
 
@@ -81,6 +149,7 @@ fn verify_file_sequential(
     path: &Path,
     entry: &crate::model::Par2FileEntry,
     slice_size: u64,
+    progress: Option<&ProgressCtx>,
 ) -> Result<FileVerifyStatus, std::io::Error> {
     use digest::Digest;
     use std::io::Read;
@@ -122,6 +191,10 @@ fn verify_file_sequential(
         }
 
         remaining -= this_slice;
+
+        if let Some(ctx) = progress {
+            ctx.advance(2);
+        }
     }
 
     if !bad_slices.is_empty() {
@@ -140,6 +213,7 @@ fn verify_file_mmap(
     path: &Path,
     entry: &crate::model::Par2FileEntry,
     slice_size: u64,
+    progress: Option<&ProgressCtx>,
 ) -> Result<FileVerifyStatus, std::io::Error> {
     use digest::Digest;
 
@@ -176,6 +250,10 @@ fn verify_file_mmap(
                 crc
             };
 
+            if let Some(ctx) = progress {
+                ctx.advance(1);
+            }
+
             if slice_md5 != expected.md5 || padded_crc != expected.crc32 {
                 Some(idx as u32)
             } else {
@@ -185,11 +263,34 @@ fn verify_file_mmap(
         .collect();
 
     if !bad_slices.is_empty() {
+        if let Some(ctx) = progress {
+            ctx.advance(entry.slice_checksums.len());
+        }
         return Ok(FileVerifyStatus::Damaged { bad_slices });
     }
 
     let mut full_hasher = md5::Md5::new();
-    full_hasher.update(data);
+    let num_slices = entry.slice_checksums.len();
+    let num_chunks = num_slices.max(1);
+    let bytes_per_chunk = data.len().div_ceil(num_chunks);
+    let mut offset = 0;
+    let mut reported = 0;
+    while offset < data.len() {
+        let end = std::cmp::min(offset + bytes_per_chunk, data.len());
+        full_hasher.update(&data[offset..end]);
+        offset = end;
+        reported += 1;
+        if let Some(ctx) = progress {
+            ctx.advance(1);
+        }
+    }
+    if let Some(ctx) = progress {
+        let remaining = num_slices.saturating_sub(reported);
+        if remaining > 0 {
+            ctx.advance(remaining);
+        }
+    }
+
     let full_md5: [u8; 16] = full_hasher.finalize().into();
     if full_md5 != entry.hash_full.0 {
         return Ok(FileVerifyStatus::Damaged { bad_slices: vec![] });

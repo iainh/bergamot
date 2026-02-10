@@ -133,6 +133,10 @@ pub enum QueueCommand {
         nzb_id: u32,
         stage: bergamot_core::models::PostStage,
     },
+    UpdatePostProgress {
+        nzb_id: u32,
+        progress: u32,
+    },
     FinishPostProcessing {
         nzb_id: u32,
         par_status: bergamot_core::models::ParStatus,

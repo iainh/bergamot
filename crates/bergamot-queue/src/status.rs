@@ -66,6 +66,10 @@ pub struct NzbSnapshotEntry {
     pub remaining_par_count: u32,
     pub file_ids: Vec<u32>,
     pub post_stage: Option<bergamot_core::models::PostStage>,
+    pub post_stage_progress: u32,
+    pub post_info_text: String,
+    pub post_stage_time_sec: u64,
+    pub post_total_time_sec: u64,
 }
 
 #[derive(Debug, Clone)]
