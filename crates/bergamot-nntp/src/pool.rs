@@ -410,7 +410,7 @@ impl<F: ConnectionFactory> ServerPool<F> {
 
 pub struct ServerPoolManager {
     all_servers: tokio::sync::RwLock<Vec<NewsServer>>,
-    pool: tokio::sync::RwLock<ServerPool>,
+    pool: tokio::sync::RwLock<Arc<ServerPool>>,
     stats: Option<Arc<dyn StatsRecorder>>,
 }
 
@@ -419,7 +419,7 @@ impl ServerPoolManager {
         let pool = ServerPool::new(servers.clone());
         Self {
             all_servers: tokio::sync::RwLock::new(servers),
-            pool: tokio::sync::RwLock::new(pool),
+            pool: tokio::sync::RwLock::new(Arc::new(pool)),
             stats: None,
         }
     }
@@ -433,7 +433,7 @@ impl ServerPoolManager {
         } else {
             new_pool
         };
-        *self.pool.get_mut() = new_pool;
+        *self.pool.get_mut() = Arc::new(new_pool);
         self
     }
 
@@ -442,8 +442,19 @@ impl ServerPoolManager {
         message_id: &str,
         groups: &[String],
     ) -> Result<Vec<u8>, NntpError> {
-        let pool = self.pool.read().await;
+        let pool = { self.pool.read().await.clone() };
         pool.fetch_article(message_id, groups).await
+    }
+
+    pub async fn fetch_article_targeted(
+        &self,
+        message_id: &str,
+        groups: &[String],
+        target_server_id: Option<u32>,
+    ) -> Result<Vec<u8>, NntpError> {
+        let pool = { self.pool.read().await.clone() };
+        pool.fetch_article_targeted(message_id, groups, target_server_id)
+            .await
     }
 
     pub async fn activate_server(&self, server_id: u32) -> bool {
@@ -465,7 +476,7 @@ impl ServerPoolManager {
                     new_pool = new_pool.with_stats(Arc::clone(s));
                 }
                 let mut pool = self.pool.write().await;
-                *pool = new_pool;
+                *pool = Arc::new(new_pool);
                 true
             }
             None => false,
@@ -473,7 +484,7 @@ impl ServerPoolManager {
     }
 
     pub async fn cleanup_idle_connections(&self, max_idle: Duration) -> usize {
-        let pool = self.pool.read().await;
+        let pool = { self.pool.read().await.clone() };
         pool.cleanup_idle_connections(max_idle).await
     }
 
@@ -1157,5 +1168,19 @@ mod tests {
             .expect("fetch should complete")
             .expect("task should not panic");
         assert!(result.is_ok(), "fetch should succeed after permit released");
+    }
+
+    #[tokio::test]
+    async fn manager_fetch_releases_read_lock() {
+        let manager = ServerPoolManager::new(vec![test_server(1, 0, 0, 2)]);
+
+        let count_before = manager.server_count().await;
+        assert_eq!(count_before, 1);
+
+        let deactivated = manager.deactivate_server(1).await;
+        assert!(deactivated);
+
+        let count_after = manager.server_count().await;
+        assert_eq!(count_after, 0);
     }
 }
