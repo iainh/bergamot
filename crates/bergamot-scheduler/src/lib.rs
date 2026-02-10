@@ -170,7 +170,10 @@ impl Scheduler {
         }
     }
 
-    pub fn from_config(config: &Config, queue: bergamot_queue::QueueHandle) -> anyhow::Result<Self> {
+    pub fn from_config(
+        config: &Config,
+        queue: bergamot_queue::QueueHandle,
+    ) -> anyhow::Result<Self> {
         let tasks = parse_scheduler_tasks(config.raw())?;
         Ok(Self::new(tasks, queue))
     }
@@ -2019,7 +2022,8 @@ mod tests {
             ip_version: bergamot_nntp::IpVersion::Auto,
             cert_verification: false,
         };
-        let manager = std::sync::Arc::new(bergamot_nntp::ServerPoolManager::new(vec![server.clone()]));
+        let manager =
+            std::sync::Arc::new(bergamot_nntp::ServerPoolManager::new(vec![server.clone()]));
         assert_eq!(manager.server_count().await, 0);
 
         let deps = CommandDeps {
@@ -2430,7 +2434,10 @@ mod tests {
             std::path::PathBuf::from("/tmp/inter"),
             std::path::PathBuf::from("/tmp/dest"),
         );
-        coordinator.add_to_history(sample_nzb(1, "fresh"), bergamot_core::models::HistoryKind::Nzb);
+        coordinator.add_to_history(
+            sample_nzb(1, "fresh"),
+            bergamot_core::models::HistoryKind::Nzb,
+        );
         tokio::spawn(async move { coordinator.run().await });
 
         let mut cleanup = HistoryCleanup {
@@ -2596,8 +2603,11 @@ mod tests {
 
         let tmp = tempfile::tempdir().expect("tempdir");
         let disk = std::sync::Arc::new(
-            bergamot_diskstate::DiskState::new(tmp.path().to_path_buf(), bergamot_diskstate::JsonFormat)
-                .expect("disk state"),
+            bergamot_diskstate::DiskState::new(
+                tmp.path().to_path_buf(),
+                bergamot_diskstate::JsonFormat,
+            )
+            .expect("disk state"),
         );
 
         let checker = HealthChecker {
@@ -2635,8 +2645,11 @@ mod tests {
 
         let tmp = tempfile::tempdir().expect("tempdir");
         let disk = std::sync::Arc::new(
-            bergamot_diskstate::DiskState::new(tmp.path().to_path_buf(), bergamot_diskstate::JsonFormat)
-                .expect("disk state"),
+            bergamot_diskstate::DiskState::new(
+                tmp.path().to_path_buf(),
+                bergamot_diskstate::JsonFormat,
+            )
+            .expect("disk state"),
         );
 
         let checker = HealthChecker {

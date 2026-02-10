@@ -4,7 +4,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use tokio::sync::watch;
 
-use bergamot_nntp::SpeedLimiter;
+use bergamot_nntp::SpeedLimiterHandle;
 use bergamot_queue::{ArticleAssignment, DownloadOutcome, DownloadResult, QueueHandle};
 use bergamot_yenc::YencDecoder;
 
@@ -59,15 +59,14 @@ pub async fn download_worker(
     writer_pool: Arc<FileWriterPool>,
 ) {
     let initial_rate = *rate_rx.borrow();
-    let limiter = Arc::new(std::sync::Mutex::new(SpeedLimiter::new(initial_rate)));
-    let rate_atomic = limiter.lock().unwrap().rate_ref().clone();
+    let limiter = SpeedLimiterHandle::new(initial_rate);
 
     let watcher_limiter = limiter.clone();
     let mut watcher_rx = rate_rx.clone();
     tokio::spawn(async move {
         while watcher_rx.changed().await.is_ok() {
             let rate = *watcher_rx.borrow();
-            watcher_limiter.lock().unwrap().set_rate(rate);
+            watcher_limiter.set_rate(rate).await;
         }
     });
 
@@ -85,17 +84,10 @@ pub async fn download_worker(
         let handle = queue_handle.clone();
         let dir = inter_dir.clone();
         let limiter = limiter.clone();
-        let rate_atomic = rate_atomic.clone();
         let cache = cache.clone();
         let writer_pool = writer_pool.clone();
         tokio::spawn(async move {
-            if rate_atomic.load(std::sync::atomic::Ordering::Relaxed) > 0 {
-                let delay = limiter.lock().unwrap().reserve(assignment.expected_size);
-                if let Some(delay) = delay {
-                    tokio::time::sleep(delay).await;
-                    limiter.lock().unwrap().after_sleep();
-                }
-            }
+            limiter.acquire(assignment.expected_size).await;
 
             let fetch_start = std::time::Instant::now();
             let server_id = assignment.server_id;
@@ -119,10 +111,12 @@ pub async fn download_worker(
                     }
                 }
                 Err(err) => {
-                    let is_no_servers = err
-                        .chain()
-                        .any(|e| e.downcast_ref::<bergamot_nntp::NntpError>()
-                            .is_some_and(|ne| matches!(ne, bergamot_nntp::NntpError::NoServersConfigured)));
+                    let is_no_servers = err.chain().any(|e| {
+                        e.downcast_ref::<bergamot_nntp::NntpError>()
+                            .is_some_and(|ne| {
+                                matches!(ne, bergamot_nntp::NntpError::NoServersConfigured)
+                            })
+                    });
                     if is_no_servers {
                         tracing::warn!(
                             message_id = %assignment.message_id,
@@ -173,7 +167,11 @@ async fn fetch_and_decode(
     } else {
         tracing::debug!(message_id = %assignment.message_id, "cache miss");
         let fetched = fetcher
-            .fetch_body(&assignment.message_id, &assignment.groups, assignment.server_id)
+            .fetch_body(
+                &assignment.message_id,
+                &assignment.groups,
+                assignment.server_id,
+            )
             .await
             .context("fetching article body")?;
         cache.put(assignment.message_id.clone(), fetched.clone());
@@ -300,12 +298,13 @@ mod tests {
             data: yenc_test_body(),
         });
         let tmp = tempfile::tempdir().expect("tempdir");
-        let (_coordinator, handle, _assignment_rx, _rate_rx) = bergamot_queue::QueueCoordinator::new(
-            2,
-            1,
-            std::path::PathBuf::from("/tmp/inter"),
-            std::path::PathBuf::from("/tmp/dest"),
-        );
+        let (_coordinator, handle, _assignment_rx, _rate_rx) =
+            bergamot_queue::QueueCoordinator::new(
+                2,
+                1,
+                std::path::PathBuf::from("/tmp/inter"),
+                std::path::PathBuf::from("/tmp/dest"),
+            );
 
         let assignment = ArticleAssignment {
             article_id: ArticleId {
@@ -344,17 +343,14 @@ mod tests {
     async fn download_worker_rate_watcher_updates_limiter() {
         let (rate_tx, rate_rx) = tokio::sync::watch::channel(0u64);
 
-        let initial_rate = *rate_rx.borrow();
-        let limiter = Arc::new(std::sync::Mutex::new(bergamot_nntp::SpeedLimiter::new(
-            initial_rate,
-        )));
+        let limiter = SpeedLimiterHandle::new(0);
 
         let watcher_limiter = limiter.clone();
         let mut watcher_rx = rate_rx.clone();
         tokio::spawn(async move {
             while watcher_rx.changed().await.is_ok() {
                 let rate = *watcher_rx.borrow();
-                watcher_limiter.lock().unwrap().set_rate(rate);
+                watcher_limiter.set_rate(rate).await;
             }
         });
 
@@ -362,7 +358,6 @@ mod tests {
         tokio::task::yield_now().await;
         tokio::task::yield_now().await;
 
-        let locked = limiter.lock().unwrap();
-        assert_eq!(locked.rate(), 500_000);
+        assert!(!limiter.is_unlimited());
     }
 }

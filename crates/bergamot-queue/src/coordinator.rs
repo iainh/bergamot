@@ -841,7 +841,13 @@ impl QueueCoordinator {
                 move_status,
                 timings,
             } => {
-                self.finish_post_processing(nzb_id, par_status, unpack_status, move_status, timings);
+                self.finish_post_processing(
+                    nzb_id,
+                    par_status,
+                    unpack_status,
+                    move_status,
+                    timings,
+                );
             }
             QueueCommand::GetAllFileArticleStates { reply } => {
                 let states = self.build_all_file_article_states();
@@ -878,10 +884,7 @@ impl QueueCoordinator {
             let server_id = result
                 .server_id
                 .or_else(|| download_info.as_ref().and_then(|d| d.server_id));
-            let article_size = download_info
-                .as_ref()
-                .map(|d| d.expected_size)
-                .unwrap_or(0);
+            let article_size = download_info.as_ref().map(|d| d.expected_size).unwrap_or(0);
             let elapsed = result
                 .elapsed
                 .or_else(|| download_info.as_ref().map(|d| d.started.elapsed()))
@@ -1030,7 +1033,10 @@ impl QueueCoordinator {
         let has_completion_tx = self.completion_tx.is_some();
 
         if let Some(nzb) = self.queue.queue.iter_mut().find(|n| n.id == nzb_id) {
-            tracing::info!("NZB {} completed download, starting post-processing", nzb.name);
+            tracing::info!(
+                "NZB {} completed download, starting post-processing",
+                nzb.name
+            );
 
             if let Some(start) = nzb.download_start_time {
                 nzb.download_sec = start.elapsed().map(|d| d.as_secs()).unwrap_or(0);
@@ -1078,7 +1084,10 @@ impl QueueCoordinator {
             if let Some(start) = nzb.download_start_time {
                 nzb.download_sec = start.elapsed().map(|d| d.as_secs()).unwrap_or(0);
             }
-            tracing::info!("NZB {} completed (no post-processor), moved to history", nzb.name);
+            tracing::info!(
+                "NZB {} completed (no post-processor), moved to history",
+                nzb.name
+            );
             self.add_to_history(nzb, HistoryKind::Nzb);
         }
     }
@@ -1092,11 +1101,8 @@ impl QueueCoordinator {
                 .failed_article_count
                 .saturating_sub(nzb.par_failed_article_count);
             nzb.health = calculate_health(data_total, data_failed);
-            nzb.critical_health = calculate_critical_health(
-                data_total,
-                nzb.par_size,
-                nzb.par_failed_size,
-            );
+            nzb.critical_health =
+                calculate_critical_health(data_total, nzb.par_size, nzb.par_failed_size);
         }
     }
 
@@ -1108,9 +1114,7 @@ impl QueueCoordinator {
             .find(|n| n.id == nzb_id)
             .is_some_and(|nzb| nzb.health < nzb.critical_health);
 
-        if should_fail
-            && let Some(idx) = self.queue.queue.iter().position(|n| n.id == nzb_id)
-        {
+        if should_fail && let Some(idx) = self.queue.queue.iter().position(|n| n.id == nzb_id) {
             let mut nzb = self.queue.queue.remove(idx);
             let has_par = nzb.par_size > 0;
             let health_pct = nzb.health as f64 / 10.0;
@@ -1118,12 +1122,17 @@ impl QueueCoordinator {
             if has_par {
                 tracing::warn!(
                     "NZB {} health {:.1}% below critical {:.1}%, too many failed articles to repair with par2, marking as failed",
-                    nzb.name, health_pct, critical_pct
+                    nzb.name,
+                    health_pct,
+                    critical_pct
                 );
             } else {
                 tracing::warn!(
                     "NZB {} health {:.1}% — no par2 files available for repair, marking as failed ({} of {} articles failed)",
-                    nzb.name, health_pct, nzb.failed_article_count, nzb.total_article_count
+                    nzb.name,
+                    health_pct,
+                    nzb.failed_article_count,
+                    nzb.total_article_count
                 );
             }
             nzb.delete_status = bergamot_core::models::DeleteStatus::Health;
@@ -1131,7 +1140,11 @@ impl QueueCoordinator {
         }
     }
 
-    fn check_duplicate(&self, dup_key: &str, dup_mode: bergamot_core::models::DupMode) -> Option<u32> {
+    fn check_duplicate(
+        &self,
+        dup_key: &str,
+        dup_mode: bergamot_core::models::DupMode,
+    ) -> Option<u32> {
         if dup_key.is_empty() {
             return None;
         }
@@ -1301,14 +1314,26 @@ impl QueueCoordinator {
                         remaining_par_count: nzb.remaining_par_count,
                         file_ids: nzb.files.iter().map(|f| f.id).collect(),
                         post_stage: nzb.post_info.as_ref().map(|pi| pi.stage),
-                        post_stage_progress: nzb.post_info.as_ref().map(|pi| (pi.stage_progress * 1000.0) as u32).unwrap_or(0),
-                        post_info_text: nzb.post_info.as_ref().map(|pi| pi.progress_label.clone()).unwrap_or_default(),
-                        post_stage_time_sec: nzb.post_info.as_ref().map(|pi| {
-                            pi.stage_time.elapsed().map(|d| d.as_secs()).unwrap_or(0)
-                        }).unwrap_or(0),
-                        post_total_time_sec: nzb.post_info.as_ref().map(|pi| {
-                            pi.start_time.elapsed().map(|d| d.as_secs()).unwrap_or(0)
-                        }).unwrap_or(0),
+                        post_stage_progress: nzb
+                            .post_info
+                            .as_ref()
+                            .map(|pi| (pi.stage_progress * 1000.0) as u32)
+                            .unwrap_or(0),
+                        post_info_text: nzb
+                            .post_info
+                            .as_ref()
+                            .map(|pi| pi.progress_label.clone())
+                            .unwrap_or_default(),
+                        post_stage_time_sec: nzb
+                            .post_info
+                            .as_ref()
+                            .map(|pi| pi.stage_time.elapsed().map(|d| d.as_secs()).unwrap_or(0))
+                            .unwrap_or(0),
+                        post_total_time_sec: nzb
+                            .post_info
+                            .as_ref()
+                            .map(|pi| pi.start_time.elapsed().map(|d| d.as_secs()).unwrap_or(0))
+                            .unwrap_or(0),
                     }
                 })
                 .collect(),
@@ -1545,8 +1570,8 @@ impl QueueCoordinator {
             tracing::debug!(path = %path.display(), bytes = data.len(), "NZB content is binary (gzipped)");
         }
 
-        let parsed =
-            bergamot_nzb::parse_nzb_auto(&data).map_err(|e| QueueError::NzbParse(format!("{e}")))?;
+        let parsed = bergamot_nzb::parse_nzb_auto(&data)
+            .map_err(|e| QueueError::NzbParse(format!("{e}")))?;
 
         for nzb_file in &parsed.files {
             tracing::info!(
@@ -1556,7 +1581,10 @@ impl QueueCoordinator {
                 "NZB file par classification"
             );
         }
-        let has_pars = parsed.files.iter().any(|f| f.par_status != bergamot_nzb::ParStatus::NotPar);
+        let has_pars = parsed
+            .files
+            .iter()
+            .any(|f| f.par_status != bergamot_nzb::ParStatus::NotPar);
         tracing::info!(
             path = %path.display(),
             file_count = parsed.files.len(),
@@ -1573,7 +1601,8 @@ impl QueueCoordinator {
             .unwrap_or_else(|| "nzb".to_string());
         let dup_key = name.strip_suffix(".nzb").unwrap_or(&name).to_string();
 
-        if let Some(existing_id) = self.check_duplicate(&dup_key, bergamot_core::models::DupMode::Score)
+        if let Some(existing_id) =
+            self.check_duplicate(&dup_key, bergamot_core::models::DupMode::Score)
         {
             tracing::info!(
                 "duplicate NZB detected: {} matches existing id {}",
@@ -1771,17 +1800,19 @@ impl QueueCoordinator {
     fn update_post_stage(&mut self, nzb_id: u32, stage: bergamot_core::models::PostStage) {
         if let Some(nzb) = self.queue.queue.iter_mut().find(|n| n.id == nzb_id) {
             let now = std::time::SystemTime::now();
-            let info = nzb.post_info.get_or_insert_with(|| bergamot_core::models::PostInfo {
-                nzb_id,
-                stage,
-                progress_label: String::new(),
-                file_progress: 0.0,
-                stage_progress: 0.0,
-                start_time: now,
-                stage_time: now,
-                working: true,
-                messages: Vec::new(),
-            });
+            let info = nzb
+                .post_info
+                .get_or_insert_with(|| bergamot_core::models::PostInfo {
+                    nzb_id,
+                    stage,
+                    progress_label: String::new(),
+                    file_progress: 0.0,
+                    stage_progress: 0.0,
+                    start_time: now,
+                    stage_time: now,
+                    working: true,
+                    messages: Vec::new(),
+                });
             info.stage = stage;
             info.stage_time = now;
             info.stage_progress = 0.0;
@@ -1850,11 +1881,7 @@ pub fn calculate_health(total_articles: u32, failed_articles: u32) -> u32 {
     (1000u64 * success as u64 / total_articles as u64) as u32
 }
 
-pub fn calculate_critical_health(
-    total_articles: u32,
-    par_size: u64,
-    par_failed_size: u64,
-) -> u32 {
+pub fn calculate_critical_health(total_articles: u32, par_size: u64, par_failed_size: u64) -> u32 {
     if total_articles == 0 || par_size == 0 {
         return 1000;
     }
@@ -2559,8 +2586,14 @@ mod tests {
     #[test]
     fn calculate_critical_health_with_partial_par_failure() {
         let ch = calculate_critical_health(100, 500, 250);
-        assert!(ch > 900, "partial par failure should reduce repair capacity");
-        assert!(ch < 1000, "partial par failure should still allow some repair");
+        assert!(
+            ch > 900,
+            "partial par failure should reduce repair capacity"
+        );
+        assert!(
+            ch < 1000,
+            "partial par failure should still allow some repair"
+        );
     }
 
     #[test]
@@ -2770,7 +2803,10 @@ mod tests {
         assert_eq!(history.len(), 1);
         assert_eq!(history[0].id, 1);
         assert_eq!(history[0].name, "done");
-        assert_eq!(history[0].mark_status, bergamot_core::models::MarkStatus::Good);
+        assert_eq!(
+            history[0].mark_status,
+            bergamot_core::models::MarkStatus::Good
+        );
 
         handle.shutdown().await.expect("shutdown");
     }
@@ -2883,7 +2919,10 @@ mod tests {
             .expect("mark");
 
         let history = handle.get_history().await.expect("history");
-        assert_eq!(history[0].mark_status, bergamot_core::models::MarkStatus::Bad);
+        assert_eq!(
+            history[0].mark_status,
+            bergamot_core::models::MarkStatus::Bad
+        );
 
         handle.shutdown().await.expect("shutdown");
     }
@@ -3326,7 +3365,10 @@ mod tests {
         assert_eq!(file.failed_articles, 1);
         assert_eq!(nzb.failed_size, 500);
         assert_eq!(nzb.remaining_size, 500);
-        assert_eq!(nzb.delete_status, bergamot_core::models::DeleteStatus::Health);
+        assert_eq!(
+            nzb.delete_status,
+            bergamot_core::models::DeleteStatus::Health
+        );
     }
 
     fn complete_article(
@@ -3437,7 +3479,12 @@ mod tests {
         let nzb = sample_nzb(1, "test");
         push_to_history(&mut coordinator, nzb);
 
-        coordinator.update_post_status(1, None, None, Some(bergamot_core::models::MoveStatus::Success));
+        coordinator.update_post_status(
+            1,
+            None,
+            None,
+            Some(bergamot_core::models::MoveStatus::Success),
+        );
 
         assert_eq!(
             coordinator.queue.history[0].nzb_info.move_status,
@@ -3462,7 +3509,12 @@ mod tests {
             .expect("add");
 
         handle
-            .update_post_status(id, Some(bergamot_core::models::ParStatus::Failure), None, None)
+            .update_post_status(
+                id,
+                Some(bergamot_core::models::ParStatus::Failure),
+                None,
+                None,
+            )
             .await
             .expect("update");
 

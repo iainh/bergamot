@@ -7,7 +7,9 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
 use bergamot_config::{Config, parse_config};
-use bergamot_core::models::{ArticleInfo, ArticleStatus, DownloadQueue, FileInfo, NzbInfo, Priority};
+use bergamot_core::models::{
+    ArticleInfo, ArticleStatus, DownloadQueue, FileInfo, NzbInfo, Priority,
+};
 use bergamot_diskstate::{DiskState, JsonFormat, StateLock};
 use bergamot_extension::{
     ExtensionInfo, ExtensionKind, ExtensionManager, ExtensionRunner, NzbppContext, ProcessRunner,
@@ -428,9 +430,7 @@ fn scan_script_dir(script_dir: &Path) -> Vec<ExtensionInfo> {
     extensions
 }
 
-fn build_extension_executor(
-    config: &Config,
-) -> Option<Arc<dyn ExtensionExecutor>> {
+fn build_extension_executor(config: &Config) -> Option<Arc<dyn ExtensionExecutor>> {
     let script_dir = &config.script_dir;
     let extensions = scan_script_dir(script_dir);
     if extensions.is_empty() {
@@ -693,8 +693,10 @@ pub async fn run_with_config_path(
             disk_clone.save_queue(&state)?;
             if let Some(states) = article_states {
                 for snap in &states {
-                    let mut file_state =
-                        bergamot_diskstate::FileArticleState::new(snap.file_id, snap.total_articles);
+                    let mut file_state = bergamot_diskstate::FileArticleState::new(
+                        snap.file_id,
+                        snap.total_articles,
+                    );
                     for &(idx, crc) in &snap.completed_articles {
                         file_state.mark_article_done(idx, crc);
                     }
@@ -740,7 +742,10 @@ mod tests {
 
         let config = load_config(tmp.path()).expect("load");
         assert_eq!(config.control_port, 6790);
-        assert_eq!(config.main_dir, std::path::PathBuf::from("/tmp/bergamot-test"));
+        assert_eq!(
+            config.main_dir,
+            std::path::PathBuf::from("/tmp/bergamot-test")
+        );
     }
 
     #[test]

@@ -145,13 +145,17 @@ impl<E: Par2Engine, U: Unpacker> PostProcessor<E, U> {
         tracing::info!(nzb = %ctx.request.nzb_name, "post-processing started");
 
         if let Some(reporter) = &self.reporter {
-            reporter.report_stage(nzb_id, bergamot_core::models::PostStage::Queued).await;
+            reporter
+                .report_stage(nzb_id, bergamot_core::models::PostStage::Queued)
+                .await;
         }
 
         ctx.set_stage(PostStage::ParRenaming);
         ctx.set_stage(PostStage::ParVerifying);
         if let Some(reporter) = &self.reporter {
-            reporter.report_stage(nzb_id, bergamot_core::models::PostStage::ParVerifying).await;
+            reporter
+                .report_stage(nzb_id, bergamot_core::models::PostStage::ParVerifying)
+                .await;
         }
         let par_start = Instant::now();
         tracing::info!(nzb = %ctx.request.nzb_name, "par2 verify starting");
@@ -179,7 +183,9 @@ impl<E: Par2Engine, U: Unpacker> PostProcessor<E, U> {
         if matches!(ctx.par_result, Some(Par2Result::RepairNeeded { .. })) {
             ctx.set_stage(PostStage::ParRepairing);
             if let Some(reporter) = &self.reporter {
-                reporter.report_stage(nzb_id, bergamot_core::models::PostStage::ParRepairing).await;
+                reporter
+                    .report_stage(nzb_id, bergamot_core::models::PostStage::ParRepairing)
+                    .await;
             }
             let repair_start = Instant::now();
             tracing::info!(nzb = %ctx.request.nzb_name, "par2 repair starting");
@@ -206,7 +212,9 @@ impl<E: Par2Engine, U: Unpacker> PostProcessor<E, U> {
 
         ctx.set_stage(PostStage::Unpacking);
         if let Some(reporter) = &self.reporter {
-            reporter.report_stage(nzb_id, bergamot_core::models::PostStage::Unpacking).await;
+            reporter
+                .report_stage(nzb_id, bergamot_core::models::PostStage::Unpacking)
+                .await;
         }
         let unpack_start = Instant::now();
         let unpack_status = match self.unpack(&ctx).await {
@@ -225,7 +233,9 @@ impl<E: Par2Engine, U: Unpacker> PostProcessor<E, U> {
 
         ctx.set_stage(PostStage::Moving);
         if let Some(reporter) = &self.reporter {
-            reporter.report_stage(nzb_id, bergamot_core::models::PostStage::Moving).await;
+            reporter
+                .report_stage(nzb_id, bergamot_core::models::PostStage::Moving)
+                .await;
         }
         let dest = resolve_dest_dir(
             &self.config.dest_dir,
@@ -240,7 +250,9 @@ impl<E: Par2Engine, U: Unpacker> PostProcessor<E, U> {
         if let Some(executor) = &self.extensions {
             ctx.set_stage(PostStage::Extensions);
             if let Some(reporter) = &self.reporter {
-                reporter.report_stage(nzb_id, bergamot_core::models::PostStage::Executing).await;
+                reporter
+                    .report_stage(nzb_id, bergamot_core::models::PostStage::Executing)
+                    .await;
             }
             let par_status_str = match ctx.par_result {
                 Some(Par2Result::AllFilesOk) | Some(Par2Result::RepairComplete) => "SUCCESS",
@@ -289,7 +301,9 @@ impl<E: Par2Engine, U: Unpacker> PostProcessor<E, U> {
             unpack_sec: unpack_elapsed.as_secs_f64().round() as u64,
         };
         if let Some(reporter) = &self.reporter {
-            reporter.report_done(nzb_id, par_status, unpack_status, move_status, timings).await;
+            reporter
+                .report_done(nzb_id, par_status, unpack_status, move_status, timings)
+                .await;
         }
 
         ctx.set_stage(PostStage::Finished);
@@ -380,7 +394,10 @@ fn spawn_progress_poller(
     })
 }
 
-pub fn find_par2_file(working_dir: &std::path::Path, _nzb_name: &str) -> Option<std::path::PathBuf> {
+pub fn find_par2_file(
+    working_dir: &std::path::Path,
+    _nzb_name: &str,
+) -> Option<std::path::PathBuf> {
     let mut candidates: Vec<std::path::PathBuf> = std::fs::read_dir(working_dir)
         .ok()?
         .filter_map(|e| e.ok())

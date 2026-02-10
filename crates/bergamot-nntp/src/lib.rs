@@ -12,4 +12,4 @@ pub use crate::pool::{
 };
 pub use crate::protocol::{BodyReader, NntpConnection, NntpIo, NntpStream};
 pub use crate::scheduler::{ServerScheduler, ServerSlot};
-pub use crate::speed::SpeedLimiter;
+pub use crate::speed::{SpeedLimiter, SpeedLimiterHandle};

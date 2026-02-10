@@ -323,7 +323,6 @@ impl ServerScheduler {
     pub fn slots(&self) -> &[ServerSlot] {
         &self.slots
     }
-
 }
 
 #[cfg(test)]

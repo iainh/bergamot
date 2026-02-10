@@ -93,7 +93,10 @@ impl AppState {
         self
     }
 
-    pub fn with_log_buffer(mut self, log_buffer: std::sync::Arc<bergamot_logging::LogBuffer>) -> Self {
+    pub fn with_log_buffer(
+        mut self,
+        log_buffer: std::sync::Arc<bergamot_logging::LogBuffer>,
+    ) -> Self {
         self.log_buffer = Some(log_buffer);
         self
     }
@@ -184,7 +187,8 @@ impl AppState {
 
     pub fn disk(
         &self,
-    ) -> Option<&std::sync::Arc<bergamot_diskstate::DiskState<bergamot_diskstate::JsonFormat>>> {
+    ) -> Option<&std::sync::Arc<bergamot_diskstate::DiskState<bergamot_diskstate::JsonFormat>>>
+    {
         self.disk.as_ref()
     }
 
@@ -638,7 +642,10 @@ async fn handle_logout() -> axum::response::Response {
     axum::response::Response::builder()
         .status(StatusCode::SEE_OTHER)
         .header("Location", "/login")
-        .header("Set-Cookie", "bergamot_session=; Path=/; HttpOnly; Max-Age=0")
+        .header(
+            "Set-Cookie",
+            "bergamot_session=; Path=/; HttpOnly; Max-Age=0",
+        )
         .body(axum::body::Body::empty())
         .unwrap()
         .into_response()

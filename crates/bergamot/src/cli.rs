@@ -37,14 +37,16 @@ mod tests {
 
     #[test]
     fn cli_parses_config_path() {
-        let cli = Cli::try_parse_from(["bergamot", "--config", "/etc/bergamot.conf"]).expect("parse");
+        let cli =
+            Cli::try_parse_from(["bergamot", "--config", "/etc/bergamot.conf"]).expect("parse");
         assert_eq!(cli.config.unwrap(), PathBuf::from("/etc/bergamot.conf"));
     }
 
     #[test]
     fn cli_parses_short_flags() {
-        let cli = Cli::try_parse_from(["bergamot", "-c", "/etc/bergamot.conf", "-D", "-l", "debug"])
-            .expect("parse");
+        let cli =
+            Cli::try_parse_from(["bergamot", "-c", "/etc/bergamot.conf", "-D", "-l", "debug"])
+                .expect("parse");
         assert_eq!(cli.config.unwrap(), PathBuf::from("/etc/bergamot.conf"));
         assert!(cli.foreground);
         assert_eq!(cli.log_level, "debug");
@@ -52,7 +54,8 @@ mod tests {
 
     #[test]
     fn cli_parses_pidfile_option() {
-        let cli = Cli::try_parse_from(["bergamot", "--pidfile", "/var/run/bergamot.pid"]).expect("parse");
+        let cli =
+            Cli::try_parse_from(["bergamot", "--pidfile", "/var/run/bergamot.pid"]).expect("parse");
         assert_eq!(cli.pidfile.unwrap(), PathBuf::from("/var/run/bergamot.pid"));
     }
 

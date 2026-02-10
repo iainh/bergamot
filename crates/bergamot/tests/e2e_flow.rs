@@ -273,11 +273,15 @@ async fn wait_for_completion(rpc_addr: SocketAddr, nzb_id: u64, max_polls: usize
             serde_json::json!([]),
         )
         .await;
-        if groups.as_array().and_then(|entries| {
-            entries
-                .iter()
-                .find(|entry| entry.get("NZBID").and_then(|v| v.as_u64()) == Some(nzb_id))
-        }).is_some() {
+        if groups
+            .as_array()
+            .and_then(|entries| {
+                entries
+                    .iter()
+                    .find(|entry| entry.get("NZBID").and_then(|v| v.as_u64()) == Some(nzb_id))
+            })
+            .is_some()
+        {
             tokio::time::sleep(Duration::from_millis(200)).await;
             continue;
         } else {
@@ -1447,10 +1451,7 @@ async fn graceful_shutdown_under_load() {
         serde_json::json!([]),
     )
     .await;
-    let still_active = groups
-        .as_array()
-        .map(|a| !a.is_empty())
-        .unwrap_or(false);
+    let still_active = groups.as_array().map(|a| !a.is_empty()).unwrap_or(false);
     assert!(
         still_active,
         "download should still be in progress when shutdown is issued"
@@ -1460,10 +1461,7 @@ async fn graceful_shutdown_under_load() {
     let app_result = tokio::time::timeout(Duration::from_secs(10), app_task)
         .await
         .expect("app should shut down within timeout");
-    assert!(
-        app_result.is_ok(),
-        "app task should complete without panic"
-    );
+    assert!(app_result.is_ok(), "app task should complete without panic");
 
     let queue_json = temp.path().join("queue").join("queue.json");
     assert!(
@@ -1504,7 +1502,10 @@ async fn graceful_shutdown_under_load() {
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     let completed = wait_for_completion(rpc_addr2, nzb_id, 80).await;
-    assert!(completed, "NZB should complete after restart from graceful shutdown state");
+    assert!(
+        completed,
+        "NZB should complete after restart from graceful shutdown state"
+    );
 
     let dest_dir = config2.dest_dir.clone();
     let inter_dir = config2.inter_dir.clone();
@@ -1672,7 +1673,10 @@ async fn rpc_editqueue_pause_resume_delete_move() {
         serde_json::json!(["GroupPause", "", [nzb_id_1]]),
     )
     .await;
-    assert!(pause_result.as_bool().unwrap_or(false), "GroupPause should succeed");
+    assert!(
+        pause_result.as_bool().unwrap_or(false),
+        "GroupPause should succeed"
+    );
 
     let groups = jsonrpc_call(
         rpc_addr,
@@ -1706,7 +1710,10 @@ async fn rpc_editqueue_pause_resume_delete_move() {
         serde_json::json!(["GroupResume", "", [nzb_id_1]]),
     )
     .await;
-    assert!(resume_result.as_bool().unwrap_or(false), "GroupResume should succeed");
+    assert!(
+        resume_result.as_bool().unwrap_or(false),
+        "GroupResume should succeed"
+    );
 
     let groups_after = jsonrpc_call(
         rpc_addr,
@@ -1734,7 +1741,10 @@ async fn rpc_editqueue_pause_resume_delete_move() {
         serde_json::json!(["GroupMoveTop", "", [nzb_id_2]]),
     )
     .await;
-    assert!(move_result.as_bool().unwrap_or(false), "GroupMoveTop should succeed");
+    assert!(
+        move_result.as_bool().unwrap_or(false),
+        "GroupMoveTop should succeed"
+    );
 
     let groups_moved = jsonrpc_call(
         rpc_addr,
@@ -1749,7 +1759,10 @@ async fn rpc_editqueue_pause_resume_delete_move() {
             .get("NZBID")
             .and_then(|v| v.as_u64())
             .unwrap_or(0);
-        assert_eq!(first_id, nzb_id_2, "nzb_id_2 should be first after GroupMoveTop");
+        assert_eq!(
+            first_id, nzb_id_2,
+            "nzb_id_2 should be first after GroupMoveTop"
+        );
     }
 
     let delete_result = jsonrpc_call(
@@ -1759,7 +1772,10 @@ async fn rpc_editqueue_pause_resume_delete_move() {
         serde_json::json!(["GroupDelete", "", [nzb_id_1, nzb_id_2]]),
     )
     .await;
-    assert!(delete_result.as_bool().unwrap_or(false), "GroupDelete should succeed");
+    assert!(
+        delete_result.as_bool().unwrap_or(false),
+        "GroupDelete should succeed"
+    );
 
     let groups_deleted = jsonrpc_call(
         rpc_addr,
@@ -1773,7 +1789,10 @@ async fn rpc_editqueue_pause_resume_delete_move() {
         let id = e.get("NZBID").and_then(|v| v.as_u64()).unwrap_or(0);
         id == nzb_id_1 || id == nzb_id_2
     });
-    assert!(!still_present, "deleted NZBs should no longer appear in listgroups");
+    assert!(
+        !still_present,
+        "deleted NZBs should no longer appear in listgroups"
+    );
 
     shutdown_app(rpc_addr).await;
     let _ = tokio::time::timeout(Duration::from_secs(5), app_task)
@@ -1831,20 +1850,21 @@ async fn rpc_pausedownload_resumedownload() {
         serde_json::json!([]),
     )
     .await;
-    assert!(pause_result.as_bool().unwrap_or(false), "pausedownload should succeed");
+    assert!(
+        pause_result.as_bool().unwrap_or(false),
+        "pausedownload should succeed"
+    );
 
-    let status_paused = jsonrpc_call(
-        rpc_addr,
-        "nzbget:secret",
-        "status",
-        serde_json::json!([]),
-    )
-    .await;
+    let status_paused =
+        jsonrpc_call(rpc_addr, "nzbget:secret", "status", serde_json::json!([])).await;
     let download_paused = status_paused
         .get("DownloadPaused")
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
-    assert!(download_paused, "DownloadPaused should be true after pausedownload");
+    assert!(
+        download_paused,
+        "DownloadPaused should be true after pausedownload"
+    );
 
     let nzb_id = append_nzb(rpc_addr, &multi_nzb_path()).await;
     tokio::time::sleep(Duration::from_millis(500)).await;
@@ -1860,7 +1880,10 @@ async fn rpc_pausedownload_resumedownload() {
     let nzb_entry = entries
         .iter()
         .find(|e| e.get("NZBID").and_then(|v| v.as_u64()) == Some(nzb_id));
-    assert!(nzb_entry.is_some(), "NZB should still be in queue while paused");
+    assert!(
+        nzb_entry.is_some(),
+        "NZB should still be in queue while paused"
+    );
 
     let remaining_before = nzb_entry
         .unwrap()
@@ -1875,20 +1898,21 @@ async fn rpc_pausedownload_resumedownload() {
         serde_json::json!([]),
     )
     .await;
-    assert!(resume_result.as_bool().unwrap_or(false), "resumedownload should succeed");
+    assert!(
+        resume_result.as_bool().unwrap_or(false),
+        "resumedownload should succeed"
+    );
 
-    let status_resumed = jsonrpc_call(
-        rpc_addr,
-        "nzbget:secret",
-        "status",
-        serde_json::json!([]),
-    )
-    .await;
+    let status_resumed =
+        jsonrpc_call(rpc_addr, "nzbget:secret", "status", serde_json::json!([])).await;
     let download_paused_after = status_resumed
         .get("DownloadPaused")
         .and_then(|v| v.as_bool())
         .unwrap_or(true);
-    assert!(!download_paused_after, "DownloadPaused should be false after resumedownload");
+    assert!(
+        !download_paused_after,
+        "DownloadPaused should be false after resumedownload"
+    );
 
     let completed = wait_for_completion(rpc_addr, nzb_id, 80).await;
     assert!(completed, "NZB should complete after resumedownload");
@@ -1935,52 +1959,38 @@ async fn rpc_rate_speed_limiting() {
     ));
     tokio::time::sleep(Duration::from_millis(200)).await;
 
-    let set_result = jsonrpc_call(
-        rpc_addr,
-        "nzbget:secret",
-        "rate",
-        serde_json::json!([100]),
-    )
-    .await;
+    let set_result =
+        jsonrpc_call(rpc_addr, "nzbget:secret", "rate", serde_json::json!([100])).await;
     assert!(set_result.as_bool().unwrap_or(false), "rate should succeed");
 
     tokio::time::sleep(Duration::from_millis(1200)).await;
 
-    let status = jsonrpc_call(
-        rpc_addr,
-        "nzbget:secret",
-        "status",
-        serde_json::json!([]),
-    )
-    .await;
+    let status = jsonrpc_call(rpc_addr, "nzbget:secret", "status", serde_json::json!([])).await;
     let limit = status
         .get("DownloadLimit")
         .and_then(|v| v.as_u64())
         .unwrap_or(0);
-    assert_eq!(limit, 100 * 1024, "DownloadLimit should be 100 KB/s in bytes/s");
+    assert_eq!(
+        limit,
+        100 * 1024,
+        "DownloadLimit should be 100 KB/s in bytes/s"
+    );
 
     let nzb_id = append_nzb(rpc_addr, &sample_nzb_path()).await;
     let completed = wait_for_completion(rpc_addr, nzb_id, 50).await;
     assert!(completed, "download should complete with rate limit set");
 
-    let clear_result = jsonrpc_call(
-        rpc_addr,
-        "nzbget:secret",
-        "rate",
-        serde_json::json!([0]),
-    )
-    .await;
-    assert!(clear_result.as_bool().unwrap_or(false), "clearing rate should succeed");
+    let clear_result =
+        jsonrpc_call(rpc_addr, "nzbget:secret", "rate", serde_json::json!([0])).await;
+    assert!(
+        clear_result.as_bool().unwrap_or(false),
+        "clearing rate should succeed"
+    );
 
     tokio::time::sleep(Duration::from_millis(1200)).await;
 
-    let status_after = jsonrpc_call(
-        rpc_addr,
-        "nzbget:secret",
-        "status",
-        serde_json::json!([]),
-    )
-    .await;
+    let status_after =
+        jsonrpc_call(rpc_addr, "nzbget:secret", "status", serde_json::json!([])).await;
     let limit_after = status_after
         .get("DownloadLimit")
         .and_then(|v| v.as_u64())
@@ -2040,7 +2050,8 @@ async fn error_invalid_nzb_returns_rpc_error() {
         "invalid NZB should not produce a result"
     );
 
-    let empty_nzb = r#"<?xml version="1.0"?><nzb xmlns="http://www.newzbin.com/DTD/2003/nzb"></nzb>"#;
+    let empty_nzb =
+        r#"<?xml version="1.0"?><nzb xmlns="http://www.newzbin.com/DTD/2003/nzb"></nzb>"#;
     let empty_b64 = base64::engine::general_purpose::STANDARD.encode(empty_nzb.as_bytes());
     let response2 = jsonrpc_call_full(
         rpc_addr,
@@ -2092,7 +2103,10 @@ async fn error_all_articles_missing_produces_failure_history() {
 
     let nzb_id = append_nzb(rpc_addr, &sample_nzb_path()).await;
     let completed = wait_for_completion(rpc_addr, nzb_id, 50).await;
-    assert!(completed, "NZB with all missing articles should still complete (move to history)");
+    assert!(
+        completed,
+        "NZB with all missing articles should still complete (move to history)"
+    );
 
     tokio::time::sleep(Duration::from_millis(500)).await;
 
@@ -2147,7 +2161,10 @@ async fn error_all_servers_down_produces_failure() {
 
     let nzb_id = append_nzb(rpc_addr, &sample_nzb_path()).await;
     let completed = wait_for_completion(rpc_addr, nzb_id, 60).await;
-    assert!(completed, "NZB should eventually complete even when servers are unreachable");
+    assert!(
+        completed,
+        "NZB should eventually complete even when servers are unreachable"
+    );
 
     tokio::time::sleep(Duration::from_millis(500)).await;
 
@@ -2236,7 +2253,10 @@ async fn extension_script_runs_during_post_processing() {
     })
     .await
     .expect("extension marker file should appear within timeout");
-    assert!(marker_found, "extension script should have created marker file");
+    assert!(
+        marker_found,
+        "extension script should have created marker file"
+    );
 
     shutdown_app(rpc_addr).await;
     let _ = tokio::time::timeout(Duration::from_secs(5), app_task)

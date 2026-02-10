@@ -12,4 +12,6 @@ pub use model::{
 };
 pub use parser::parse_recovery_set;
 pub use repair::{repair_recovery_set, repair_recovery_set_with_progress};
-pub use verify::{verify_recovery_set, verify_recovery_set_with_progress, verify_recovery_set_with_progress_range};
+pub use verify::{
+    verify_recovery_set, verify_recovery_set_with_progress, verify_recovery_set_with_progress_range,
+};

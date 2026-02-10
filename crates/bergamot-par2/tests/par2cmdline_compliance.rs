@@ -230,7 +230,8 @@ fn compliance_flatdata_repair_missing_files() {
     let result = bergamot_par2::verify_recovery_set(&rs, dir.path());
     assert!(!result.all_ok());
 
-    let report = bergamot_par2::repair_recovery_set(&rs, &result, dir.path()).expect("repair failed");
+    let report =
+        bergamot_par2::repair_recovery_set(&rs, &result, dir.path()).expect("repair failed");
     assert!(report.repaired_slices > 0);
 
     let result_after = bergamot_par2::verify_recovery_set(&rs, dir.path());
@@ -255,7 +256,8 @@ fn compliance_flatdata_repair_damaged_file() {
     let result = bergamot_par2::verify_recovery_set(&rs, dir.path());
     assert!(!result.all_ok());
 
-    let report = bergamot_par2::repair_recovery_set(&rs, &result, dir.path()).expect("repair failed");
+    let report =
+        bergamot_par2::repair_recovery_set(&rs, &result, dir.path()).expect("repair failed");
     assert!(report.repaired_slices > 0);
 
     let result_after = bergamot_par2::verify_recovery_set(&rs, dir.path());

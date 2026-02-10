@@ -338,7 +338,9 @@ async fn rpc_editqueue(
 
 fn parse_edit_command(command: &str) -> Result<bergamot_queue::EditAction, JsonRpcError> {
     match command {
-        "GroupMoveTop" => Ok(bergamot_queue::EditAction::Move(bergamot_queue::MovePosition::Top)),
+        "GroupMoveTop" => Ok(bergamot_queue::EditAction::Move(
+            bergamot_queue::MovePosition::Top,
+        )),
         "GroupMoveBottom" => Ok(bergamot_queue::EditAction::Move(
             bergamot_queue::MovePosition::Bottom,
         )),
@@ -1070,11 +1072,23 @@ async fn rpc_history(
             m.insert("CriticalHealth".into(), serde_json::json!(0));
             m.insert("Parameters".into(), serde_json::json!([]));
             m.insert("ServerStats".into(), serde_json::json!([]));
-            m.insert("SuccessArticles".into(), serde_json::json!(e.success_article_count));
-            m.insert("FailedArticles".into(), serde_json::json!(e.failed_article_count));
-            m.insert("TotalArticles".into(), serde_json::json!(e.total_article_count));
+            m.insert(
+                "SuccessArticles".into(),
+                serde_json::json!(e.success_article_count),
+            );
+            m.insert(
+                "FailedArticles".into(),
+                serde_json::json!(e.failed_article_count),
+            );
+            m.insert(
+                "TotalArticles".into(),
+                serde_json::json!(e.total_article_count),
+            );
             m.insert("RemainingFileCount".into(), serde_json::json!(0));
-            m.insert("RemainingParCount".into(), serde_json::json!(e.remaining_par_count));
+            m.insert(
+                "RemainingParCount".into(),
+                serde_json::json!(e.remaining_par_count),
+            );
             m.insert("FileCount".into(), serde_json::json!(e.file_count));
             m.insert("RetryData".into(), serde_json::json!(false));
             m.insert("FinalDir".into(), serde_json::json!(""));
@@ -1083,8 +1097,14 @@ async fn rpc_history(
             m.insert("DownloadedSizeMB".into(), serde_json::json!(file_size_mb));
             m.insert("DownloadedSizeLo".into(), serde_json::json!(file_size_lo));
             m.insert("DownloadedSizeHi".into(), serde_json::json!(file_size_hi));
-            m.insert("DownloadTimeSec".into(), serde_json::json!(e.download_time_sec));
-            m.insert("PostTotalTimeSec".into(), serde_json::json!(e.post_total_sec));
+            m.insert(
+                "DownloadTimeSec".into(),
+                serde_json::json!(e.download_time_sec),
+            );
+            m.insert(
+                "PostTotalTimeSec".into(),
+                serde_json::json!(e.post_total_sec),
+            );
             m.insert("ParTimeSec".into(), serde_json::json!(e.par_sec));
             m.insert("RepairTimeSec".into(), serde_json::json!(e.repair_sec));
             m.insert("UnpackTimeSec".into(), serde_json::json!(e.unpack_sec));
@@ -1548,8 +1568,8 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tempdir");
         let config_path = tmp.path().join("bergamot.conf");
         std::fs::write(&config_path, "ControlPort=6789\nMainDir=/tmp/bergamot\n").expect("write");
-        let raw =
-            bergamot_config::parse_config("ControlPort=6789\nMainDir=/tmp/bergamot\n").expect("parse");
+        let raw = bergamot_config::parse_config("ControlPort=6789\nMainDir=/tmp/bergamot\n")
+            .expect("parse");
         let config = bergamot_config::Config::from_raw(raw);
         let config = std::sync::Arc::new(std::sync::RwLock::new(config));
         let state = AppState::default().with_config(config, config_path);

@@ -1,6 +1,8 @@
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
+use tokio::sync::{mpsc, oneshot};
 use tokio::time::sleep;
 
 #[derive(Debug)]
@@ -11,9 +13,105 @@ pub struct SpeedLimiter {
     last_refill: Instant,
 }
 
-use std::sync::Arc;
+enum LimiterCommand {
+    Acquire {
+        bytes: u64,
+        reply: oneshot::Sender<Option<Duration>>,
+    },
+    SetRate {
+        rate: u64,
+        reply: oneshot::Sender<()>,
+    },
+}
+
+#[derive(Clone)]
+pub struct SpeedLimiterHandle {
+    tx: mpsc::Sender<LimiterCommand>,
+    rate_atomic: Arc<AtomicU64>,
+}
+
+impl SpeedLimiterHandle {
+    pub fn new(rate_bytes_per_sec: u64) -> Self {
+        let rate_atomic = Arc::new(AtomicU64::new(rate_bytes_per_sec));
+        let (tx, rx) = mpsc::channel(256);
+        let atomic_clone = rate_atomic.clone();
+        tokio::spawn(Self::run(rx, rate_bytes_per_sec, atomic_clone));
+        Self { tx, rate_atomic }
+    }
+
+    async fn run(
+        mut rx: mpsc::Receiver<LimiterCommand>,
+        initial_rate: u64,
+        rate_atomic: Arc<AtomicU64>,
+    ) {
+        let mut limiter = SpeedLimiter::new_internal(initial_rate);
+        while let Some(cmd) = rx.recv().await {
+            match cmd {
+                LimiterCommand::Acquire { bytes, reply } => {
+                    let delay = limiter.reserve(bytes);
+                    let _ = reply.send(delay);
+                }
+                LimiterCommand::SetRate { rate, reply } => {
+                    limiter.rate = rate;
+                    rate_atomic.store(rate, Ordering::Relaxed);
+                    let _ = reply.send(());
+                }
+            }
+        }
+    }
+
+    pub async fn acquire(&self, bytes: u64) {
+        if self.is_unlimited() {
+            return;
+        }
+        let (reply_tx, reply_rx) = oneshot::channel();
+        if self
+            .tx
+            .send(LimiterCommand::Acquire {
+                bytes,
+                reply: reply_tx,
+            })
+            .await
+            .is_err()
+        {
+            return;
+        }
+        if let Ok(Some(delay)) = reply_rx.await {
+            sleep(delay).await;
+        }
+    }
+
+    pub async fn set_rate(&self, rate: u64) {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        if self
+            .tx
+            .send(LimiterCommand::SetRate {
+                rate,
+                reply: reply_tx,
+            })
+            .await
+            .is_err()
+        {
+            return;
+        }
+        let _ = reply_rx.await;
+    }
+
+    pub fn is_unlimited(&self) -> bool {
+        self.rate_atomic.load(Ordering::Relaxed) == 0
+    }
+}
 
 impl SpeedLimiter {
+    fn new_internal(rate_bytes_per_sec: u64) -> Self {
+        Self {
+            rate: rate_bytes_per_sec,
+            rate_atomic: Arc::new(AtomicU64::new(rate_bytes_per_sec)),
+            tokens: rate_bytes_per_sec as f64,
+            last_refill: Instant::now(),
+        }
+    }
+
     pub fn new(rate_bytes_per_sec: u64) -> Self {
         Self {
             rate: rate_bytes_per_sec,
@@ -106,5 +204,51 @@ mod tests {
         limiter.set_rate(0);
         limiter.acquire(1_000_000).await;
         assert_eq!(limiter.rate(), 0);
+    }
+
+    #[tokio::test]
+    async fn handle_acquire_unlimited_returns_immediately() {
+        let handle = SpeedLimiterHandle::new(0);
+        handle.acquire(1024).await;
+    }
+
+    #[tokio::test]
+    async fn handle_acquire_within_budget_returns_immediately() {
+        let handle = SpeedLimiterHandle::new(1_000_000);
+        let start = Instant::now();
+        handle.acquire(100).await;
+        assert!(start.elapsed() < Duration::from_millis(50));
+    }
+
+    #[tokio::test]
+    async fn handle_set_rate_to_zero_disables_limiting() {
+        let handle = SpeedLimiterHandle::new(100);
+        handle.set_rate(0).await;
+        let start = Instant::now();
+        handle.acquire(1_000_000).await;
+        assert!(start.elapsed() < Duration::from_millis(50));
+    }
+
+    #[tokio::test]
+    async fn handle_is_unlimited_reflects_rate() {
+        let handle = SpeedLimiterHandle::new(1000);
+        assert!(!handle.is_unlimited());
+        let handle_zero = SpeedLimiterHandle::new(0);
+        assert!(handle_zero.is_unlimited());
+    }
+
+    #[tokio::test]
+    async fn handle_concurrent_acquires_do_not_panic() {
+        let handle = SpeedLimiterHandle::new(1_000_000);
+        let mut tasks = Vec::new();
+        for _ in 0..50 {
+            let h = handle.clone();
+            tasks.push(tokio::spawn(async move {
+                h.acquire(100).await;
+            }));
+        }
+        for t in tasks {
+            t.await.unwrap();
+        }
     }
 }
