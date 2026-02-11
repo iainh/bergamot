@@ -439,6 +439,17 @@ body.navfixed.scrolled .navbar-fixed-top .navbar-inner {
 
 #NavLinks {
     margin-right: 0;
+    flex: 1;
+    justify-content: center;
+    order: 0;
+}
+
+#RefreshBlockDesktop,
+#RefreshBlockPhone,
+#SearchBlock {
+    order: 1;
+    display: flex;
+    align-items: center;
 }
 
 .navbar-container {
@@ -450,10 +461,6 @@ body.navfixed.scrolled .navbar-fixed-top .navbar-inner {
     padding: 0;
 }
 
-/* needed for Safari 4 */
-.btn-toolbar .btn {
-    height: 28px;
-}
 
 .navbar .nav {
     margin-right: 0;
@@ -869,11 +876,6 @@ ul.dropdown-menu > li > a > i {
 }
 
 /* END: Icons */
-
-.btn-toolbar {
-    margin-top: 6px;
-    margin-bottom: 0px;
-}
 
 .section-toolbar,
 .modal-toolbar {

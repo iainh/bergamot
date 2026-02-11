@@ -175,9 +175,16 @@ input, select, textarea, button {
 }
 
 .navbar-search {
-	display: inline-block;
+	display: inline-flex;
+	align-items: center;
 	position: relative;
 	margin: 0 10px;
+}
+
+.navbar input,
+.navbar select,
+.navbar button {
+	margin-bottom: 0;
 }
 
 .navbar-search .search-query {
@@ -239,11 +246,6 @@ input, select, textarea, button {
 	color: #ffffff;
 	text-decoration: none;
 	background-color: #222222;
-}
-
-.navbar .btn,
-.navbar .btn-group {
-	margin-top: 5px;
 }
 
 .navbar .btn-group .btn {
