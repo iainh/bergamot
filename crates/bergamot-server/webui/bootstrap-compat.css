@@ -91,16 +91,6 @@ input, select, textarea, button {
 	margin-right: -15px;
 }
 
-.row-fluid::before,
-.row-fluid::after {
-	content: "";
-	display: table;
-}
-
-.row-fluid::after {
-	clear: both;
-}
-
 .row-fluid > [class*="span"] {
 	box-sizing: border-box;
 	padding-left: 15px;
@@ -115,18 +105,8 @@ input, select, textarea, button {
 .span9  { width: 75%; }
 .span12 { width: 100%; }
 
-.pull-left  { float: left; margin-right: auto; }
-.pull-right { float: right; margin-left: auto; }
-
-.clearfix::before,
-.clearfix::after {
-	content: "";
-	display: table;
-}
-
-.clearfix::after {
-	clear: both;
-}
+.pull-left  { margin-right: auto; }
+.pull-right { margin-left: auto; }
 
 .hide {
 	display: none;
