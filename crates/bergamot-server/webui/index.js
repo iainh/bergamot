@@ -264,11 +264,6 @@ var Frontend = (new function($)
 	{
 		window.onerror = error;
 
-		if (!checkBrowser())
-		{
-			return;
-		}
-
 		$('#FirstUpdateInfo').show();
 
 		UISettings.load();
@@ -331,17 +326,6 @@ var Frontend = (new function($)
 		$('li > a:has(table)').addClass('has-table');
 		$(document).on('keydown', keyDown);
 		$(window).scroll(windowScrolled);
-	}
-
-	function checkBrowser()
-	{
-		if ($.browser.msie && parseInt($.browser.version, 10) < 9)
-		{
-			$('#FirstUpdateInfo').hide();
-			$('#UnsupportedBrowserIE8Alert').show();
-			return false;
-		}
-		return true;
 	}
 
 	function error(message, source, lineno)

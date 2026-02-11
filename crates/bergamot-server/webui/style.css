@@ -1563,8 +1563,7 @@ ul.help > li {
 #ConfigLoadInfo,
 #ConfigLoadServerTemplateError,
 #ConfigLoadError,
-#ConfigSaved,
-.unsupported-browser {
+#ConfigSaved {
     margin: 15px 20px 0 15px;
 }
 

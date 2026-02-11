@@ -68,13 +68,7 @@
   <!-- favicons -->
   <link rel="shortcut icon" href="img/favicon.ico">
   <!-- apple ios -->
-  <script language="javascript" type="text/javascript">
-	// prevent Android browsers from using of icon designed for iOS
-	if (window.navigator.userAgent.match(/iPhone/i) || window.navigator.userAgent.match(/iPad/i))
-	{
-		document.write('<link rel="apple-touch-icon" href="img/favicon-256x256-opaque.png">');  // lgtm [js/eval-like-call]
-	}
-  </script>
+  <link rel="apple-touch-icon" href="img/favicon-256x256-opaque.png">
   <!-- android -->
   <link rel="icon" type="image/png" sizes="256x256" href="img/favicon-256x256.png">
 
@@ -232,16 +226,6 @@
 <div class="alert alert-info alert-block" id="FirstUpdateInfo">
 	<h4 class="alert-heading">Loading...</h4>
 	Please wait.
-</div>
-
-<!-- *** UNSUPPORTED BROWSER: IE < 9 *************************************************** -->
-<div class="alert alert-danger alert-block unsupported-browser" style="display:none;" id="UnsupportedBrowserIE8Alert">
-	<h4 class="alert-heading">Unsupported browser!</h4>
-	<p>Sorry but this application doesn't work with Internet Explorer versions below 9. Please
-	upgrade to at least IE 9 or use another browser.</p>
-	<p>If you believe you are getting this message by mistake, please check
-	whether the compatibility mode is active in IE and switch it off to activate
-	all browser functionality required for the application.</p>
 </div>
 
 <!-- *** CONTENT ************************************************************ -->
