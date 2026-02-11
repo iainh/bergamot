@@ -1028,13 +1028,7 @@ var Refresher = (new function($)
 
 		var degree = 360 * f / 10;
 
-		$('#RefreshAnimation').css({
-			'-webkit-transform': 'rotate(' + degree + 'deg)',
-			   '-moz-transform': 'rotate(' + degree + 'deg)',
-				'-ms-transform': 'rotate(' + degree + 'deg)',
-				 '-o-transform': 'rotate(' + degree + 'deg)',
-					'transform': 'rotate(' + degree + 'deg)'
-		});
+		$('#RefreshAnimation').css('transform', 'rotate(' + degree + 'deg)');
 
 		if ((!refreshing && indicatorFrame === 0 && (UISettings.refreshInterval === 0 || UISettings.refreshInterval > 1 || !UISettings.refreshAnimation)) || UISettings.connectionError)
 		{

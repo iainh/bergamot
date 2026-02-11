@@ -614,7 +614,7 @@ ul.dropdown-menu > li > a > i {
 }
 
 /* HiDPI screens */
-@media only screen and (-webkit-min-device-pixel-ratio: 2) {
+@media only screen and (min-resolution: 2dppx) {
     [class^="icon-"],
     [class*=" icon-"],
     [class^="img-"],
@@ -2951,7 +2951,6 @@ table > thead > tr > th.table-selector {
 	text-align: center;
 	display: none;
 	cursor: grabbing;
-	cursor: -webkit-grabbing;
 	z-index: 5000;
 }
 
