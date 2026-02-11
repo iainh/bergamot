@@ -1108,10 +1108,6 @@ body.phone {
 	margin-top: 0;
 }
 
-body.navfixed .navbar-fixed-top {
-	position: static;
-}
-
 
 /* ==========================================================================
    Accordion
