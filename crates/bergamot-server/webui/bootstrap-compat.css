@@ -105,8 +105,10 @@ input, select, textarea, button {
 .span9  { width: 75%; }
 .span12 { width: 100%; }
 
-.pull-left  { margin-right: auto; }
-.pull-right { margin-left: auto; }
+.dropdown-menu-end {
+	left: auto;
+	right: 0;
+}
 
 .hide {
 	display: none;
@@ -627,10 +629,18 @@ input, select, textarea, button {
 }
 
 .modal-footer {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: flex-end;
+	gap: 5px;
 	padding: 14px 15px 15px;
 	margin-bottom: 0;
-	text-align: right;
 	border-top: 1px solid var(--pico-form-element-border-color, #ddd);
+}
+
+.modal-footer-left {
+	margin-right: auto;
 }
 
 .modal-footer .btn + .btn {

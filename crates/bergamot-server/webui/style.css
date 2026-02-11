@@ -879,6 +879,8 @@ table.datatable > tbody > tr > td {
 
 /* top toolbox (length-combo and pager) for tables */
 .toolbox-top {
+    display: flex;
+    align-items: center;
     margin-bottom: 8px;
 }
 
@@ -896,9 +898,11 @@ div.toolbox-length select {
     margin-top: 10px;
 }
 
-.pagination {
+.pagination,
+[id$="_pagerBlock"] {
     height: 32px;
     margin: 0;
+    margin-left: auto;
 }
 
 .pagination a {
@@ -1862,6 +1866,7 @@ ul.help > li {
 }
 
 .config-header .btn-group {
+    margin-left: auto;
     margin-right: 0;
 }
 
@@ -2805,6 +2810,8 @@ table > thead > tr > th.table-selector {
 }
 
 #ConfigContent .config-header {
+	display: flex;
+	align-items: center;
 	padding: 7px;
 	border-radius: 3px;
 	margin-bottom: 20px;

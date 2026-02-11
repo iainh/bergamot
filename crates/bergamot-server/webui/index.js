@@ -547,7 +547,7 @@ var Frontend = (new function($)
 		var $elem = $(menu);
 		if (center)
 		{
-			$elem.removeClass('pull-right');
+			$elem.removeClass('dropdown-menu-end');
 			var top = ($(window).height() - $elem.outerHeight())/2;
 			top = top > 0 ? top : 0;
 			var off = $elem.parent().offset();
@@ -575,7 +575,7 @@ var Frontend = (new function($)
 			}
 			if (right)
 			{
-				$elem.addClass('pull-right');
+				$elem.addClass('dropdown-menu-end');
 			}
 		}
 	}
