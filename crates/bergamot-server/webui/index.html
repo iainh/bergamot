@@ -169,19 +169,19 @@
 						</ul>
 					</div>
 
-					<input id="DownloadsTable_filter" class="search-query" type="text" placeholder="Search downloads" title="Search downloads [Shift+F]">
+					<input id="DownloadsTable_filter" class="search-query" type="search" placeholder="Search downloads" title="Search downloads [Shift+F]">
 					<i id="DownloadsTable_clearfilter" class="material-icon search-clear" title="Clear [Shift+C]">close</i>
 
-					<input id="HistoryTable_filter" class="search-query" type="text" placeholder="Search history" title="Search history [Shift+F]">
+					<input id="HistoryTable_filter" class="search-query" type="search" placeholder="Search history" title="Search history [Shift+F]">
 					<i id="HistoryTable_clearfilter" class="material-icon search-clear" title="Clear [Shift+C]">close</i>
 
-					<input id="MessagesTable_filter" class="search-query" type="text" placeholder="Search messages" title="Search messages [Shift+F]">
+					<input id="MessagesTable_filter" class="search-query" type="search" placeholder="Search messages" title="Search messages [Shift+F]">
 					<i id="MessagesTable_clearfilter" class="material-icon search-clear" title="Clear [Shift+C]">close</i>
 
-					<input id="ConfigTable_filter" class="search-query" type="text" placeholder="Search settings" title="Search settings [Shift+F]">
+					<input id="ConfigTable_filter" class="search-query" type="search" placeholder="Search settings" title="Search settings [Shift+F]">
 					<i id="ConfigTable_clearfilter" class="material-icon search-clear" title="Clear [Shift+C]">close</i>
 					
-					<input id="StatisticsTable_filter" class="search-query" disabled type="text" placeholder="Search statistics" title="Search">
+					<input id="StatisticsTable_filter" class="search-query" disabled type="search" placeholder="Search statistics" title="Search">
 					<i id="StatisticsTable_clearfilter" class="material-icon search-clear" title="Clear [Shift+C]">close</i>
 				</div>
 			</div>
@@ -230,7 +230,7 @@
 
 <!-- *** CONTENT ************************************************************ -->
 
-<main class="container-fluid" id="MainContent">
+<main class="container" id="MainContent">
 
 	<div class="tab-content" style="display:none;" id="MainTabContent">
 
@@ -306,7 +306,7 @@
 				<div class="pagination"><ul id="DownloadsTable_pager"></ul></div>
 			</div>
 
-			<table class="table table-striped table-bordered table-check table-cancheck table-drag datatable" id="DownloadsTable">
+			<table class="table-check table-cancheck table-drag datatable" id="DownloadsTable">
 				<thead>
 					<tr>
 						<th><div class="check img-check"></div></th>
@@ -398,7 +398,7 @@
 				<div class="pagination"><ul id="HistoryTable_pager"></ul></div>
 			</div>
 
-			<table class="table table-striped table-bordered table-check table-cancheck datatable" id="HistoryTable">
+			<table class="table-check table-cancheck datatable" id="HistoryTable">
 				<thead>
 				    <tr>
                         <th><div class="check img-check"></div></th>
@@ -474,7 +474,7 @@
 				<div class="pagination"><ul id="MessagesTable_pager"></ul></div>
 			</div>
 
-			<table class="table table-striped table-bordered datatable" id="MessagesTable">
+			<table class="datatable" id="MessagesTable">
 				<thead><tr>
 					<th width="60px">Kind</th>
 					<th class="text-center" style="white-space: nowrap; width: 1%">Time</th>
@@ -681,7 +681,7 @@
 															<h3 id="SpeedTest_StatsHeader"></h3>
 														</div>
 														<div class="modal-body">
-															<table class="table table-striped table-bordered datatable" id="SpeedTest_StatsTable">
+															<table class="datatable" id="SpeedTest_StatsTable">
 																<thead><tr><th>Statistics</th><th class="text-center">Data</th></tr></thead>
 																<tbody>
 																	<tr>
@@ -793,7 +793,7 @@
 												</div>
 
 												<div id="SystemInfo_MainContent">
-													<table class="table table-striped table-condensed table-bordered table-fixed">
+													<table class="table-condensed table-fixed">
 														<tbody>
 															<tr>
 																<td width="50%">Version</td>
@@ -813,7 +813,7 @@
 													<br>
 
 													<h4>Tools</h4>
-													<table class="table table-striped table-condensed table-bordered table-fixed">
+													<table class="table-condensed table-fixed">
 														<thead>
 															<th width="25%">Name</th>
 															<th width="25%">Version</th>
@@ -825,7 +825,7 @@
 													<br>
 
 													<h4>News Servers</h4>
-													<table class="table table-striped table-condensed table-bordered table-fixed">
+													<table class="table-condensed table-fixed">
 														<thead>
 															<th width="25%" class="flex-center">Host (Connections)</th>
 															<th width="25%">Active</th>
@@ -837,7 +837,7 @@
 													<br>
 
 													<h4>System</h4>
-													<table class="table table-striped table-condensed table-bordered table-fixed">
+													<table class="table-condensed table-fixed">
 														<tbody>
 															<tr>
 																<td width="50%">OS</td>
@@ -906,7 +906,7 @@
 													<br>
 
 													<h4>Libraries</h4>
-													<table class="table table-striped table-condensed table-bordered table-fixed">
+													<table class="table-condensed table-fixed">
 														<thead>
 															<th width="50%">Name</th>
 															<th width="50%">Version</th>
@@ -1011,7 +1011,7 @@
 
 												<br>
 
-												<table class="table table-striped table-bordered" id="ExtensionManagerTable">
+												<table id="ExtensionManagerTable">
 													<thead>
 														<tr>
 															<th class="text-center">ON/OFF</th>
@@ -1173,7 +1173,7 @@
 		<div>
 			<div class="modal-tab" id="StatDialog_GeneralTab">
 				<div class="modal-tab-padded-small">
-					<table class="table table-striped table-bordered datatable" id="StatisticsTable">
+					<table class="datatable" id="StatisticsTable">
 						<tbody>
 							<tr><td>Bergamot version</td><td class="text-right" id="StatDialog_DataVersion"></td></tr>
 							<tr><td>Uptime</td><td class="text-right" id="StatDialog_DataUptime"></td></tr>
@@ -1191,7 +1191,7 @@
 						</tbody>
 					</table>
 					<br>
-					<table class="table table-striped table-bordered datatable" id="StatusTable">
+					<table class="datatable" id="StatusTable">
 						<tbody></tbody>
 					</table>
 				</div>
@@ -1274,7 +1274,7 @@
 					</div>
 				</div>
 
-				<p class="help-block" ">Type period as <strong>year</strong> or <strong>year-month</strong>, for example:
+				<p class="help-block">Type period as <strong>year</strong> or <strong>year-month</strong>, for example:
 				2014 or 2014-12.</p>
 			</fieldset>
 			</form>
@@ -1310,7 +1310,7 @@
 					<label class="control-label" for="LimitDialog_ServerGroup">Active news servers</label>
 					<div class="controls" id="LimitDialog_ServerGroup">
 						<div>
-							<table class="table table-striped table-bordered table-check table-cancheck check-simple datatable" id="LimitDialog_ServerTable">
+							<table class="table-check table-cancheck check-simple datatable" id="LimitDialog_ServerTable">
 								<tbody></tbody>
 							</table>
 						</div>
@@ -1423,7 +1423,7 @@
 	</div>
 	<div class="modal-body">
 		<p>Below you'll find the accepted formats</p>
-		<table class="table table table-condensed table-striped">
+		<table class="table-condensed">
 			<thead>
 				<tr>
 					<th>Format</th>
@@ -1565,7 +1565,7 @@
 						<div class="control-group control-group-last" id="DownloadsEdit_StatisticsGroup">
 							<label class="control-label" for="DownloadsEdit_Statistics">Statistics</label>
 							<div class="controls">
-							<table class="table table-striped table-bordered data-statistics">
+							<table class="data-statistics">
 								<tbody id="DownloadsEdit_Statistics">
 								</tbody>
 							</table>
@@ -1615,11 +1615,11 @@
 							<div class="btn-group phone-only inline"><button class="btn btn-default" onclick="DownloadsEditDialog.editActionClick('down')" title="Move selected files down"><i class="material-icon">south</i></button></div>
 							<div class="btn-group phone-only inline"><button class="btn btn-default" onclick="DownloadsEditDialog.editActionClick('bottom')" title="Move selected files to the bottom"><i class="material-icon">vertical_align_bottom</i></button></div>
 						</div>
-						<div style="margin-left:auto; margin-bottom:10px;"><input id="DownloadsEdit_FileTable_filter" class="search-query" placeholder="Search" type="text"></div>
+						<div style="margin-left:auto; margin-bottom:10px;"><input id="DownloadsEdit_FileTable_filter" class="search-query" placeholder="Search" type="search"></div>
 					</div>
 
 					<div id="DownloadsEdit_FileBlock">
-						<table class="table table-striped table-bordered table-check table-cancheck datatable" id="DownloadsEdit_FileTable" style="margin-bottom:15px;">
+						<table class="table-check table-cancheck datatable" id="DownloadsEdit_FileTable" style="margin-bottom:15px;">
 							<thead><tr><th><div class="check img-check"></div></th><th>Status</th><th>Name</th><th class="text-right">Age</th><th class="text-right">Size</th></tr></thead>
 							<tbody></tbody>
 						</table>
@@ -1640,7 +1640,7 @@
 			<div class="modal-tab padded-tab hide" id="DownloadsEdit_ServStatsTab">
 				<div>
 					<div id="DownloadsEdit_ServStatsBlock">
-						<table class="table table-striped table-bordered datatable" id="DownloadsEdit_ServStatsTable">
+						<table class="datatable" id="DownloadsEdit_ServStatsTable">
 							<thead><tr><th>Server</th><th class="text-right">Articles</th><th class="text-right">Art. %</th><th class="text-right">Success</th><th class="text-right">Failures</th></tr></thead>
 							<tbody></tbody>
 						</table>
@@ -1673,12 +1673,12 @@
 							</select><span class="records-label"> records per page</span>
 						</div>
 						<div id="DownloadsEdit_LogTable_filterBlock">
-							<input id="DownloadsEdit_LogTable_filter" class="search-query" placeholder="Search" type="text">
+							<input id="DownloadsEdit_LogTable_filter" class="search-query" placeholder="Search" type="search">
 						</div>
 						<div id ="DownloadsEdit_LogTable_pagerBlock"><div class="pagination" id ="DownloadsEdit_LogTable_pager"></div></div>
 					</div>
 					<div id="DownloadsEdit_LogBlock">
-						<table class="table table-striped table-bordered datatable" id="DownloadsEdit_LogTable" style="margin-bottom:15px;">
+						<table class="datatable" id="DownloadsEdit_LogTable" style="margin-bottom:15px;">
 							<thead><tr><th width="65px">Kind</th><th width="170px" class="text-center">Time</th><th>Text</th></tr></thead>
 							<tbody></tbody>
 						</table>
@@ -1803,7 +1803,7 @@
 						<div class="control-group">
 							<label class="control-label" for="DownloadsMulti_Statistics">Statistics</label>
 							<div class="controls">
-							<table class="table table-striped table-bordered data-statistics">
+							<table class="data-statistics">
 								<tbody id="DownloadsMulti_Statistics">
 								</tbody>
 							</table>
@@ -1976,7 +1976,7 @@
 						<div class="control-group control-group-last" id="HistoryEdit_StatisticsGroup">
 							<label class="control-label" for="HistoryEdit_Statistics">Statistics</label>
 							<div class="controls">
-							<table class="table table-striped table-bordered data-statistics">
+							<table class="data-statistics">
 								<tbody id="HistoryEdit_Statistics">
 								</tbody>
 							</table>
@@ -2033,12 +2033,12 @@
 							</select><span class="records-label"> records per page</span>
 						</div>
 						<div id="HistoryEdit_LogTable_filterBlock">
-							<input id="HistoryEdit_LogTable_filter" class="search-query" placeholder="Search" type="text">
+							<input id="HistoryEdit_LogTable_filter" class="search-query" placeholder="Search" type="search">
 						</div>
 						<div id ="HistoryEdit_LogTable_pagerBlock"><div class="pagination" id ="HistoryEdit_LogTable_pager"></div></div>
 					</div>
 					<div id="HistoryEdit_LogBlock">
-						<table class="table table-striped table-bordered datatable" id="HistoryEdit_LogTable" style="margin-bottom:15px;">
+						<table class="datatable" id="HistoryEdit_LogTable" style="margin-bottom:15px;">
 							<thead><tr><th width="65px">Kind</th><th width="170px" class="text-center">Time</th><th>Text</th></tr></thead>
 							<tbody></tbody>
 						</table>
@@ -2049,7 +2049,7 @@
 			<div class="modal-tab padded-tab hide" id="HistoryEdit_ServStatsTab">
 				<div>
 					<div id="HistoryEdit_ServStatsBlock">
-						<table class="table table-striped table-bordered datatable" id="HistoryEdit_ServStatsTable">
+						<table class="datatable" id="HistoryEdit_ServStatsTable">
 							<thead><tr><th>Server</th><th class="text-right">Articles</th><th class="text-right">Art. %</th><th class="text-right">Success</th><th class="text-right">Failures</th></tr></thead>
 							<tbody></tbody>
 						</table>
@@ -2061,7 +2061,7 @@
 			<div class="modal-tab padded-tab hide" id="HistoryEdit_TimeStatsTab">
 				<div>
 					<div id="HistoryEdit_TimeStatsBlock">
-						<table class="table table-striped table-bordered datatable" id="HistoryEdit_TimeStatsTable">
+						<table class="datatable" id="HistoryEdit_TimeStatsTable">
 							<thead><tr><th>Statistic</th><th class="text-center">Data</th></tr></thead>
 							<tbody></tbody>
 						</table>
@@ -2191,11 +2191,11 @@
 							<div class="btn-group phone-only inline"><button class="btn btn-default FeedDialog-names" id="FeedDialog_Filenames2" onclick="FeedDialog.setFilenameMode(true)" title="Show Filenames">Filenames</button></div>
 
 						</div>
-						<div style="margin-left:auto; margin-bottom:10px;"><input id="FeedDialog_ItemTable_filter" class="search-query" placeholder="Search" type="text"></div>
+						<div style="margin-left:auto; margin-bottom:10px;"><input id="FeedDialog_ItemTable_filter" class="search-query" placeholder="Search" type="search"></div>
 					</div>
 
 					<div id="FeedDialog_TableBlock">
-						<table class="table table-striped table-bordered table-check table-cancheck datatable" id="FeedDialog_ItemTable" style="margin-bottom:15px;">
+						<table class="table-check table-cancheck datatable" id="FeedDialog_ItemTable" style="margin-bottom:15px;">
 							<thead><tr><th><i</th><th>Status</th><th id="FeedDialog_ItemTable_Name">Title</th><th>Category</th><th class="text-right">Age</th><th class="text-right">Size</th></tr></thead>
 							<tbody></tbody>
 						</table>
@@ -2280,7 +2280,7 @@
 						<img src="img/transmit.gif"></img>
 					</div>
 
-					<table class="table table-striped table-bordered datatable" id="FeedFilterDialog_ItemTable" style="margin-bottom:15px;">
+					<table class="datatable" id="FeedFilterDialog_ItemTable" style="margin-bottom:15px;">
 						<thead><tr><th>Match</th><th>Rule</th><th id="FeedFilterDialog_ItemTable_Name">Title</th><th>Category</th><th class="text-right">Age</th><th class="text-right">Size</th></tr></thead>
 						<tbody></tbody>
 					</table>
@@ -2326,7 +2326,7 @@
 		</strong></p>
 
 		<p>
-		<table class="table table-bordered">
+		<table>
 		<tbody>
 		<tr><td>A</td>
 		<td>
@@ -2374,7 +2374,7 @@
 
 		<p>
 		Options can be defined using long option names or short names:
-		<table class="table table-bordered">
+		<table>
 		<tbody>
 		<tr><td width="110px">category (cat, c)</td><td>set category name, value is a string;</td></tr>
 		<tr><td>pause (p)</td><td>add nzb in paused or unpaused state, possible values are: yes (y), no (n);</td></tr>
@@ -2416,7 +2416,7 @@
 		</strong></p>
 
 		<p>
-		<table class="table table-bordered">
+		<table>
 		<tbody>
 		<tr><td>+</td>
 		<td>
@@ -2873,7 +2873,7 @@
 	<div class="modal-body">
 		<ul class="help">
 			<li>For adding of local files the web-interface uses FileReader API available in most modern browsers:
-			<table class="table table-condensed table-striped">
+			<table class="table-condensed">
 			<thead>
 			<tr><th>Browser</th><th class="text-center">Minimum version</th><th class="text-center">Tested version</th></tr>
 			<tbody>
@@ -2967,7 +2967,7 @@
 				<p id="ScriptListDialog_Instruction">Select scripts for option <strong>PostScript</strong></p>
 
 				<div>
-					<table class="table table-striped table-bordered table-check table-cancheck order-mode datatable" id="ScriptListDialog_ScriptTable" style="margin-bottom:15px;">
+					<table class="table-check table-cancheck order-mode datatable" id="ScriptListDialog_ScriptTable" style="margin-bottom:15px;">
 						<thead><tr><th><div class="check img-check"/></th><th>Name</th></tr></thead>
 						<tbody></tbody>
 					</table>
@@ -3005,7 +3005,7 @@
 				<p id="RestoreSettingsDialog_Instruction">Select sections to restore. Tip: click on the checkbox of the table header to select all sections.</p>
 
 				<div>
-					<table class="table table-striped table-bordered table-check table-cancheck datatable" id="RestoreSettingsDialog_SectionTable" style="margin-bottom:15px;">
+					<table class="table-check table-cancheck datatable" id="RestoreSettingsDialog_SectionTable" style="margin-bottom:15px;">
 						<thead><tr><th><div class="check img-check"/></th><th>Section</th></tr></thead>
 						<tbody></tbody>
 					</table>
@@ -3095,7 +3095,7 @@
 	<p id="UpdateDialog_DownloadAvail"><strong>A new version is available!</strong></p>
 	<p id="UpdateDialog_UpdateNotAvail" class="hide"><strong>You are running the most current version.</strong></p>
 
-	<table id="UpdateDialog_Versions" class="table" style="margin-top:10px;">
+	<table id="UpdateDialog_Versions" style="margin-top:10px;">
 	<thead>
 		<tr>
 			<th></th>

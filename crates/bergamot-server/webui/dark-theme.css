@@ -99,14 +99,13 @@ a:hover {
 	background-color: #333;
 }
 
-.accordion-inner,
-.accordion-group,
-.accordion-heading,
+details,
+summary,
 .table th, .table td {
 	border: 0.5px solid #626262;
 }
 
-.table-striped tbody tr:nth-child(odd) td, .table-striped tbody tr:nth-child(odd) th {
+table tbody tr:nth-child(odd) td, table tbody tr:nth-child(odd) th {
 	background-color: #212529;
 }
 
@@ -199,7 +198,7 @@ select {
 	color: #fff;
 }
 
-.table-bordered {
+table {
 	border: 1px solid #626262;
 }
 
@@ -234,7 +233,7 @@ tr.checked:nth-child(odd) {
 	background-color: #005580;
 }
 
-.table-striped tbody tr.checked:nth-child(odd) td,
+table tbody tr.checked:nth-child(odd) td,
 .checked .progress {
 	background-color: #005580;
 }
@@ -295,7 +294,7 @@ td.dropdown-cell > div:not(.dropdown-disabled):hover::after {
 	border: 1px solid #626262;
 }
 
-.dragover, .dragover .table-striped tbody tr:nth-child(odd) td, .dragover .table-striped tbody tr:nth-child(odd) th {
+.dragover, .dragover table tbody tr:nth-child(odd) td, .dragover table tbody tr:nth-child(odd) th {
 	background-color: #414141;
 }
 

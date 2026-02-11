@@ -80,11 +80,11 @@ html {
 	color: #000000;
 }
 
-.table-bordered {
+table {
 	border-left: 1px solid #dddddd;
 }
 
-.table-striped tbody tr:nth-child(odd) {
+table tbody tr:nth-child(odd) {
 	background-color: #f9f9f9;
 }
   
@@ -115,7 +115,7 @@ tr.checked:nth-child(odd) .progress {
 	background-color: #FFFFE8;
 }
 
-.table-striped tbody tr.checked:nth-child(odd) td,
+table tbody tr.checked:nth-child(odd) td,
 .checked .progress {
 	background-color: #FFFFD8;
 }
@@ -188,7 +188,7 @@ td.dropdown-cell > div:not(.dropdown-disabled):hover::after {
 	border: 1px solid #eee;
 }
 
-.dragover, .dragover .table-striped tbody tr:nth-child(odd) td, .dragover .table-striped tbody tr:nth-child(odd) th {
+.dragover, .dragover table tbody tr:nth-child(odd) td, .dragover table tbody tr:nth-child(odd) th {
 	background-color: #dff0d8;
 }
 

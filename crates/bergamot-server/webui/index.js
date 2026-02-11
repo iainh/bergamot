@@ -696,7 +696,7 @@ var Frontend = (new function($)
 		$('#MessagesTable tbody').empty();
 
 		$('body').toggleClass('phone', UISettings.miniTheme);
-		$('.datatable').toggleClass('table-bordered', !UISettings.miniTheme);
+		$('.datatable').toggleClass('no-border', UISettings.miniTheme);
 		$('#DownloadsTable').toggleClass('table-check', !UISettings.miniTheme || UISettings.showEditButtons);
 		$('#HistoryTable').toggleClass('table-check', !UISettings.miniTheme || UISettings.showEditButtons);
 

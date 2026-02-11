@@ -688,42 +688,9 @@ button.close,
 
 
 /* ==========================================================================
-   Tables
+   Tables — Pico CSS styles <table> natively with striping and borders.
+   Only custom overrides remain here.
    ========================================================================== */
-
-.table {
-	width: 100%;
-	border-collapse: collapse;
-}
-
-.table th,
-.table td {
-	padding: 8px;
-	line-height: 20px;
-	text-align: left;
-	vertical-align: top;
-	border-top: 1px solid var(--pico-table-border-color, #ddd);
-}
-
-.table thead th {
-	vertical-align: bottom;
-}
-
-.table-striped tbody > tr:nth-child(odd) > td,
-.table-striped tbody > tr:nth-child(odd) > th {
-	background-color: var(--pico-table-row-stripped-background-color, #f9f9f9);
-}
-
-.table-bordered {
-	border: 1px solid var(--pico-table-border-color, #ddd);
-	border-collapse: separate;
-	border-radius: var(--pico-border-radius, 4px);
-}
-
-.table-bordered th,
-.table-bordered td {
-	border-left: 1px solid var(--pico-table-border-color, #ddd);
-}
 
 .table-condensed th,
 .table-condensed td {
@@ -732,6 +699,12 @@ button.close,
 
 table.datatable {
 	width: 100%;
+}
+
+table.no-border,
+table.no-border th,
+table.no-border td {
+	border: none;
 }
 
 
@@ -1094,44 +1067,8 @@ body.phone {
 
 
 /* ==========================================================================
-   Accordion
+   Accordion — now uses native <details>/<summary> styled by Pico CSS.
    ========================================================================== */
-
-.accordion {
-	margin-bottom: 20px;
-}
-
-.accordion-group {
-	margin-bottom: 2px;
-	border: 1px solid var(--pico-form-element-border-color, #e5e5e5);
-	border-radius: var(--pico-border-radius, 4px);
-}
-
-.accordion-heading {
-	border-bottom: 0;
-}
-
-.accordion-heading .accordion-toggle {
-	display: block;
-	padding: 8px 15px;
-	cursor: pointer;
-	text-decoration: none;
-}
-
-.accordion-body {
-	overflow: hidden;
-	height: 0;
-	transition: height 0.35s ease;
-}
-
-.accordion-body.in {
-	height: auto;
-}
-
-.accordion-inner {
-	padding: 9px 15px;
-	border-top: 1px solid var(--pico-form-element-border-color, #e5e5e5);
-}
 
 
 /* ==========================================================================

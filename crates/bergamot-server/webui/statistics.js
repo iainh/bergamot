@@ -305,7 +305,7 @@ var Statistics = new (function ($) {
 		var html = '<div class="statistics__server-details">';
 		html += "<h4>Server Details</h4>";
 		html +=
-			'<table class="table table-condensed table-bordered table-fixed server-details__table">';
+			'<table class="table-condensed table-fixed server-details__table">';
 		html += "<tr><th>Name:</th><td>".concat(server.name, "</td></tr>");
 		html += "<tr><th>Host:</th><td>".concat(server.host, "</td></tr>");
 		html += "<tr><th>Connections:</th><td>".concat(
@@ -319,7 +319,7 @@ var Statistics = new (function ($) {
 		html += "</table>";
 		html += "<h4>Bandwidth Usage</h4>";
 		html +=
-			'<table class="table table-condensed table-bordered table-fixed server-details__table">';
+			'<table class="table-condensed table-fixed server-details__table">';
 		html += '<tr><th>Today:</td><td id="'.concat(
 			server.id,
 			'_TodayDownloaded"></td></tr>'
@@ -338,7 +338,7 @@ var Statistics = new (function ($) {
 		);
 		html += "</table>";
 		html += "<h4>Article Statistics</h4>";
-		html += '<table class="table table-condensed table-bordered table-fixed">';
+		html += '<table class="table-condensed table-fixed">';
 		html += '<tr><th>Success/Failed:</th><td id="'.concat(
 			server.id,
 			'_Articles"></td></tr>'
@@ -1342,7 +1342,7 @@ var Statistics = new (function ($) {
 		if ($section.length === 0) {
 			$section = $("<div>", { id: "Scheduler_Stats_Section" });
 			$section.append('<h3 style="margin-top: 20px;">Server Scheduler (WFQ)</h3>');
-			var $table = $('<table class="table table-condensed table-bordered table-striped" id="Scheduler_Stats_Table">');
+			var $table = $('<table class="table-condensed" id="Scheduler_Stats_Table">');
 			$table.append(
 				'<thead><tr>' +
 				'<th>Server</th>' +

@@ -189,24 +189,20 @@ var SystemHealth = (new function ($) {
 	function redraw(alertsReport) {
 		var $container = $("#SystemInfo_Health");
 		var $mainWrapper = $("#SystemInfoHealthSection");
-		var accordionId = "healthAccordion";
 		var sections = [
 			{
-				id: 'collapseErrors',
 				label: 'Errors',
 				data: alertsReport.errors,
 				cssClass: 'txt-error',
 				icon: 'error'
 			},
 			{
-				id: 'collapseWarnings',
 				label: 'Warnings',
 				data: alertsReport.warnings,
 				cssClass: 'txt-warning',
 				icon: 'warning'
 			},
 			{
-				id: 'collapseInfo',
 				label: 'Info',
 				data: alertsReport.info,
 				cssClass: 'txt-success',
@@ -217,7 +213,7 @@ var SystemHealth = (new function ($) {
 		$container.empty();
 
 		var hasContent = false;
-		var $accordion = $('<div class="accordion" id="' + accordionId + '"></div>');
+		var $accordion = $('<div id="healthAccordion"></div>');
 
 		sections.forEach(function (section) {
 			if (!section.data || section.data.length === 0) {
@@ -226,27 +222,18 @@ var SystemHealth = (new function ($) {
 
 			hasContent = true;
 
-			var $group = $('<div class="accordion-group"></div>');
-			var $heading = $('<div class="accordion-heading"></div>');
-			var $toggle = $('<span class="accordion-toggle" data-toggle="collapse"></span>');
-			$toggle.attr('data-parent', '#' + accordionId);
-			$toggle.attr('href', '#' + section.id);
-			
-			$toggle.html(
+			var $details = $('<details></details>');
+			var $summary = $('<summary></summary>');
+			$summary.html(
 				'<i class="material-icon ' + section.cssClass + '">' + section.icon + '</i> ' +
 				'<span class="' + section.cssClass + '">' + section.label + ' (' + section.data.length + ')</span>'
 			);
-			
-			$heading.append($toggle);
-			$group.append($heading);
+			$details.append($summary);
 
-			var $body = $('<div id="' + section.id + '" class="accordion-body collapse"></div>');
-			var $inner = $('<div class="accordion-inner"></div>');
-		
 			section.data.forEach(function (alert) {
 				var $link = $('<a href="#" style="display:block;margin-bottom: 5px;""></a>');
 				$link.addClass(section.cssClass);
-				
+
 				$link.on('click', function (e) {
 					e.preventDefault();
 					var $mockBtn = $('<a class="option">' + alert.name + '</a>');
@@ -255,12 +242,10 @@ var SystemHealth = (new function ($) {
 				});
 
 				$link.html('<span>' + alert.message + '</span>');
-				$inner.append($link);
+				$details.append($link);
 			});
 
-			$body.append($inner);
-			$group.append($body);
-			$accordion.append($group);
+			$accordion.append($details);
 		});
 
 		if (!hasContent) {

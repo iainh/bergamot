@@ -1078,12 +1078,12 @@ form {
 }
 
 /* BEGIN: Tables */
-.table {
+table {
     margin-bottom: 0px;
 }
 
-.table-bordered:not(.table-fixed) th,
-.table-bordered:not(.table-fixed) td {
+table:not(.table-fixed) th,
+table:not(.table-fixed) td {
     border-left: none;
 }
 
@@ -1153,7 +1153,7 @@ table.table-cancheck tr.checkremove div.img-check {
 
 .check-simple tr.checked,
 .check-simple tr.checked td,
-.table-striped.check-simple tbody tr.checked:nth-child(odd) td {
+table.check-simple tbody tr.checked:nth-child(odd) td {
     background-color: inherit;
 }
 
@@ -2147,7 +2147,7 @@ div.multiset-toolbar button {
     border-radius: 12px;
 }
 
-#TableDragBox .table-bordered {
+#TableDragBox table {
     border: none;
 }
 
@@ -2790,7 +2790,7 @@ input[type="date"] {
 	background: linear-gradient(to bottom, rgb(255,255,255) 0%, rgb(238,238,238) 45%, rgb(231,231,231) 55%, rgb(255,255,255) 100%);
 }
 
-.table-bordered {
+table {
 	border-collapse: collapse;
 }
 
@@ -2970,9 +2970,9 @@ tr.drag-source > td {
 	visibility: visible;
 }
 
-.table-striped tbody tr.drag-finish td,
-.table-striped tbody tr.drag-finish .progress,
-.table-striped tbody tr.drag-finish td a {
+table tbody tr.drag-finish td,
+table tbody tr.drag-finish .progress,
+table tbody tr.drag-finish td a {
 	background-color: var(--bergamot-color-drag-finish);
 }
 

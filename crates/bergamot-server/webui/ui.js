@@ -180,23 +180,4 @@
 		$(this).tab('show');
 	});
 
-	// =========================================================================
-	// Collapse
-	// =========================================================================
-
-	$(document).on('click', '[data-toggle="collapse"]', function(e) {
-		e.preventDefault();
-		var target = $(this).attr('data-target') || $(this).attr('href');
-		if (!target) return;
-
-		var $target = $(target);
-		var $parent = $(this).attr('data-parent');
-
-		if ($parent) {
-			$($parent).find('.collapse.in').not($target).removeClass('in');
-		}
-
-		$target.toggleClass('in');
-	});
-
 })(jQuery);
