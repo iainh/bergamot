@@ -1111,6 +1111,19 @@ table th.text-center {
     border: none;
 }
 
+.table {
+    contain: layout paint;
+}
+
+.table tbody tr {
+    touch-action: none;
+}
+
+.tab-pane:not(.active) {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 800px;
+}
+
 /* END: Tables */
 
 /* BEGIN: Checkmarks in the table */

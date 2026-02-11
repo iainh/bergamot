@@ -18,35 +18,17 @@
  */
 
 /*
-* Some code was borrowed from:
-* 1. Greg Weber's uiTableFilter jQuery plugin (http://gregweber.info/projects/uitablefilter)
-* 2. Denny Ferrassoli & Charles Christolini's TypeWatch jQuery plugin (http://github.com/dennyferra/TypeWatch)
-* 3. Justin Britten's tablesorterFilter jQuery plugin (http://www.justinbritten.com/work/2008/08/tablesorter-filter-results-based-on-search-string/)
-* 4. Allan Jardine's Bootstrap Pagination jQuery plugin for DataTables (http://datatables.net/)
-*/
-
-/*
  * In this module:
  *   HTML tables with:
- *     1) very fast content updates;
+ *     1) very fast content updates via rAF-coalesced rendering;
  *     2) automatic pagination;
  *     3) search/filtering;
- *     4) drag and drop.
+ *     4) drag and drop via Pointer Events.
  *
- * What makes it unique and fast?
- * The tables are designed to be updated very often (up to 10 times per second). This has two challenges:
- *   1) updating of whole content is slow because the DOM updates are slow.
- *   2) if the DOM is updated during user interaction the user input is not processed correctly.
- *       For example if the table is updated after the user pressed mouse key but before he/she released
- *       the key, the click is not processed because the element, on which the click was performed,
- *       doesn't exist after the update of DOM anymore.
- *
- * How Fasttable solves these problems? The solutions is to update only rows and cells,
- * which were changed by keeping the unchanged DOM-elements.
- *
- * Important: the UI of table must be designed in a way, that the cells which are frequently changed
- * (like remaining download size) should not be clickable, whereas the cells which are rarely changed
- * (e. g. Download name) can be clickable.
+ * Updates are coalesced to at most one render per animation frame.
+ * DOM updates are deferred during active user interactions (drag, selection)
+ * to prevent click/pointer events from being lost due to DOM mutations.
+ * Cached DOM references and minimal cell patching avoid unnecessary layout work.
  */
 
 (function($) {
@@ -83,13 +65,8 @@
 				var $this = $(this);
 				var data = $this.data('fasttable');
 
-				// If the plugin hasn't been initialized yet
 				if (!data)
 				{
-					/*
-					Do more setup stuff here
-					*/
-
 					var config = {};
 					config = $.extend(config, defaults, options);
 
@@ -104,42 +81,39 @@
 
 					var searcher = new FastSearcher();
 
-					// Create a timer which gets reset upon every keyup event.
-					// Perform filter only when the timer's wait is reached (user finished typing or paused long enough to elapse the timer).
-					// Do not perform the filter is the query has not changed.
-					// Immediately perform the filter if the ENTER key is pressed.
-
 					var timer;
+					var filterInputEl = config.filterInput[0];
 
-					config.filterInput.keyup(function()
+					if (filterInputEl)
 					{
-						var timerWait = 500;
-						var overrideBool = false;
-						var inputBox = this;
-
-						// Was ENTER pushed?
-						if (inputBox.keyCode == 13)
+						filterInputEl.addEventListener('input', function()
 						{
-							timerWait = 1;
-							overrideBool = true;
-						}
-
-						var timerCallback = function()
-						{
-							var value = inputBox.value.trim();
-							var data = $this.data('fasttable');
-							if ((value != data.lastFilter) || overrideBool)
+							var inputBox = this;
+							clearTimeout(timer);
+							timer = setTimeout(function()
 							{
+								var value = inputBox.value.trim();
+								var data = $this.data('fasttable');
+								if (!data) return;
+								if (value !== data.lastFilter)
+								{
+									applyFilter(data, value);
+								}
+							}, 500);
+						});
+
+						filterInputEl.addEventListener('keydown', function(e)
+						{
+							if (e.key === 'Enter')
+							{
+								clearTimeout(timer);
+								var value = this.value.trim();
+								var data = $this.data('fasttable');
+								if (!data) return;
 								applyFilter(data, value);
 							}
-						};
-
-						// Reset the timer
-						clearTimeout(timer);
-						timer = setTimeout(timerCallback, timerWait);
-
-						return false;
-					});
+						});
+					}
 
 					config.filterClearButton.click(function()
 					{
@@ -152,7 +126,7 @@
 					{
 						e.preventDefault();
 						var data = $this.data('fasttable');
-						var pageNum = $(this).text();
+						var pageNum = this.textContent;
 						if (pageNum.indexOf('Prev') > -1)
 						{
 							data.curPage--;
@@ -174,7 +148,9 @@
 
 					var data = {
 						target: $this,
+						tableEl: $this[0],
 						config: config,
+						content: [],
 						pageSize: parseInt(config.pageSize),
 						maxPages: parseInt(config.maxPages),
 						pageDots: Util.parseBool(config.pageDots),
@@ -182,13 +158,18 @@
 						checkedRows: {},
 						checkedCount: 0,
 						lastClickedRowID: null,
-						searcher: searcher
+						searcher: searcher,
+						rafHandle: 0,
+						pendingContent: null,
+						pendingBlink: false,
+						isInteracting: false,
+						rowCache: new Map()
 					};
 
 					initDragDrop(data);
 
-					$this.on('click', 'thead > tr', function(e) { titleCheckClick(data, e); });
-					$this.on('click', 'tbody > tr', function(e) { itemCheckClick(data, e); });
+					$this.on('click.fasttable', 'thead > tr', function(e) { titleCheckClick(data, e); });
+					$this.on('click.fasttable', 'tbody > tr', function(e) { itemCheckClick(data, e); });
 
 					$this.data('fasttable', data);
 				}
@@ -200,9 +181,30 @@
 			return this.each(function()
 			{
 				var $this = $(this);
+				var data = $this.data('fasttable');
+				if (!data) return;
 
-				// Namespacing FTW
-				$(window).unbind('.fasttable');
+				if (data.rafHandle)
+				{
+					cancelAnimationFrame(data.rafHandle);
+				}
+				if (data.blinkTimer)
+				{
+					clearTimeout(data.blinkTimer);
+				}
+				if (data.scrollTimer)
+				{
+					clearTimeout(data.scrollTimer);
+				}
+				if (data.isInteracting)
+				{
+					pointerUp(data, null);
+				}
+				if (data.onPointerDown)
+				{
+					data.tableEl.removeEventListener('pointerdown', data.onPointerDown);
+				}
+				$this.off('.fasttable');
 				$this.removeData('fasttable');
 			});
 		},
@@ -254,15 +256,48 @@
 		},
 	};
 
+	//*************** RAF-COALESCED RENDERING
+
+	function scheduleRender(data, doBlink)
+	{
+		if (doBlink)
+		{
+			data.pendingBlink = true;
+		}
+		if (data.rafHandle)
+		{
+			return;
+		}
+		data.rafHandle = requestAnimationFrame(function()
+		{
+			data.rafHandle = 0;
+			if (data.isInteracting)
+			{
+				return;
+			}
+			var content = data.pendingContent;
+			if (content !== null)
+			{
+				data.content = content;
+				data.pendingContent = null;
+			}
+			refresh(data);
+			if (data.pendingBlink)
+			{
+				data.pendingBlink = false;
+				blinkMovedRecords(data);
+			}
+		});
+	}
+
 	function updateContent(content)
 	{
 		var data = $(this).data('fasttable');
 		if (content)
 		{
-			data.content = content;
+			data.pendingContent = content;
 		}
-		refresh(data);
-		blinkMovedRecords(data);
+		scheduleRender(data, true);
 	}
 
 	function applyFilter(data, filter)
@@ -318,31 +353,23 @@
 		}
 	}
 
+	//*************** TABLE UPDATE WITH CACHED DOM REFERENCES
+
 	function updateTable(data)
 	{
-		var oldTable = data.target[0];
-		var newTable = buildTBody(data);
-		updateTBody(data, oldTable, newTable);
-	}
+		var tableEl = data.tableEl;
+		var tbody = tableEl.tBodies[0];
+		if (!tbody) return;
 
-	function buildTBody(data)
-	{
-		var table = $('<table><tbody></tbody></table>')[0];
-		for (var i=0; i < data.pageContent.length; i++)
+		var headerRows = tableEl.tHead ? tableEl.tHead.rows.length : 0;
+		var pageContent = data.pageContent;
+		var oldRows = tbody.rows;
+		var oldRowCount = oldRows.length;
+		var newRowCount = pageContent.length;
+
+		for (var i = 0; i < newRowCount; i++)
 		{
-			var item = data.pageContent[i];
-
-			var row = table.insertRow(table.rows.length);
-
-			row.fasttableID = item.id;
-			if (data.checkedRows[item.id])
-			{
-				row.className = 'checked';
-			}
-			if (data.config.renderRowCallback)
-			{
-				data.config.renderRowCallback(row, item);
-			}
+			var item = pageContent[i];
 
 			if (!item.fields)
 			{
@@ -356,75 +383,88 @@
 				}
 			}
 
-			for (var j=0; j < item.fields.length; j++)
+			var wantClass = data.checkedRows[item.id] ? 'checked' : '';
+
+			if (i < oldRowCount)
 			{
-				var cell = row.insertCell(row.cells.length);
-				cell.innerHTML = item.fields[j];
-				if (data.config.renderCellCallback)
+				var oldRow = oldRows[i];
+				oldRow.fasttableID = item.id;
+
+				if (data.config.renderRowCallback)
 				{
-					data.config.renderCellCallback(cell, j, item);
+					data.config.renderRowCallback(oldRow, item);
+				}
+				else if (oldRow.className !== wantClass)
+				{
+					oldRow.className = wantClass;
+				}
+
+				var oldCells = oldRow.cells;
+				for (var j = 0; j < item.fields.length; j++)
+				{
+					if (j < oldCells.length)
+					{
+						var oldCell = oldCells[j];
+						var newHtml = item.fields[j];
+						if (oldCell.innerHTML !== newHtml)
+						{
+							oldCell.innerHTML = newHtml;
+						}
+						if (data.config.renderCellCallback)
+						{
+							data.config.renderCellCallback(oldCell, j, item);
+						}
+					}
+					else
+					{
+						var cell = oldRow.insertCell(oldRow.cells.length);
+						cell.innerHTML = item.fields[j];
+						if (data.config.renderCellCallback)
+						{
+							data.config.renderCellCallback(cell, j, item);
+						}
+					}
+				}
+				while (oldRow.cells.length > item.fields.length)
+				{
+					oldRow.deleteCell(oldRow.cells.length - 1);
 				}
 			}
+			else
+			{
+				var row = tbody.insertRow(tbody.rows.length);
+				row.fasttableID = item.id;
+				if (wantClass)
+				{
+					row.className = wantClass;
+				}
+				if (data.config.renderRowCallback)
+				{
+					data.config.renderRowCallback(row, item);
+				}
+
+				for (var j = 0; j < item.fields.length; j++)
+				{
+					var cell = row.insertCell(row.cells.length);
+					cell.innerHTML = item.fields[j];
+					if (data.config.renderCellCallback)
+					{
+						data.config.renderCellCallback(cell, j, item);
+					}
+				}
+			}
+		}
+
+		while (tbody.rows.length > newRowCount)
+		{
+			tbody.deleteRow(tbody.rows.length - 1);
 		}
 
 		titleCheckRedraw(data);
 
 		if (data.config.renderTableCallback)
 		{
-			data.config.renderTableCallback(table);
-		}
-
-		return table;
-	}
-
-	function updateTBody(data, oldTable, newTable)
-	{
-		var headerRows = $('thead > tr', oldTable).length;
-		var oldTRs = oldTable.rows;
-		var newTRs = newTable.rows;
-		var oldTBody = $('tbody', oldTable)[0];
-		var oldTRsLength = oldTRs.length - headerRows; // evlt. skip header row
-		var newTRsLength = newTRs.length;
-
-		for (var i=0; i < newTRs.length; )
-		{
-			var newTR = newTRs[i];
-
-			if (i < oldTRsLength)
-			{
-				// update existing row
-				var oldTR = oldTRs[i + headerRows]; // evlt. skip header row
-				var oldTDs = oldTR.cells;
-				var newTDs = newTR.cells;
-
-				oldTR.className = newTR.className;
-				oldTR.fasttableID = newTR.fasttableID;
-
-				for (var j=0, n = 0; j < oldTDs.length; j++, n++)
-				{
-					var oldTD = oldTDs[j];
-					var newTD = newTDs[n];
-					var oldHtml = oldTD.outerHTML;
-					var newHtml = newTD.outerHTML;
-					if (oldHtml !== newHtml)
-					{
-						oldTR.replaceChild(newTD, oldTD);
-						n--;
-					}
-				}
-				i++;
-			}
-			else
-			{
-				// add new row
-				oldTBody.appendChild(newTR);
-			}
-		}
-
-		var maxTRs = newTRsLength + headerRows; // evlt. skip header row;
-		while (oldTRs.length > maxTRs)
-		{
-			oldTable.deleteRow(oldTRs.length - 1);
+			data.config.renderTableCallback(data.tableEl);
 		}
 	}
 
@@ -447,7 +487,17 @@
 		var pagerHtml = buildPagerHtml(data);
 
 		var oldPager = pagerObj[0];
-		var newPager = $(pagerHtml)[0];
+		if (!oldPager) return;
+
+		if (oldPager.tagName !== 'UL')
+		{
+			pagerObj.html(pagerHtml);
+			return;
+		}
+
+		var newPager = document.createElement('div');
+		newPager.innerHTML = pagerHtml;
+		newPager = newPager.firstElementChild;
 
 		updatePagerContent(data, oldPager, newPager);
 	}
@@ -518,6 +568,8 @@
 
 	function updatePagerContent(data, oldPager, newPager)
 	{
+		if (!newPager) return;
+
 		var oldLIs = oldPager.getElementsByTagName('li');
 		var newLIs = newPager.getElementsByTagName('li');
 
@@ -530,7 +582,6 @@
 
 			if (n < oldLIsLength)
 			{
-				// update existing LI
 				var oldLI = oldLIs[n];
 
 				var oldHtml = oldLI.outerHTML;
@@ -543,7 +594,6 @@
 			}
 			else
 			{
-				// add new LI
 				oldPager.appendChild(newLI);
 				i--;
 			}
@@ -557,19 +607,22 @@
 
 	function updateInfo(data)
 	{
+		var infoText;
+		var firstRecord, lastRecord;
+
 		if (data.content.length === 0)
 		{
-			var infoText = data.config.infoEmpty;
+			infoText = data.config.infoEmpty;
 		}
 		else if (data.curPage === 0)
 		{
-			var infoText = 'No matching records found (total ' + data.content.length + ')';
+			infoText = 'No matching records found (total ' + data.content.length + ')';
 		}
 		else
 		{
-			var firstRecord = (data.curPage - 1) * data.pageSize + 1;
-			var lastRecord = firstRecord + data.pageContent.length - 1;
-			var infoText = 'Showing records ' + firstRecord + '-' + lastRecord + ' from ' + data.filteredContent.length;
+			firstRecord = (data.curPage - 1) * data.pageSize + 1;
+			lastRecord = firstRecord + data.pageContent.length - 1;
+			infoText = 'Showing records ' + firstRecord + '-' + lastRecord + ' from ' + data.filteredContent.length;
 			if (data.filteredContent.length != data.content.length)
 			{
 				infoText += ' filtered (total ' + data.content.length + ')';
@@ -599,12 +652,16 @@
 				data.pageCheckedCount += data.checkedRows[data.filteredContent[i].id] ? 1 : 0;
 			}
 		}
-		data.config.selector.css('display', data.pageCheckedCount === data.checkedCount ? 'none' : '');
-		if (data.checkedCount !== data.pageCheckedCount)
+
+		var selectorEl = data.config.selector[0];
+		if (selectorEl)
 		{
-			data.config.selector.text('' + (data.checkedCount - data.pageCheckedCount) +
-				(data.checkedCount - data.pageCheckedCount > 1 ? ' records' : ' record') +
-				' selected on other pages');
+			selectorEl.style.display = data.pageCheckedCount === data.checkedCount ? 'none' : '';
+			if (data.checkedCount !== data.pageCheckedCount)
+			{
+				var diff = data.checkedCount - data.pageCheckedCount;
+				selectorEl.textContent = diff + (diff > 1 ? ' records' : ' record') + ' selected on other pages';
+			}
 		}
 	}
 
@@ -665,30 +722,44 @@
 			}
 		}
 
-		var headerRow = $('thead > tr', data.target);
+		var headerRow = data.tableEl.tHead ? data.tableEl.tHead.rows[0] : null;
+		if (!headerRow) return;
+
 		if (hasSelectedItems && hasUnselectedItems)
 		{
-			headerRow.removeClass('checked').addClass('checkremove');
+			headerRow.classList.remove('checked');
+			headerRow.classList.add('checkremove');
 		}
 		else if (hasSelectedItems)
 		{
-			headerRow.removeClass('checkremove').addClass('checked');
+			headerRow.classList.remove('checkremove');
+			headerRow.classList.add('checked');
 		}
 		else
 		{
-			headerRow.removeClass('checked').removeClass('checkremove');
+			headerRow.classList.remove('checked', 'checkremove');
 		}
+	}
+
+	function resolveTarget(event)
+	{
+		var target = event.target;
+		if (!(target instanceof Element)) target = target.parentElement;
+		return target;
 	}
 
 	function itemCheckClick(data, event)
 	{
-		var checkmark = $(event.target).hasClass('check');
+		var target = resolveTarget(event);
+		if (!target) return;
+		var checkmark = target.classList.contains('check');
 		if (data.dragging || (!checkmark && !data.config.rowSelect))
 		{
 			return;
 		}
 
-		var row = $(event.target).closest('tr', data.target)[0];
+		var row = target.closest('tr');
+		if (!row) return;
 		var id = row.fasttableID;
 		var doToggle = true;
 		var checkedRows = data.checkedRows;
@@ -711,7 +782,9 @@
 
 	function titleCheckClick(data, event)
 	{
-		var checkmark = $(event.target).hasClass('check');
+		var target = resolveTarget(event);
+		if (!target) return;
+		var checkmark = target.classList.contains('check');
 		if (data.dragging || (!checkmark && !data.config.rowSelect))
 		{
 			return;
@@ -831,12 +904,13 @@
 		}
 	}
 
-	//*************** DRAG-N-DROP
+	//*************** DRAG-N-DROP (Pointer Events)
 
 	function initDragDrop(data)
 	{
-		data.target[0].addEventListener('mousedown', function(e) { mouseDown(data, e); }, true);
-		data.target[0].addEventListener('touchstart', function(e) { mouseDown(data, e); }, true);
+		var el = data.tableEl;
+		data.onPointerDown = function(e) { pointerDown(data, e); };
+		el.addEventListener('pointerdown', data.onPointerDown);
 
 		data.moveIds = [];
 		data.dropAfter = false;
@@ -848,34 +922,33 @@
 		data.blinkIds = [];
 		data.blinkState = null;
 		data.wantBlink = false;
+		data.blinkTimer = null;
+		data.activePointerId = null;
 	}
 
-	function touchToMouse(e)
+	function pointerDown(data, e)
 	{
-		if (e.type === 'touchstart' || e.type === 'touchmove' || e.type === 'touchend')
-		{
-			e.clientX = e.changedTouches[0].clientX;
-			e.clientY = e.changedTouches[0].clientY;
-		}
-	}
+		if (data.isInteracting) return;
 
-	function mouseDown(data, e)
-	{
 		data.dragging = false;
 		data.dropId = null;
-		data.dragRow = $(e.target).closest('tr', data.target);
 
-		var checkmark = $(e.target).hasClass('check') ||
-			($(e.target).find('.check').length > 0 && !$('body').hasClass('phone'));
-		var head = $(e.target).closest('tr', data.target).parent().is('thead');
-		if (head || !(checkmark || (data.config.rowSelect && e.type === 'mousedown')) ||
-			data.dragRow.length != 1 || e.ctrlKey || e.altKey || e.metaKey)
+		var target = resolveTarget(e);
+		if (!target) return;
+		var row = target.closest('tr');
+		if (!row || !data.tableEl.contains(row)) return;
+		data.dragRow = $(row);
+
+		var checkmark = target.classList.contains('check') ||
+			(target.querySelector('.check') && !document.body.classList.contains('phone'));
+		var head = row.parentNode && row.parentNode.tagName === 'THEAD';
+		if (head || !(checkmark || (data.config.rowSelect && e.pointerType === 'mouse')) ||
+			e.ctrlKey || e.altKey || e.metaKey)
 		{
 			return;
 		}
 
-		touchToMouse(e);
-		if (e.type === 'mousedown')
+		if (e.pointerType === 'mouse')
 		{
 			e.preventDefault();
 		}
@@ -886,29 +959,24 @@
 		}
 
 		data.downPos = { x: e.clientX, y: e.clientY };
+		data.isInteracting = true;
+		data.activePointerId = e.pointerId;
 
-		data.mouseMove = function(e) { mouseMove(data, e); };
-		data.mouseUp = function(e) { mouseUp(data, e); };
-		data.keyDown = function(e) { keyDown(data, e); };
-		document.addEventListener('mousemove', data.mouseMove, true);
-		document.addEventListener('touchmove', data.mouseMove, true);
-		document.addEventListener('mouseup', data.mouseUp, true);
-		document.addEventListener('touchend', data.mouseUp, true);
-		document.addEventListener('touchcancel', data.mouseUp, true);
-		document.addEventListener('keydown', data.keyDown, true);
+		data.onPointerMove = function(ev) { pointerMove(data, ev); };
+		data.onPointerUp = function(ev) { pointerUp(data, ev); };
+		data.onKeyDown = function(ev) { dragKeyDown(data, ev); };
+
+		document.addEventListener('pointermove', data.onPointerMove, true);
+		document.addEventListener('pointerup', data.onPointerUp, true);
+		document.addEventListener('pointercancel', data.onPointerUp, true);
+		document.addEventListener('keydown', data.onKeyDown, true);
 	}
 
-	function mouseMove(data, e)
+	function pointerMove(data, e)
 	{
-		touchToMouse(e);
-		e.preventDefault();
+		if (e.pointerId !== data.activePointerId) return;
 
-		if (e.touches && e.touches.length > 1)
-		{
-			data.cancelDrag = true;
-			mouseUp(data, e);
-			return;
-		}
+		e.preventDefault();
 
 		if (!data.dragging)
 		{
@@ -918,9 +986,9 @@
 				return;
 			}
 			startDrag(data, e);
-			if (data.dragCancel)
+			if (data.cancelDrag)
 			{
-				mouseUp(data, e);
+				pointerUp(data, e);
 				return;
 			}
 		}
@@ -936,11 +1004,13 @@
 			data.config.dragStartCallback();
 		}
 
-		var offsetX = $(document).scrollLeft();
-		var offsetY = $(document).scrollTop();
-		var rf = data.dragRow.offset();
-		data.dragOffset = { x: data.downPos.x - rf.left + offsetX,
-			y: Math.min(Math.max(data.downPos.y - rf.top + offsetY, 0), data.dragRow.height()) };
+		var offsetX = window.scrollX;
+		var offsetY = window.scrollY;
+		var rf = data.dragRow[0].getBoundingClientRect();
+		data.dragOffset = {
+			x: data.downPos.x - rf.left,
+			y: Math.min(Math.max(data.downPos.y - rf.top, 0), rf.height)
+		};
 
 		var checkedRows = data.checkedRows;
 		var chkIds = checkedIds(data);
@@ -949,12 +1019,16 @@
 		data.dragging = true;
 		data.cancelDrag = false;
 
+		try {
+			data.dragRow[0].setPointerCapture(data.activePointerId);
+		} catch (ex) {}
+
 		buildDragBox(data);
-		data.config.dragBox.css('display', 'block');
-		data.dragRow.addClass('drag-source');
-		$('html').addClass('drag-progress');
-		data.oldOverflowX = $('body').css('overflow-x');
-		$('body').css('overflow-x', 'hidden');
+		data.config.dragBox[0].style.display = 'block';
+		data.dragRow[0].classList.add('drag-source');
+		document.documentElement.classList.add('drag-progress');
+		data.oldOverflowX = document.body.style.overflowX;
+		document.body.style.overflowX = 'hidden';
 	}
 
 	function buildDragBox(data)
@@ -968,49 +1042,64 @@
 		data.config.dragContent.html(table);
 		data.config.dragBadge.text(data.moveIds.length);
 		data.config.dragBadge.css('display', data.moveIds.length > 1 ? 'block' : 'none');
-		data.config.dragBox.css({left: data.target.offset().left, width: data.dragRow.width()});
+
+		var dragRowRect = data.dragRow[0].getBoundingClientRect();
+		data.config.dragBox.css({left: dragRowRect.left + window.scrollX, width: dragRowRect.width});
+
 		var tds = $('td', tr);
-		$('td', data.dragRow).each(function(ind, el) { $(tds[ind]).css('width', $(el).width()); });
+		var srcTds = data.dragRow[0].cells;
+		for (var i = 0; i < srcTds.length && i < tds.length; i++)
+		{
+			tds[i].style.width = srcTds[i].offsetWidth + 'px';
+		}
 	}
 
 	function updateDrag(data, x, y)
 	{
-		var offsetX = $(document).scrollLeft();
-		var offsetY = $(document).scrollTop();
+		var offsetX = window.scrollX;
+		var offsetY = window.scrollY;
 		var posX = x + offsetX;
 		var posY = y + offsetY;
 
-		data.config.dragBox.css({
-			left: posX - data.dragOffset.x,
-			top: Math.max(Math.min(posY - data.dragOffset.y, offsetY + $(window).height() - data.config.dragBox.height() - 2), offsetY + 2)});
+		var dragBoxEl = data.config.dragBox[0];
+		var dragBoxHeight = dragBoxEl.offsetHeight;
+		var winHeight = window.innerHeight;
 
-		var dt = data.config.dragBox.offset().top;
-		var dh = data.config.dragBox.height();
+		dragBoxEl.style.left = (posX - data.dragOffset.x) + 'px';
+		dragBoxEl.style.top = Math.max(Math.min(posY - data.dragOffset.y, offsetY + winHeight - dragBoxHeight - 2), offsetY + 2) + 'px';
 
-		var rows = $('tbody > tr', data.target);
+		var dragBoxRect = dragBoxEl.getBoundingClientRect();
+		var dt = dragBoxRect.top + offsetY;
+		var dh = dragBoxRect.height;
+
+		var tbody = data.tableEl.tBodies[0];
+		if (!tbody) return;
+		var rows = tbody.rows;
+
 		for (var i = 0; i < rows.length; i++)
 		{
-			var row = $(rows[i]);
-			var rt = row.offset().top;
-			var rh = row.height();
-			if (row[0] !== data.dragRow[0])
+			var rowEl = rows[i];
+			if (rowEl === data.dragRow[0]) continue;
+
+			var rowRect = rowEl.getBoundingClientRect();
+			var rt = rowRect.top + offsetY;
+			var rh = rowRect.height;
+
+			if ((dt >= rt && dt <= rt + rh / 2) ||
+				(dt < rt && i === 0))
 			{
-				if ((dt >= rt && dt <= rt + rh / 2) ||
-					(dt < rt && i == 0))
-				{
-					data.dropAfter = false;
-					row.before(data.dragRow);
-					data.dropId = row[0].fasttableID;
-					break;
-				}
-				if ((dt + dh >= rt + rh / 2 && dt + dh <= rt + rh) ||
-					(dt + dh > rt + rh && i === rows.length - 1))
-				{
-					data.dropAfter = true;
-					row.after(data.dragRow);
-					data.dropId = row[0].fasttableID;
-					break;
-				}
+				data.dropAfter = false;
+				rowEl.parentNode.insertBefore(data.dragRow[0], rowEl);
+				data.dropId = rowEl.fasttableID;
+				break;
+			}
+			if ((dt + dh >= rt + rh / 2 && dt + dh <= rt + rh) ||
+				(dt + dh > rt + rh && i === rows.length - 1))
+			{
+				data.dropAfter = true;
+				rowEl.parentNode.insertBefore(data.dragRow[0], rowEl.nextSibling);
+				data.dropId = rowEl.fasttableID;
+				break;
 			}
 		}
 
@@ -1023,14 +1112,13 @@
 
 	function autoScroll(data, x, y)
 	{
-		// works properly only if the table lays directly on the page (not in another scrollable div)
-
-		data.scrollStep = (y > $(window).height() - 20 ? 1 : y < 20 ? -1 : 0) * 5;
+		var winHeight = window.innerHeight;
+		data.scrollStep = (y > winHeight - 20 ? 1 : y < 20 ? -1 : 0) * 5;
 		if (data.scrollStep !== 0 && !data.scrollTimer)
 		{
 			var scroll = function()
 			{
-				$(document).scrollTop($(document).scrollTop() + data.scrollStep);
+				window.scrollBy(0, data.scrollStep);
 				updateDrag(data, x, y + data.scrollStep);
 				data.scrollTimer = data.scrollStep == 0 ? null : setTimeout(scroll, 10);
 			}
@@ -1038,14 +1126,18 @@
 		}
 	}
 
-	function mouseUp(data, e)
+	function pointerUp(data, e)
 	{
-		document.removeEventListener('mousemove', data.mouseMove, true);
-		document.removeEventListener('touchmove', data.mouseMove, true);
-		document.removeEventListener('mouseup', data.mouseUp, true);
-		document.removeEventListener('touchend', data.mouseUp, true);
-		document.removeEventListener('touchcancel', data.mouseUp, true);
-		document.removeEventListener('keydown', data.keyDown, true);
+		var pid = (e && e.pointerId !== undefined) ? e.pointerId : data.activePointerId;
+		if (pid !== data.activePointerId) return;
+
+		document.removeEventListener('pointermove', data.onPointerMove, true);
+		document.removeEventListener('pointerup', data.onPointerUp, true);
+		document.removeEventListener('pointercancel', data.onPointerUp, true);
+		document.removeEventListener('keydown', data.onKeyDown, true);
+
+		data.isInteracting = false;
+		data.activePointerId = null;
 
 		if (!data.dragging)
 		{
@@ -1053,24 +1145,31 @@
 		}
 
 		data.dragging = false;
-		data.cancelDrag = data.cancelDrag || e.type === 'touchcancel';
-		data.dragRow.removeClass('drag-source');
-		$('html').removeClass('drag-progress');
-		$('body').css('overflow-x', data.oldOverflowX);
-		data.config.dragBox.hide();
+		data.cancelDrag = data.cancelDrag || (e && e.type === 'pointercancel');
+
+		try {
+			data.dragRow[0].releasePointerCapture(pid);
+		} catch (ex) {}
+
+		data.dragRow[0].classList.remove('drag-source');
+		document.documentElement.classList.remove('drag-progress');
+		document.body.style.overflowX = data.oldOverflowX;
+		data.config.dragBox[0].style.display = 'none';
 		data.scrollStep = 0;
 		clearTimeout(data.scrollTimer);
 		data.scrollTimer = null;
 		moveRecords(data);
+
+		scheduleRender(data, false);
 	}
 
-	function keyDown(data, e)
+	function dragKeyDown(data, e)
 	{
-		if (e.keyCode == 27) // ESC-key
+		if (e.key === 'Escape')
 		{
 			data.cancelDrag = true;
 			e.preventDefault();
-			mouseUp(data, e);
+			pointerUp(data, null);
 		}
 	}
 
@@ -1146,7 +1245,6 @@
 
 		if (data.dropId === null)
 		{
-			// restore content
 			for (var j = 0; j < movedRecords.length; j++)
 			{
 				data.content.push(movedRecords[j]);
@@ -1169,32 +1267,39 @@
 
 	function blinkMovedRecords(data)
 	{
-		if (data.blinkIds.length > 0)
-		{
-			blinkProgress(data, data.wantBlink);
-			data.wantBlink = false;
-		}
+		if (data.blinkIds.length === 0) return;
+		if (data.blinkTimer) return;
+		blinkProgress(data, data.wantBlink);
+		data.wantBlink = false;
 	}
 
 	function blinkProgress(data, recur)
 	{
-		var rows = $('tr', data.target);
-		rows.removeClass('drag-finish');
-		rows.each(function(ind, el)
+		var tbody = data.tableEl.tBodies[0];
+		if (!tbody) return;
+
+		var rows = tbody.rows;
+		for (var i = 0; i < rows.length; i++)
+		{
+			var el = rows[i];
+			var id = el.fasttableID;
+			if (data.blinkIds.indexOf(id) > -1 &&
+				(data.blinkState === 1 || data.blinkState === 3 || data.blinkState === 5))
 			{
-				var id = el.fasttableID;
-				if (data.blinkIds.indexOf(id) > -1 &&
-					(data.blinkState === 1 || data.blinkState === 3 || data.blinkState === 5))
-				{
-					$(el).addClass('drag-finish');
-				}
-			});
+				el.classList.add('drag-finish');
+			}
+			else
+			{
+				el.classList.remove('drag-finish');
+			}
+		}
 
 		if (recur && data.blinkState > 0)
 		{
-			setTimeout(function()
+			data.blinkTimer = setTimeout(function()
 				{
 					data.blinkState -= 1;
+					data.blinkTimer = null;
 					blinkProgress(data, true);
 				},
 				150);
