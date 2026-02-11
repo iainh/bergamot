@@ -621,6 +621,12 @@ input, select, textarea, button {
 	padding: 15px;
 }
 
+.modal-body fieldset {
+	border: none;
+	margin: 0;
+	padding: 0;
+}
+
 .modal-footer {
 	padding: 14px 15px 15px;
 	margin-bottom: 0;
