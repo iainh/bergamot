@@ -1024,12 +1024,10 @@ form {
 }
 
 .modal-max {
-    margin: 15px;
-    left: 0;
-    top: 0;
-    bottom: 0;
-    right: 0;
+    inset: 15px;
+    transform: none;
     width: auto;
+    max-width: none;
     height: auto;
 }
 
@@ -1067,7 +1065,6 @@ form {
 }
 
 .modal-2 {
-    margin-top: -200px;
     z-index: 1060;
 }
 
@@ -1343,18 +1340,15 @@ textarea[readonly],
 }
 
 .modal-mini {
-    width: 420px;
-    margin-left: -210px;
+    max-width: 420px;
 }
 
 .modal-small {
-    width: 480px;
-    margin-left: -240px;
+    max-width: 480px;
 }
 
 .modal-large {
-    width: 700px;
-    margin-left: -350px;
+    max-width: 700px;
 }
 
 .modal-padded-small .modal-body {
@@ -1398,6 +1392,7 @@ ul.help > li {
     padding: 20px;
     top: 50%;
     left: 50%;
+    transform: translate(-50%, -50%);
     z-index: 2000;
     overflow: auto;
     text-align: center;
@@ -1406,12 +1401,10 @@ ul.help > li {
 
 .alert-center-small {
     width: 200px;
-    margin: -80px 0 0 -100px;
 }
 
 .alert-center-medium {
     width: 400px;
-    margin: -80px 0 0 -200px;
 }
 
 .alert-error.alert-center {
@@ -1475,10 +1468,6 @@ ul.help > li {
 
 .data-statistics-full {
     width: 364px;
-}
-
-.modal-center {
-    margin-top: 0;
 }
 
 /*** STATISTICS */
@@ -1958,8 +1947,7 @@ div.multiset-toolbar button {
 }
 
 .log-dialog {
-    width: 640px;
-    margin-left: -320px;
+    max-width: 640px;
 }
 
 .log-dialog .modal-body {
@@ -2906,8 +2894,7 @@ td:hover span.none-category {
     }
 
     .modal-large {
-        width: 600px;
-        margin-left: -300px;
+        max-width: 600px;
     }
 }
 
@@ -2948,15 +2935,15 @@ td:hover span.none-category {
 
     .modal {
         position: absolute;
-        top: 0px;
-        right: 0px;
-        left: 0px;
+        inset: 0;
+        transform: none;
         width: auto;
+        max-width: none;
         margin: 0;
     }
 
     .modal.fade.in {
-        top: auto;
+        transform: none;
     }
 
     .modal .input-xlarge,
@@ -2972,16 +2959,15 @@ td:hover span.none-category {
     }
 
     .modal-center {
-        right: 20px;
-        left: 20px;
+        inset: 0 20px;
     }
 
     .alert-center-small,
     .alert-center-medium {
-        right: 20px;
         left: 20px;
+        right: 20px;
         width: auto;
-        margin: -10% 0 0;
+        transform: translate(0, -50%);
     }
 }
 

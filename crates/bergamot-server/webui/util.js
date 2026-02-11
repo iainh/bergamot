@@ -396,13 +396,13 @@ var Util = (new function($)
 		var $elem = $(dialog);
 		if (center)
 		{
-			var top = ($(window).height() - $elem.outerHeight()) * 0.4;
-			top = top > 0 ? top : 0;
-			$elem.css({ top: top});
+			var pct = ($(window).height() - $elem.outerHeight()) / $(window).height() * 50;
+			pct = pct > 0 ? pct : 50;
+			$elem.css({ top: pct + '%', transform: 'translate(-50%, -50%)' });
 		}
 		else
 		{
-			$elem.css({ top: '' });
+			$elem.css({ top: '', transform: '' });
 		}
 	}
 
