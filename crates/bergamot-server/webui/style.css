@@ -247,7 +247,8 @@ th {
 body {
     height: 100vh;
     width: 100vw;
-    overflow: hidden;
+    overflow-x: hidden;
+    overflow-y: auto;
 }
 
 body.navfixed .navbar-fixed-top {
