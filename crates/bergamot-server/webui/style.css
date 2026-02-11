@@ -269,7 +269,6 @@ body.navfixed.scrolled .navbar-fixed-top .navbar-inner {
 /* end of fixed navbar */
 
 #Logo {
-    float: left;
     margin-top: 1px;
     margin-right: 5px;
     width: 38px;
@@ -287,8 +286,6 @@ body.navfixed.scrolled .navbar-fixed-top .navbar-inner {
 #PlayBlock {
     width: 70px;
     height: 38px;
-    display: block;
-    float: left;
     position: relative;
     z-index: 2;
 }
@@ -377,7 +374,6 @@ body.navfixed.scrolled .navbar-fixed-top .navbar-inner {
 }
 
 #InfoBlock {
-    float: left;
     margin-right: 10px;
     padding-top: 2px;
     cursor: pointer;

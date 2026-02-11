@@ -115,8 +115,8 @@ input, select, textarea, button {
 .span9  { width: 75%; }
 .span12 { width: 100%; }
 
-.pull-left  { float: left; }
-.pull-right { float: right; }
+.pull-left  { float: left; margin-right: auto; }
+.pull-right { float: right; margin-left: auto; }
 
 .clearfix::before,
 .clearfix::after {
@@ -999,6 +999,7 @@ table.datatable {
    ========================================================================== */
 
 .progress {
+	display: flex;
 	height: 20px;
 	overflow: hidden;
 	background-color: var(--pico-form-element-background-color, #f7f7f7);
@@ -1006,7 +1007,6 @@ table.datatable {
 }
 
 .progress .bar {
-	float: left;
 	width: 0;
 	height: 100%;
 	font-size: 12px;
