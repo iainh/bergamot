@@ -208,13 +208,11 @@ var Status = (new function($)
 			}
 		}
 
-		$StatusSpeedIcon.toggleClass('icon-plane', !limit);
-		$StatusSpeedIcon.toggleClass('icon-truck', limit);
+		$StatusSpeedIcon.text(limit ? 'local_shipping' : 'speed');
 
 		var statWarning = (status.ServerStandBy && status.ResumeTime > 0) || status.QuotaReached;
 		$StatusTime.toggleClass('orange', statWarning);
-		$StatusTimeIcon.toggleClass('icon-time', !statWarning);
-		$StatusTimeIcon.toggleClass('icon-time-orange', statWarning);
+		$StatusTimeIcon.toggleClass('orange', statWarning);
 
 		updateTitle();
 	}

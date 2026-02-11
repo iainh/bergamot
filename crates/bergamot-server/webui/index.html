@@ -119,14 +119,14 @@
 
 			<!-- SPEED/TIME -->
 			<div id="InfoBlock">
-				<div href="#" onclick="LimitDialog.clicked(event)" title="Current speed (click to set speed limit) [Shift+L]"><i class="icon-plane" id="StatusSpeedIcon"></i> <span id="StatusSpeed">--- KB/s</span></div>
-				<div href="#" onclick="Status.statDialogClick()" title="Remaining time (click for more statistics) [Shift+A]"><i class="icon-time" id="StatusTimeIcon"></i> <span id="StatusTime">--h --m</span></div>
+				<div href="#" onclick="LimitDialog.clicked(event)" title="Current speed (click to set speed limit) [Shift+L]"><i class="material-icon navbar-icon" id="StatusSpeedIcon">speed</i> <span id="StatusSpeed">--- KB/s</span></div>
+				<div href="#" onclick="Status.statDialogClick()" title="Remaining time (click for more statistics) [Shift+A]"><i class="material-icon navbar-icon" id="StatusTimeIcon">schedule</i> <span id="StatusTime">--h --m</span></div>
 			</div>
 			
 			<div id="RefreshBlockDesktop" class="pull-right phone-hide">
 				<div class="btn-toolbar" id="RefreshBlock">
 					<div class="btn-group">
-						<button class="btn btn-inverse" id="RefreshButton" title="Refresh [Shift+R]"><i class="icon-refresh" id="RefreshAnimation"></i></button>
+						<button class="btn btn-inverse" id="RefreshButton" title="Refresh [Shift+R]"><i class="material-icon" id="RefreshAnimation">refresh</i></button>
 						<button class="btn btn-inverse dropdown-toggle" data-toggle="dropdown"><span class="caret"></span></button>
 						<ul class="dropdown-menu menu-refresh" id="RefreshMenu">
 							<li class="menu-header">Automatic refresh</li>
@@ -170,19 +170,19 @@
 					</div>
 
 					<input id="DownloadsTable_filter" class="search-query" type="text" placeholder="Search downloads" title="Search downloads [Shift+F]">
-					<i id="DownloadsTable_clearfilter" class="icon-remove-white search-clear" title="Clear [Shift+C]"></i>
+					<i id="DownloadsTable_clearfilter" class="material-icon search-clear" title="Clear [Shift+C]">close</i>
 
 					<input id="HistoryTable_filter" class="search-query" type="text" placeholder="Search history" title="Search history [Shift+F]">
-					<i id="HistoryTable_clearfilter" class="icon-remove-white search-clear" title="Clear [Shift+C]"></i>
+					<i id="HistoryTable_clearfilter" class="material-icon search-clear" title="Clear [Shift+C]">close</i>
 
 					<input id="MessagesTable_filter" class="search-query" type="text" placeholder="Search messages" title="Search messages [Shift+F]">
-					<i id="MessagesTable_clearfilter" class="icon-remove-white search-clear" title="Clear [Shift+C]"></i>
+					<i id="MessagesTable_clearfilter" class="material-icon search-clear" title="Clear [Shift+C]">close</i>
 
 					<input id="ConfigTable_filter" class="search-query" type="text" placeholder="Search settings" title="Search settings [Shift+F]">
-					<i id="ConfigTable_clearfilter" class="icon-remove-white search-clear" title="Clear [Shift+C]"></i>
+					<i id="ConfigTable_clearfilter" class="material-icon search-clear" title="Clear [Shift+C]">close</i>
 					
 					<input id="StatisticsTable_filter" class="search-query" disabled type="text" placeholder="Search statistics" title="Search">
-					<i id="StatisticsTable_clearfilter" class="icon-remove-white search-clear" title="Clear [Shift+C]"></i>
+					<i id="StatisticsTable_clearfilter" class="material-icon search-clear" title="Clear [Shift+C]">close</i>
 				</div>
 			</div>
 

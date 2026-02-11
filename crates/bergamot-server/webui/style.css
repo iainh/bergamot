@@ -44,6 +44,11 @@
     vertical-align: top;
 }
 
+.navbar-icon {
+    font-size: 14px;
+    vertical-align: middle;
+}
+
 body {
     padding-left: 0;
     padding-right: 0;
@@ -406,6 +411,10 @@ body.navfixed.scrolled .navbar-fixed-top .navbar-inner {
     color: #ffa15a;
 }
 
+#StatusTimeIcon.orange {
+    color: #f08929;
+}
+
 .navbar-inner .btn:hover i {
     opacity: 1;
 }
@@ -499,6 +508,7 @@ body.navfixed.scrolled .navbar-fixed-top .navbar-inner {
     right: 9px;
     cursor: pointer;
     opacity: 0.65;
+    color: #fff;
 }
 
 .search-caret-block {

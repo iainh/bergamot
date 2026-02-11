@@ -440,8 +440,7 @@ var Upload = (new function($)
 			$('#AddDialog_URL').empty();
 		}
 		$('#AddDialog_URLLabel img').hide();
-		$('#AddDialog_URLLabel i').removeClass('icon-ok').removeClass('icon-remove').addClass(
-			result ? 'icon-ok' : 'icon-remove').show();
+		$('#AddDialog_URLLabel i').text(result ? 'check_circle' : 'cancel').show();
 
 		fileNext();
 	}
