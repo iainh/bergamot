@@ -202,6 +202,7 @@ var Messages = (new function($)
 		if (index === 1)
 		{
 			cell.className = 'text-center';
+			cell.style.whiteSpace = 'nowrap';
 		}
 	}
 
