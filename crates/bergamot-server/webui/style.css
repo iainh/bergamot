@@ -2632,6 +2632,253 @@ input[type="date"] {
     width: auto;
 }
 
+/* ========== Theme-shared structural rules ========== */
+
+.menu-header {
+	display: block;
+	padding: 3px 15px;
+	font-size: 11px;
+	font-weight: bold;
+	line-height: 18px;
+	text-transform: uppercase;
+}
+
+#PlayCaret {
+	margin-top: 3px;
+	margin-left: 9px;
+	opacity: 0.75;
+}
+
+.search-caret-button .caret {
+	margin-top: 3px;
+	margin-left: 9px;
+	opacity: 0.75;
+}
+
+.focused .search-caret-button .caret {
+	margin-left: 5px;
+}
+
+.badge-active {
+	text-shadow: none;
+}
+
+.navbar .nav .active > a,
+.navbar .nav .active > a:hover {
+	outline: 0;
+	color: #000;
+	text-shadow: none;
+	background: linear-gradient(to bottom, rgb(255,255,255) 0%, rgb(238,238,238) 45%, rgb(231,231,231) 55%, rgb(255,255,255) 100%);
+}
+
+.table-bordered {
+	border-collapse: collapse;
+}
+
+table > thead > tr > th.table-selector {
+	text-align: center;
+	padding: 2px;
+	font-size: 12px;
+	line-height: 14px;
+	color: inherit;
+}
+
+#ConfigNav {
+	border-radius: 3px;
+	padding: 8px 15px;
+	margin-bottom: 15px;
+}
+
+#ConfigNav.nav-list a {
+	text-decoration: none;
+	padding-top: 5px;
+	padding-bottom: 5px;
+	font-size: 12px;
+}
+
+#ConfigContent .config-header {
+	padding: 7px;
+	border-radius: 3px;
+	margin-bottom: 20px;
+	padding-right: 0;
+	padding-top: 0;
+}
+
+.config-header .btn {
+	margin-top: 7px;
+	margin-right: 0;
+	background-image: none;
+	border: none;
+	box-shadow: none;
+}
+
+.config-settitle {
+	font-size: 14px;
+	font-weight: bold;
+	background-color: #505050;
+	padding: 7px;
+	border-radius: 3px;
+	margin-bottom: 20px;
+}
+
+.config-multicaption {
+	color: #c0c0c0;
+	font-weight: normal;
+}
+
+#DownloadsEdit_ParamTab div.control-group.wants-divider,
+#HistoryEdit_ParamTab div.control-group.wants-divider,
+#ConfigContent div.control-group,
+#ConfigContent.search div.control-group.multiset {
+	margin-bottom: 15px;
+	padding-bottom: 12px;
+}
+
+.btn-switch input:focus {
+	border-color: rgba(0, 0, 0, 0.1) rgba(0, 0, 0, 0.1) rgba(0, 0, 0, 0.25);
+	box-shadow: none;
+}
+
+.search .option-name:hover {
+	cursor: pointer;
+	text-decoration: underline;
+	color: #005580;
+}
+
+.table .update-release-notes {
+	font-size: 11px;
+	height: 10px;
+	outline: none;
+}
+
+#UpdateDialog_Hint p {
+	color: #555;
+	margin-bottom: 3px;
+}
+
+.confirm-help-block {
+	font-size: 13px;
+	line-height: 16px;
+	margin-bottom: 0;
+}
+
+.log-dialog .modal-body pre {
+	min-height: 270px;
+	padding: 3px 6px;
+	margin-bottom: 0px;
+	position: absolute;
+	top: 15px;
+	bottom: 15px;
+	left: 15px;
+	right: 15px;
+	overflow-y: auto;
+	border-radius: 3px;
+}
+
+#FeedFilterDialog_FilterBlock {
+	position: absolute;
+	left: 15px;
+	width: 300px;
+	bottom: 0;
+	height: auto;
+	padding-top: 0;
+	margin-bottom: 12px;
+	padding: 0;
+	font-size: 12px;
+	line-height: 18px;
+	border-radius: 4px;
+}
+
+#FeedFilterDialog_FilterHeader {
+	font-size: 13px;
+	font-weight: bold;
+	margin-top: 5px;
+	padding-left: 6px;
+	height: 23px;
+}
+
+#FeedFilterDialog_FilterLines {
+	position: absolute;
+	left: 0;
+	top: 29px;
+	bottom: 0px;
+	width: 32px;
+	height: auto;
+	overflow: hidden;
+}
+
+#FeedFilterDialog_FilterNumbers .lineno {
+	color: #3A87AD;
+	padding-right: 5px;
+	padding-top: 0;
+	text-align: right;
+	font-weight: bold;
+	white-space: nowrap;
+}
+
+#FeedFilterDialog_FilterClient {
+	position: absolute;
+	left: 33px;
+	right: 0px;
+	top: 29px;
+	bottom: 0px;
+	width: auto;
+	padding-left: 3px;
+	height: auto;
+}
+
+#TableDragBox {
+	position: absolute;
+	left: 100px;
+	top: 100px;
+	text-align: center;
+	display: none;
+	cursor: grabbing;
+	cursor: -webkit-grabbing;
+	z-index: 5000;
+}
+
+#TableDragBox .badge {
+	position: absolute;
+	left: 0px;
+	top: -12px;
+	text-align: center;
+	padding: 1px 6px;
+}
+
+tr.drag-source > td {
+	visibility: visible;
+}
+
+.table-striped tbody tr.drag-finish td,
+.table-striped tbody tr.drag-finish .progress,
+.table-striped tbody tr.drag-finish td a {
+	background-color: #E6FAE4 !important;
+}
+
+.uneditable-mulitline-input {
+	display: inline-block;
+	width: 340px;
+	overflow: hidden;
+	cursor: not-allowed;
+	padding: 4px;
+	padding-right: 20px;
+	border-radius: 3px;
+	box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.025);
+}
+
+.alert-inverse {
+	text-shadow: 0 -1px 0 rgba(0, 0, 0, 0.25);
+	background-color: #414141;
+	border-color: #222222;
+}
+
+td:hover span.none-category {
+	color: #aaa;
+}
+
+/* ========== End theme-shared structural rules ========== */
+
 /* MEDIA SMALL SCREENS */
 @media (max-width: 700px) {
     #ConfigContent [class*="span"] {

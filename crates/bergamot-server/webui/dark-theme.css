@@ -179,47 +179,23 @@ select {
 	background-color: #212529;
 }
 
-#PlayCaret {
-	margin-top: 3px;
-	margin-left: 9px;
-	opacity: 0.75;
-}
-
 .dropup .caret, .navbar-fixed-bottom .dropdown .caret {
 	border-top: none;
 	border-bottom: 4px solid #f5f5f5;
 }
 
-.navbar .nav .active > a,
-.navbar .nav .active > a:hover {
-	outline: 0;
-	color: #000;
-	text-shadow: none;
-	background: linear-gradient(to bottom, rgb(255,255,255) 0%, rgb(238,238,238) 45%, rgb(231,231,231) 55%, rgb(255,255,255) 100%);
-}
-
 /* headers in navbar menu */
 .menu-header {
-	display: block;
-	padding: 3px 15px;
-	font-size: 11px;
-	font-weight: bold;
-	line-height: 18px;
 	color: #f5f5f5;
 	text-shadow: 0 1px 0 rgba(0, 0, 0, 0.5);
-	text-transform: uppercase;
 }
 
 .search-caret-button .caret {
-	margin-top: 3px;
-	margin-left: 9px;
 	border-top-color: #f5f5f5;
 	border-bottom-color: #f5f5f5;
-	opacity: 0.75;
 }
 
 .focused .search-caret-button .caret {
-	margin-left: 5px;
 	border-top-color: #f5f5f5;
 	border-bottom-color: #f5f5f5;
 }
@@ -227,13 +203,12 @@ select {
 .badge-active {
 	background-color: #3a87ad;
 	color: #fff;
-	text-shadow: none;
 }
 
 .table-bordered {
 	border: 1px solid #626262;
-	border-collapse: collapse;
 }
+
 .table tbody tr:hover td, .table tbody tr:hover th,
 .table tbody tr:hover  {
 	background-color: #212529;
@@ -244,11 +219,7 @@ hr {
 }
 
 table > thead > tr > th.table-selector {
-    text-align: center;
     background: repeating-linear-gradient(-45deg, #1a1a1a, #333 6px, #666 6px, #666 12px);
-    padding: 2px;
-    font-size: 12px;
-    line-height: 14px;
 }
 
 div.check {
@@ -324,22 +295,10 @@ td.dropdown-cell > div:not(.dropdown-disabled):hover::after {
 	margin-bottom: 1px;
 }
 
-td:hover span.none-category {
-	color: #aaa;
-}
-
 .uneditable-mulitline-input {
-	display: inline-block;
-	width: 340px;
-	overflow: hidden;
-	cursor: not-allowed;
 	background-color: #f5f5f5;
 	border-color: #eee;
 	border: 1px solid #626262;
-	padding: 4px;
-	padding-right: 20px;
-	border-radius: 3px;
-	box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.025);
 }
 
 .dragover, .dragover .table-striped tbody tr:nth-child(odd) td, .dragover .table-striped tbody tr:nth-child(odd) th {
@@ -348,16 +307,10 @@ td:hover span.none-category {
 
 .alert-inverse {
 	color: #f5f5f5;
-	text-shadow: 0 -1px 0 rgba(0, 0, 0, 0.25);
-	background-color: #414141;
-	border-color: #222222;
 }
 
 .confirm-help-block {
 	color: #f5f5f5;
-	font-size: 13px;
-	line-height: 16px;
-	margin-bottom: 0;
 }
 
 .table .btn-success,
@@ -374,10 +327,6 @@ td:hover span.none-category {
 
 #ConfigNav.nav-list a {
 	color: #f5f5f5;
-	text-decoration: none;
-	padding-top: 5px;
-	padding-bottom: 5px;
-	font-size: 12px;
 }
 
 #ConfigNav.nav-list > .active > a,
@@ -387,28 +336,12 @@ td:hover span.none-category {
 }
 
 #ConfigNav {
-	border-radius: 3px;
 	border: 1px solid #626262;
-	padding: 8px 15px;
 	background-color: #212529;
-	margin-bottom: 15px;
 }
 
 #ConfigContent .config-header {
-	padding: 7px;
-	border-radius: 3px;
-	margin-bottom: 20px;
-	padding-right: 0;
-	padding-top: 0;
 	border-bottom: 1px solid #626262;
-}
-
-.config-header .btn {
-	margin-top: 7px;
-	margin-right: 0;
-	background-image: none;
-	border: none;
-	box-shadow: none;
 }
 
 .failure-message,
@@ -417,19 +350,8 @@ span.help-option-title {
 }
 
 .config-settitle {
-	font-size: 14px;
-	font-weight: bold;
-	background-color: #505050;
 	color: #f5f5f5;
-	padding: 7px;
-	border-radius: 3px;
-	margin-bottom: 20px;
 	border-bottom: 1px solid #626262;
-}
-
-.config-multicaption {
-	color: #c0c0c0;
-	font-weight: normal;
 }
 
 #DownloadsEdit_ParamTab div.control-group.wants-divider,
@@ -437,123 +359,36 @@ span.help-option-title {
 #ConfigContent div.control-group,
 #ConfigContent.search div.control-group.multiset {
 	border-bottom: 1px solid #626262;
-	margin-bottom: 15px;
-	padding-bottom: 12px;
-}
-
-.btn-switch input:focus {
-	border-color: rgba(0, 0, 0, 0.1) rgba(0, 0, 0, 0.1) rgba(0, 0, 0, 0.25);
-	box-shadow: none;
-}
-
-.search .option-name:hover {
-	cursor: pointer;
-	text-decoration: underline;
-	color: #005580;
 }
 
 .table .update-release-notes {
 	color: #0074cc;
-	font-size: 11px;
-	height: 10px;
-	outline: none;
-}
-
-#UpdateDialog_Hint p {
-	color: #555;
-	margin-bottom: 3px;
 }
 
 .log-dialog .modal-body pre {
-	min-height: 270px;
 	background-color: #222222;
 	border: 1px solid #626262;
 	color: #cccccc;
-	padding: 3px 6px;
-	margin-bottom: 0px;
-	position: absolute;
-	top: 15px;
-	bottom: 15px;
-	left: 15px;
-	right: 15px;
-	overflow-y: auto;
-	border-radius: 3px;
 }
 
 #FeedFilterDialog_FilterBlock {
-	position: absolute;
-	left: 15px;
-	width: 300px;
-	bottom: 0;
-	height: auto;
-	padding-top: 0;
-	margin-bottom: 12px;
-	padding: 0;
-	font-size: 12px;
-	line-height: 18px;
 	border: 1px solid #626262;
-	border-radius: 4px;
 }
 
 #FeedFilterDialog_FilterHeader {
-	font-size: 13px;
-	font-weight: bold;
-	margin-top: 5px;
-	padding-left: 6px;
-	height: 23px;
 	border-bottom: 1px solid rgba(0, 0, 0, 0.15);
 }
 
 #FeedFilterDialog_FilterLines {
-	position: absolute;
-	left: 0;
-	top: 29px;
-	bottom: 0px;
-	width: 32px;
-	height: auto;
-	overflow: hidden;
 	border-right: 1px solid #626262;
 }
 
-#FeedFilterDialog_FilterNumbers .lineno {
-	color: #3A87AD;
-	padding-right: 5px;
-	padding-top: 0;
-	text-align: right;
-	font-weight: bold;
-	white-space: nowrap;
-}
-
-#FeedFilterDialog_FilterClient {
-	position: absolute;
-	left: 33px;
-	right: 0px;
-	top: 29px;
-	bottom: 0px;
-	width: auto;
-	padding-left: 3px;
-	height: auto;
-}
-
 #TableDragBox {
-	position: absolute;
-	left: 100px;
-	top: 100px;
-	text-align: center;
 	border: 1px solid #626262;
 	background-color: #f8f8f8;
-	display: none;
-	cursor: grabbing;
-	cursor: -webkit-grabbing;
-	z-index: 5000;
 }
 
 #TableDragBox .badge {
-	position: absolute;
-	left: 0px;
-	top: -12px;
-	text-align: center;
-	padding: 1px 6px;
 	color: #f5f5f5;
 	background-color: #D70015;
 }
@@ -561,11 +396,4 @@ span.help-option-title {
 tr.drag-source > td {
 	background-color: #f5f5f5 !important;
 	color: #f5f5f5 !important;
-	visibility: visible;
-}
-
-.table-striped tbody tr.drag-finish td,
-.table-striped tbody tr.drag-finish .progress,
-.table-striped tbody tr.drag-finish td a {
-	background-color: #E6FAE4 !important;
 }
