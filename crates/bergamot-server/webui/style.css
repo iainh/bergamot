@@ -174,7 +174,7 @@ th {
 }
 
 #SysInfo_DiskSpeedTestBtn.btn--disabled {
-    opacity: 0.6 !important;
+    opacity: 0.6;
 }
 
 .spinner {
@@ -189,8 +189,8 @@ th {
 }
 
 /* EXTENSION MANAGER */
-.extension-manager__td {
-    vertical-align: middle !important;
+td.extension-manager__td {
+    vertical-align: middle;
     max-width: 350px;
 }
 
@@ -233,13 +233,14 @@ th {
     border-color: var(--pico-contrast-hover-border);
 }
 
-.btn--disabled {
-    opacity: 0.7 !important;
+button.btn--disabled,
+a.btn--disabled {
+    opacity: 0.7;
     pointer-events: none;
 }
 
-.list-item--nested a {
-    padding-left: 25px !important;
+.nav-list .list-item--nested a {
+    padding-left: 25px;
 }
 
 /* NAVBAR */
@@ -2187,7 +2188,7 @@ table.table-drag > tbody > tr > td:first-child > div.check {
 }
 
 tr.drag-source > td > * {
-    visibility: hidden !important;
+    visibility: hidden;
 }
 
 /****************************************************************************/
@@ -2979,7 +2980,7 @@ tr.drag-source > td {
 .table-striped tbody tr.drag-finish td,
 .table-striped tbody tr.drag-finish .progress,
 .table-striped tbody tr.drag-finish td a {
-	background-color: #E6FAE4 !important;
+	background-color: #E6FAE4;
 }
 
 .uneditable-mulitline-input {
@@ -3106,8 +3107,8 @@ td:hover span.none-category {
         right: 25px;
     }
 
-    .list-item--nested a {
-        padding-left: 0px !important;
+    .nav-list .list-item--nested a {
+        padding-left: 0px;
     }
 }
 
