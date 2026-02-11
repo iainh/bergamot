@@ -251,10 +251,16 @@ a.btn--disabled {
 }
 
 body {
-    height: 100vh;
+    min-height: 100vh;
     width: 100vw;
     overflow-x: hidden;
     overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+}
+
+body > main {
+    flex: 1;
 }
 
 body.navfixed .navbar-fixed-top {
