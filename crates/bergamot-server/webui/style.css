@@ -211,6 +211,23 @@ th {
     text-shadow: none;
 }
 
+.btn-active {
+    color: var(--pico-contrast-inverse);
+    background-color: var(--pico-contrast-background);
+    border-color: var(--pico-contrast-border);
+}
+
+.btn-active .caret {
+    border-top: 4px solid var(--pico-contrast-inverse);
+    opacity: unset;
+}
+
+.btn-active:hover {
+    color: var(--pico-contrast-inverse);
+    background-color: var(--pico-contrast-hover-background);
+    border-color: var(--pico-contrast-hover-border);
+}
+
 .btn--disabled {
     opacity: 0.7 !important;
     pointer-events: none;

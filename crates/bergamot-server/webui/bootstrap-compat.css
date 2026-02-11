@@ -318,7 +318,9 @@ input, select, textarea, button {
 
 
 /* ==========================================================================
-   Buttons — Pico-native with Bootstrap class mapping
+   Buttons — Bootstrap class names mapped to Pico CSS native variables
+   Pico styles <button> natively as primary. .btn maps to Pico's .secondary,
+   variant classes override via --pico-* custom properties.
    ========================================================================== */
 
 .btn {
@@ -335,80 +337,94 @@ input, select, textarea, button {
 	white-space: nowrap;
 	user-select: none;
 	width: auto;
-	--pico-background-color: var(--pico-secondary-background);
-	--pico-border-color: var(--pico-secondary-border);
-	--pico-color: var(--pico-secondary-inverse);
-	background-color: var(--pico-background-color);
-	border: 1px solid var(--pico-border-color);
+	background-color: var(--pico-secondary-background);
+	border: 1px solid var(--pico-secondary-border);
 	border-radius: var(--pico-border-radius, 4px);
-	color: var(--pico-color);
+	color: var(--pico-secondary-inverse);
+	transition: background-color 0.2s, border-color 0.2s;
 }
 
 .btn:hover {
 	text-decoration: none;
-	--pico-background-color: var(--pico-secondary-hover-background);
-	--pico-border-color: var(--pico-secondary-hover-border);
+	background-color: var(--pico-secondary-hover-background);
+	border-color: var(--pico-secondary-hover-border);
 }
 
 .btn-default {
-	--pico-background-color: var(--pico-secondary-background);
-	--pico-border-color: var(--pico-secondary-border);
-	--pico-color: var(--pico-secondary-inverse);
+	background-color: var(--pico-secondary-background);
+	border-color: var(--pico-secondary-border);
+	color: var(--pico-secondary-inverse);
+}
+
+.btn-default:hover {
+	background-color: var(--pico-secondary-hover-background);
+	border-color: var(--pico-secondary-hover-border);
 }
 
 .btn-primary {
-	--pico-background-color: var(--pico-primary-background);
-	--pico-border-color: var(--pico-primary-border);
-	--pico-color: var(--pico-primary-inverse);
+	background-color: var(--pico-primary-background);
+	border-color: var(--pico-primary-border);
+	color: var(--pico-primary-inverse);
 }
 
 .btn-primary:hover {
-	--pico-background-color: var(--pico-primary-hover-background);
-	--pico-border-color: var(--pico-primary-hover-border);
+	background-color: var(--pico-primary-hover-background);
+	border-color: var(--pico-primary-hover-border);
 }
 
 .btn-danger {
-	--pico-background-color: #b71c1c;
-	--pico-border-color: #9a0007;
-	--pico-color: #fff;
+	background-color: #b71c1c;
+	border-color: #9a0007;
+	color: #fff;
 }
 
 .btn-danger:hover {
-	--pico-background-color: #d32f2f;
-	--pico-border-color: #b71c1c;
+	background-color: #d32f2f;
+	border-color: #b71c1c;
 }
 
 .btn-success {
-	--pico-background-color: #2e7d32;
-	--pico-border-color: #1b5e20;
-	--pico-color: #fff;
+	background-color: #2e7d32;
+	border-color: #1b5e20;
+	color: #fff;
 }
 
 .btn-success:hover {
-	--pico-background-color: #388e3c;
-	--pico-border-color: #2e7d32;
+	background-color: #388e3c;
+	border-color: #2e7d32;
+}
+
+.btn-warning {
+	background-color: #e65100;
+	border-color: #bf360c;
+	color: #fff;
+}
+
+.btn-warning:hover {
+	background-color: #ef6c00;
+	border-color: #e65100;
 }
 
 .btn-info {
-	--pico-background-color: #0277bd;
-	--pico-border-color: #01579b;
-	--pico-color: #fff;
+	background-color: #0277bd;
+	border-color: #01579b;
+	color: #fff;
 }
 
 .btn-info:hover {
-	--pico-background-color: #0288d1;
-	--pico-border-color: #0277bd;
+	background-color: #0288d1;
+	border-color: #0277bd;
 }
 
 .btn-inverse {
-	--pico-background-color: var(--pico-contrast-background);
-	--pico-border-color: var(--pico-contrast-border);
-	--pico-color: var(--pico-contrast-inverse);
+	background-color: var(--pico-contrast-background);
+	border-color: var(--pico-contrast-border);
+	color: var(--pico-contrast-inverse);
 }
 
 .btn-inverse:hover {
-	--pico-background-color: var(--pico-contrast-hover-background);
-	--pico-border-color: var(--pico-contrast-hover-border);
+	background-color: var(--pico-contrast-hover-background);
+	border-color: var(--pico-contrast-hover-border);
 }
 
 .btn-large {
@@ -416,6 +432,12 @@ input, select, textarea, button {
 	font-size: 16px;
 	line-height: normal;
 	border-radius: var(--pico-border-radius, 5px);
+}
+
+.btn-mini {
+	padding: 2px 6px;
+	font-size: 11px;
+	line-height: 16px;
 }
 
 .btn-active,

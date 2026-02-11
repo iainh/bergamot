@@ -21,26 +21,6 @@ html {
 	scrollbar-color: #bbb #f5f5f5;
 }
 
-.btn-active {
-	color: #f5f5f5;
-	background-color: #414141;
-	background-image: linear-gradient(to bottom, #555555, #222222);
-	background-repeat: repeat-x;
-	border-color: #222222 #222222 #000000;
-	border-color: rgba(0, 0, 0, 0.1) rgba(0, 0, 0, 0.1) rgba(0, 0, 0, 0.25);
-}
-
-.btn-active .caret {
-	border-top: 4px solid #fff;
-	opacity: unset;
-}
-
-.btn-active:hover {
-	color: #f5f5f5;
-	background-color: #000;
-	background-image: none;
-}
-
 .system-health-badge--info,
 .txt-success {
 	color: #468847;
@@ -209,11 +189,6 @@ td.dropdown-cell > div:not(.dropdown-disabled):hover::after {
 
 .confirm-help-block {
 	color: #555555;
-}
-
-.table .btn-success,
-.table .btn-success:hover {
-	color: #ffffff;
 }
 
 #StatDialog_Custom a,
