@@ -52,6 +52,8 @@ var Statistics = new (function ($) {
 		this.$speedChartBtn = null;
 		this.$volumeChartBtn = null;
 		this.activeChart = this.SPEED_CHART;
+		this.speedPlot = null;
+		this.volumePlot = null;
 
 		this.speedChartData = {
 			range: "MIN",
@@ -60,8 +62,7 @@ var Statistics = new (function ($) {
 			dataBits: null,
 			curPoint: null,
 			units: null,
-			labels: null,
-			mouseOverIndex: -1
+			labels: null
 		};
 
 		this.volumeChartData = {
@@ -73,8 +74,7 @@ var Statistics = new (function ($) {
 			curPoint: null,
 			sumMB: null,
 			sumLo: null,
-			labels: null,
-			mouseOverIndex: -1
+			labels: null
 		};
 
 		this.makeId = function(suffix) {
@@ -139,8 +139,8 @@ var Statistics = new (function ($) {
 				this.$volumeChartBtn.addClass("btn-active");
 			} else {
 				this.activeChart = this.SPEED_CHART;
-				this.$speedChart.hide();
-				this.$volumeChart.show();
+				this.$volumeChart.hide();
+				this.$speedChart.show();
 				this.$speedChartBtn.addClass("btn-active");
 				this.$volumeChartBtn.removeClass("btn-active");
 			}
@@ -910,32 +910,77 @@ var Statistics = new (function ($) {
 		server.hideSpinner();
 
 		var $chart = $("#" + server.makeId(server.SPEED_CHART + "_CHART"));
-		if (!$chart) return;
+		if (!$chart.length) return;
 		if (!isParentContainerRendered($chart)) {
 			server.hideChart();
 			server.showSpinner();
 			return;
 		}
 
-		$chart
-			.chart('clear')
-			.width(getChartWidth($chart))
-			.chart(
-				makeChart(serieData, curPointData, lineLabels, units, {
-					type: "axis",
-					onMouseOver: function onMouseOver(env, serie, index, mouseAreaData) {
-						speedChartMouseOver(server, env, serie, index, mouseAreaData);
-					},
-					onMouseExit: function onMouseExit(env, serie, index, mouseAreaData) {
-						speedChartMouseExit(server, env, serie, index, mouseAreaData);
-					},
-					onMouseOut: function onMouseOut(env, serie, index, mouseAreaData) {
-						speedChartMouseExit(server, env, serie, index, mouseAreaData);
-					}
-				})
-			);
+		var chartEl = $chart[0];
+		if (server.speedPlot) { server.speedPlot.destroy(); server.speedPlot = null; }
+		chartEl.innerHTML = '';
 
-		simulateMouseEvent(server, speedChartMouseExit);
+		var xData = [];
+		for (var i = 0; i < serieData.length; i++) { xData.push(i); }
+
+		var opts = {
+			width: chartEl.clientWidth || 600,
+			height: 250,
+			scales: { x: { time: false } },
+			cursor: { show: true, points: { show: true } },
+			legend: { show: false },
+			series: [
+				{},
+				{
+					label: "Speed",
+					stroke: "#55AAFF",
+					width: 2,
+					fill: "rgba(85,170,255,0.1)",
+					points: { show: false }
+				},
+				{
+					label: "Current",
+					stroke: "#F21860",
+					width: 0,
+					points: { show: true, size: 7, fill: "#F21860", stroke: "#F21860" }
+				}
+			],
+			axes: [
+				{
+					values: function(self, ticks) {
+						return ticks.map(function(v) {
+							return dataLabels[v] !== undefined ? dataLabels[v] : '';
+						});
+					},
+					stroke: '#3a87ad',
+					font: '13px sans-serif'
+				},
+				{
+					values: function(self, ticks) {
+						return ticks.map(function(v) {
+							return v != null ? v.toFixed(1) + units : '';
+						});
+					},
+					stroke: '#3a87ad',
+					font: '13px sans-serif',
+					grid: { stroke: '#e0e0e0', width: 1 }
+				}
+			],
+			hooks: {
+				setCursor: [function(u) {
+					var idx = u.cursor.idx;
+					if (idx != null && idx >= 0 && idx < serieData.length) {
+						speedChartMouseOver(server, idx);
+					} else {
+						speedChartMouseExit(server);
+					}
+				}]
+			}
+		};
+
+		server.speedPlot = new uPlot(opts, [xData, serieData, curPointData], chartEl);
+		speedChartMouseExit(server);
 	}
 
 	function redrawVolumeChart(server) {
@@ -1084,32 +1129,77 @@ var Statistics = new (function ($) {
 		server.hideSpinner();
 
 		var $chart = $("#" + server.makeId(server.VOLUME_CHART + "_CHART"));
-		if (!$chart) return;
+		if (!$chart.length) return;
 		if (!isParentContainerRendered($chart)) {
 			server.hideChart();
 			server.showSpinner();
 			return;
 		}
 
-		$chart
-			.chart('clear')
-			.width(getChartWidth($chart))
-			.chart(
-				makeChart(serieData, curPointData, lineLabels, units, {
-					type: "axis",
-					onMouseOver: function onMouseOver(env, serie, index, mouseAreaData) {
-						volumeChartMouseOver(server, env, serie, index, mouseAreaData);
-					},
-					onMouseExit: function onMouseExit(env, serie, index, mouseAreaData) {
-						volumeChartMouseExit(server, env, serie, index, mouseAreaData);
-					},
-					onMouseOut: function onMouseOut(env, serie, index, mouseAreaData) {
-						volumeChartMouseExit(server, env, serie, index, mouseAreaData);
-					}
-				})
-			);
+		var chartEl = $chart[0];
+		if (server.volumePlot) { server.volumePlot.destroy(); server.volumePlot = null; }
+		chartEl.innerHTML = '';
 
-		simulateMouseEvent(server, volumeChartMouseExit);
+		var xData = [];
+		for (var i = 0; i < serieData.length; i++) { xData.push(i); }
+
+		var opts = {
+			width: chartEl.clientWidth || 600,
+			height: 250,
+			scales: { x: { time: false } },
+			cursor: { show: true, points: { show: true } },
+			legend: { show: false },
+			series: [
+				{},
+				{
+					label: "Volume",
+					stroke: "#55AAFF",
+					width: 2,
+					fill: "rgba(85,170,255,0.1)",
+					points: { show: false }
+				},
+				{
+					label: "Current",
+					stroke: "#F21860",
+					width: 0,
+					points: { show: true, size: 7, fill: "#F21860", stroke: "#F21860" }
+				}
+			],
+			axes: [
+				{
+					values: function(self, ticks) {
+						return ticks.map(function(v) {
+							return dataLabels[v] !== undefined ? dataLabels[v] : '';
+						});
+					},
+					stroke: '#3a87ad',
+					font: '13px sans-serif'
+				},
+				{
+					values: function(self, ticks) {
+						return ticks.map(function(v) {
+							return v != null ? v.toFixed(1) + units : '';
+						});
+					},
+					stroke: '#3a87ad',
+					font: '13px sans-serif',
+					grid: { stroke: '#e0e0e0', width: 1 }
+				}
+			],
+			hooks: {
+				setCursor: [function(u) {
+					var idx = u.cursor.idx;
+					if (idx != null && idx >= 0 && idx < serieData.length) {
+						volumeChartMouseOver(server, idx);
+					} else {
+						volumeChartMouseExit(server);
+					}
+				}]
+			}
+		};
+
+		server.volumePlot = new uPlot(opts, [xData, serieData, curPointData], chartEl);
+		volumeChartMouseExit(server);
 	}
 
 	function isParentContainerRendered($chart) {
@@ -1139,32 +1229,17 @@ var Statistics = new (function ($) {
 		}
 	}
 
-	function speedChartMouseOver(server, env, serie, index, mouseAreaData) {
+	function speedChartMouseOver(server, index) {
 		var data = server.getChartData();
-		if (data.mouseOverIndex > -1) {
-			var $chart = $("#" + server.makeId(server.SPEED_CHART + "_CHART"));
-			if (!$chart) return;
-			var env = $chart.data("elycharts_env");
-			if (!env) return;
-			if (env.mouseAreas[data.mouseOverIndex])
-				$.elycharts.mousemanager.onMouseOutArea(
-					env,
-					false,
-					data.mouseOverIndex,
-					env.mouseAreas[data.mouseOverIndex]
-				);
-		}
-
-		var $tooltip = $("#" + server.makeId(server.SPEED_CHART + "_TOOLTIP"));
 		var $tooltipMB = $("#" + server.makeId(server.SPEED_CHART + "_TOOLTIP_MB"));
 		var $tooltipBits = $("#" + server.makeId(server.SPEED_CHART + "_TOOLTIP_BITS"));
-		if (!$tooltip || !$tooltipMB || !$tooltipBits) return;
+		if (!$tooltipMB.length || !$tooltipBits.length) return;
 
 		var valueMB = data.data[index];
 		var valueBits = data.dataBits[index];
 		var label = data.labels[index];
 		var MBTitle = '';
-		var BitsTitle= '';
+		var BitsTitle = '';
 		if (valueMB === undefined || valueMB === null) {
 			MBTitle = "0.0";
 			BitsTitle = "0.0";
@@ -1174,33 +1249,16 @@ var Statistics = new (function ($) {
 		}
 		$tooltipMB.html(
 			"<span>" + label + " " + "</span>" +
-			'<span class="stat-size">' + MBTitle + '</span>',
+			'<span class="stat-size">' + MBTitle + '</span>'
 		);
 		$tooltipBits.text(BitsTitle);
 	}
 
-	function volumeChartMouseOver(server, env, serie, index, mouseAreaData) {
+	function volumeChartMouseOver(server, index) {
 		var data = server.getChartData();
-		if (data.mouseOverIndex > -1) {
-			var $chart = $("#" + server.makeId(server.VOLUME_CHART + "_CHART"));
-			if (!$chart) return;
-			var env = $chart.data("elycharts_env");
-			if (!env) return;
-
-			if (env.mouseAreas[data.mouseOverIndex])
-				$.elycharts.mousemanager.onMouseOutArea(
-					env,
-					false,
-					data.mouseOverIndex,
-					env.mouseAreas[data.mouseOverIndex]
-				);
-		}
-		data.mouseOverIndex = index;
 		var $tooltip = $("#" + server.makeId(server.activeChart + "_TOOLTIP"));
+		if (!$tooltip.length) return;
 
-		if (!$tooltip) return;
-
-		var data = server.getChartData();
 		$tooltip.html(
 			data.labels[index] +
 			': <span class="stat-size">' +
@@ -1209,11 +1267,10 @@ var Statistics = new (function ($) {
 		);
 	}
 
-	function speedChartMouseExit(server, env, serie, index, mouseAreaData) {
-		var $tooltip = $("#" + server.makeId(server.SPEED_CHART + "_TOOLTIP"));
+	function speedChartMouseExit(server) {
 		var $tooltipMB = $("#" + server.makeId(server.SPEED_CHART + "_TOOLTIP_MB"));
 		var $tooltipBits = $("#" + server.makeId(server.SPEED_CHART + "_TOOLTIP_BITS"));
-		if (!$tooltip || !$tooltipMB || !$tooltipBits) return;
+		if (!$tooltipMB.length || !$tooltipBits.length) return;
 
 		var data = server.getChartData();
 		var valueMB = data.data[data.curPoint] || 0;
@@ -1226,44 +1283,22 @@ var Statistics = new (function ($) {
 		$tooltipBits.text(BitsTitle);
 	}
 
-	function volumeChartMouseExit(server, env, serie, index, mouseAreaData) {
+	function volumeChartMouseExit(server) {
 		var $tooltip = $("#" + server.makeId(server.VOLUME_CHART + "_TOOLTIP"));
-		if (!$tooltip) return;
+		if (!$tooltip.length) return;
 		var data = server.getChartData();
 		if (data.sumMB === undefined || data.sumLo === undefined) return;
 
-		data.mouseOverIndex = -1;
 		var title = Util.formatSizeMB(data.sumMB, data.sumLo);
 		$tooltip.html(
 			"Selected period:" + " " + '<span class="stat-size">' + title + "</span>"
 		);
 	}
 
-	function simulateMouseEvent(server, onExitFn) {
-		var data = server.getChartData();
-		if (data.mouseOverIndex > -1) {
-			var $chart = $("#" + server.makeId(server.activeChart + "_CHART"));
-			if (!$chart) return;
-			var env = $chart.data("elycharts_env");
-			if (!env) return;
-
-			if (env.mouseAreas[data.mouseOverIndex])
-				$.elycharts.mousemanager.onMouseOverArea(
-					env,
-					false,
-					data.mouseOverIndex,
-					env.mouseAreas[data.mouseOverIndex]
-				);
-		} else {
-			onExitFn(server);
-		}
-	}
-
 	function chooseRange(server, range) {
 		var data = server.getChartData();
 		updateRangeButtons(server, range, data.range);
 		data.range = range;
-		data.mouseOverIndex = -1;
 		redrawChart(server);
 	}
 
@@ -1340,84 +1375,4 @@ var Statistics = new (function ($) {
 		}
 	}
 
-	function makeChart(serieData, curPointData, lineLabels, units, mousearea) {
-		return {
-			height: 250,
-			values: {
-				serie1: serieData,
-				serie2: curPointData
-			},
-			labels: lineLabels,
-			type: "line",
-			margins: [10, 15, 20, 70],
-			defaultSeries: {
-				rounded: 0.0,
-				fill: true,
-				plotProps: {
-					"stroke-width": 3.0
-				},
-				dot: true,
-				dotProps: {
-					stroke: "#FFF",
-					size: 3.0,
-					"stroke-width": 1.0,
-					fill: "#5AF"
-				},
-				highlight: {
-					scaleSpeed: 0,
-					scaleEasing: ">",
-					scale: 2.0
-				},
-				tooltip: {
-					active: false
-				},
-				color: "#5AF"
-			},
-			series: {
-				serie2: {
-					dotProps: {
-						stroke: "#F21860",
-						fill: "#F21860",
-						size: 3.5,
-						"stroke-width": 2.5
-					},
-					highlight: {
-						scale: 1.5
-					}
-				}
-			},
-			defaultAxis: {
-				labels: true,
-				labelsProps: {
-					"font-size": 13,
-					fill: "#3a87ad"
-				},
-				labelsDistance: 12
-			},
-			axis: {
-				l: {
-					labels: true,
-					suffix: units
-				}
-			},
-			features: {
-				grid: {
-					draw: [true, false],
-					forceBorder: true,
-					props: {
-						stroke: "#e0e0e0",
-						"stroke-width": 1
-					},
-					ticks: {
-						active: [true, false, false],
-						size: [6, 0],
-						props: {
-							stroke: "#e0e0e0"
-						}
-					}
-				},
-				mousearea: mousearea
-			}
-		};
-	}
 })(jQuery);

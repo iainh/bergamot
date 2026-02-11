@@ -34,36 +34,14 @@
 	
 
 	<!-- Libraries -->
-	<!-- %if-debug%
-	<script language="javascript" type="text/javascript" src="lib/jquery.js"></script>
-	<script language="javascript" type="text/javascript" src="lib/bootstrap.js"></script>
-	<script language="javascript" type="text/javascript" src="lib/raphael.js"></script>
-	<script language="javascript" type="text/javascript" src="lib/elycharts.js"></script>
-	%end% -->
+	<script language="javascript" type="text/javascript" src="lib/jquery.min.js"></script>
+	<link rel="stylesheet" type="text/css" href="lib/uPlot.min.css" />
+	<script language="javascript" type="text/javascript" src="lib/uPlot.iife.min.js"></script>
+
+	<!-- Bergamot UI (replaces Bootstrap JS) -->
+	<script language="javascript" type="text/javascript" src="ui.js"></script>
 
 	<!-- Bergamot -->
-	<!-- %if-debug%
-	<script language="javascript" type="text/javascript" src="datetime.js"></script>
-	<script language="javascript" type="text/javascript" src="fasttable.js"></script>
-	<script language="javascript" type="text/javascript" src="index.js"></script>
-	<script language="javascript" type="text/javascript" src="util.js"></script>
-	<script language="javascript" type="text/javascript" src="downloads.js"></script>
-	<script language="javascript" type="text/javascript" src="edit.js"></script>
-	<script language="javascript" type="text/javascript" src="status.js"></script>
-	<script language="javascript" type="text/javascript" src="messages.js"></script>
-	<script language="javascript" type="text/javascript" src="history.js"></script>
-	<script language="javascript" type="text/javascript" src="upload.js"></script>
-	<script language="javascript" type="text/javascript" src="config.js"></script>
-	<script language="javascript" type="text/javascript" src="feed.js"></script>
-	<script language="javascript" type="text/javascript" src="system-info.js"></script>
-	<script language="javascript" type="text/javascript" src="statistics.js"></script>
-	<script language="javascript" type="text/javascript" src="system-health.js"></script>
-	%end% -->
-
-	<script language="javascript" type="text/javascript" src="lib/jquery.min.js"></script>
-	<script language="javascript" type="text/javascript" src="lib/bootstrap.min.js"></script>
-	<script language="javascript" type="text/javascript" src="lib/raphael.min.js"></script>
-	<script language="javascript" type="text/javascript" src="lib/elycharts.min.js"></script>
 	<script language="javascript" type="text/javascript" src="datetime.js"></script>
 	<script language="javascript" type="text/javascript" src="fasttable.js"></script>
 	<script language="javascript" type="text/javascript" src="index.js"></script>
@@ -81,7 +59,8 @@
 	<script language="javascript" type="text/javascript" src="system-health.js"></script>
 
 	<style>.hide{display:none;}</style>
-	<link rel="stylesheet" type="text/css" href="lib/bootstrap.css" />
+	<link rel="stylesheet" type="text/css" href="lib/pico.min.css" />
+	<link rel="stylesheet" type="text/css" href="bootstrap-compat.css" />
 	<link rel="stylesheet" type="text/css" href="style.css" />
 	<link id="ThemeStyleSheet" rel="stylesheet" type="text/css" href="light-theme.css">
 
@@ -1108,32 +1087,20 @@
 										jQuery is licensed under the <a href="https://jquery.com/license/">MIT</a> license.
 									</p>
 
-									<h4>Bootstrap</h4>
+									<h4>Pico CSS</h4>
 									<p>
 										Bergamot web-interface uses 
-										<a href="https://getbootstrap.com/2.3.2/">Bootstrap</a>. Designed and built with all the love in the world @twitter by @mdo and @fat.
+										<a href="https://picocss.com/">Pico CSS</a> by Lucas Larroche.
 									</p>
 									<p>
-										Bootstrap code is licensed under the 
-										<a href="https://www.apache.org/licenses/LICENSE-2.0">Apache License v2.0</a>.
-									</p>
-
-									<h4>Raphaël</h4>
-									<p>
-										Bergamot web-interface makes use of 
-										<a href="https://dmitrybaranovskiy.github.io/raphael/">Raphaël</a> built by Dmitry Baranovskiy.
-									</p>
-									<p>
-										Raphaël code is licensed under the 
-										<a href="https://dmitrybaranovskiy.github.io/raphael/license.html">MIT license</a>.
+										Pico CSS is licensed under the 
+										<a href="https://github.com/picocss/pico/blob/master/LICENSE.md">MIT License</a>.
 									</p>
 
-									<h4>Elycharts</h4>
+									<h4>uPlot</h4>
 									<p>
-										For charts Bergamot relies on <a href="https://elycharts.com/">Elycharts</a> by Void Labs s.n.c.
-									</p>
-									<p>
-										Elycharts code is licensed under the <a href="https://elycharts.com/license/">MIT license</a>.
+										For charts Bergamot relies on <a href="https://github.com/leeoniya/uPlot">uPlot</a> by Leon Sorokin.
+										uPlot code is licensed under the <a href="https://github.com/leeoniya/uPlot/blob/master/LICENSE">MIT license</a>.
 									</p>
 
 									<h4>iconSweets</h4>

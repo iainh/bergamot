@@ -573,6 +573,7 @@ var StatDialog = (new function($)
 	var monEndIndex = 0;
 	var monStartDate;
 	var chartData = null;
+	var statChart = null;
 	var mouseOverIndex = -1;
 	var clockOK = false;
 	var volumeMode = false;
@@ -1036,104 +1037,85 @@ var StatDialog = (new function($)
 		var $chart = $("#StatDialog_Chart");
 		if (!$chart) return;
 
-		$chart.chart('clear').chart({
-			values: { serie1 : serieData, serie2: curPointData },
-			labels: lineLabels,
-			type: 'line',
-			margins: [10, 15, 20, 60],
-			defaultSeries: {
-				rounded: 0.0,
-				fill: true,
-				plotProps: {
-					'stroke-width': 3.0
-				},
-				dot: true,
-				dotProps: {
-					stroke: '#FFF',
-					size: 3.0,
-					'stroke-width': 1.0,
-					fill: '#5AF'
-				},
-				highlight: {
-					scaleSpeed: 0,
-					scaleEasing: '>',
-					scale: 2.0
-				},
-				tooltip: {
-					active: false,
-				},
-	            color: '#5AF'
-	        },
-			series: {
-				serie2: {
-					dotProps: {
-						stroke: '#F21860',
-						fill: '#F21860',
-						size: 3.5,
-						'stroke-width': 2.5
-					},
-					highlight: {
-						scale: 1.5
-					},
-				}
+		var xData = [];
+		for (var i = 0; i < serieData.length; i++) { xData.push(i); }
+		var plotData = [xData, serieData, curPointData];
+
+		var chartEl = $chart[0];
+		if (statChart) { statChart.destroy(); statChart = null; }
+		chartEl.innerHTML = '';
+
+		var opts = {
+			width: chartEl.clientWidth || 600,
+			height: 250,
+			scales: { x: { time: false } },
+			cursor: {
+				show: true,
+				points: { show: true }
 			},
-			defaultAxis: {
-				labels: true,
-				labelsProps: {
-					'font-size': 13,
-					'fill': '#3a87ad'
+			series: [
+				{},
+				{
+					label: "Data",
+					stroke: "#55AAFF",
+					width: 2,
+					fill: "rgba(85,170,255,0.1)",
+					points: { show: false }
 				},
-				labelsDistance: 12
-			},
-			axis: {
-				l: {
-					labels: true,
-					suffix: units,
-				}
-			},
-			features: {
-				grid: {
-					draw: [true, false],
-					forceBorder: true,
-					props: {
-						stroke: '#e0e0e0',
-						'stroke-width': 1
-					},
-					ticks: {
-						active: [true, false, false],
-						size: [6, 0],
-						props: {
-							stroke: '#e0e0e0'
-						}
+				{
+					label: "Current",
+					stroke: "#F21860",
+					width: 0,
+					points: {
+						show: true,
+						size: 7,
+						fill: "#F21860",
+						stroke: "#F21860"
 					}
-            	},
-				mousearea: {
-					type: 'axis',
-			        onMouseOver: chartMouseOver,
-					onMouseExit: chartMouseExit,
-					onMouseOut: chartMouseExit
+				}
+			],
+			axes: [
+				{
+					values: function(self, ticks) {
+						return ticks.map(function(v) {
+							return dataLabels[v] !== undefined ? dataLabels[v] : '';
+						});
+					},
+					stroke: '#3a87ad',
+					font: '13px sans-serif'
 				},
+				{
+					values: function(self, ticks) {
+						return ticks.map(function(v) {
+							return v != null ? v.toFixed(1) + units : '';
+						});
+					},
+					stroke: '#3a87ad',
+					font: '13px sans-serif',
+					grid: { stroke: '#e0e0e0', width: 1 }
+				}
+			],
+			hooks: {
+				setCursor: [function(u) {
+					var idx = u.cursor.idx;
+					if (idx != null && idx >= 0 && idx < serieData.length) {
+						$StatDialog_Tooltip.html(chartData.dataLabels[idx] + ': <span class="stat-size">' +
+							Util.formatSizeMB(chartData.serieDataMB[idx], chartData.serieDataLo[idx]) + '</span>');
+					} else {
+						chartMouseExit();
+					}
+				}]
 			}
-		});
+		};
+
+		statChart = new uPlot(opts, plotData, chartEl);
 
 		simulateMouseEvent();
 
 		updateCounters();
 	}
 
-	function chartMouseOver(env, serie, index, mouseAreaData)
-	{
-		if (mouseOverIndex > -1)
-		{
-			var env = $('#StatDialog_Chart').data('elycharts_env');
-			$.elycharts.mousemanager.onMouseOutArea(env, false, mouseOverIndex, env.mouseAreas[mouseOverIndex]);
-		}
-		mouseOverIndex = index;
-		$StatDialog_Tooltip.html(chartData.dataLabels[index] + ': <span class="stat-size">' +
-			Util.formatSizeMB(chartData.serieDataMB[index], chartData.serieDataLo[index]) + '</span>');
-	}
-
-	function chartMouseExit(env, serie, index, mouseAreaData)
+	function chartMouseExit()
 	{
 		mouseOverIndex = -1;
 		var title = curRange === 'MIN' ? '60 seconds' :
@@ -1146,15 +1128,7 @@ var StatDialog = (new function($)
 
 	function simulateMouseEvent()
 	{
-		if (mouseOverIndex > -1)
-		{
-			var env = $('#StatDialog_Chart').data('elycharts_env');
-			$.elycharts.mousemanager.onMouseOverArea(env, false, mouseOverIndex, env.mouseAreas[mouseOverIndex]);
-		}
-		else
-		{
-			chartMouseExit()
-		}
+		chartMouseExit();
 	}
 
 	this.chooseRange = function(range)
