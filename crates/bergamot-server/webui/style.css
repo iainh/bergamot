@@ -1501,9 +1501,9 @@ ul.help > li {
 }
 
 #StatisticsTab {
-    max-width: 1280px;
+    width: 100%;
     padding: 5px;
-    margin: auto;
+    box-sizing: border-box;
 }
 
 .statistics__server-details {

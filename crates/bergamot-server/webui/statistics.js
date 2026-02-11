@@ -260,11 +260,11 @@ var Statistics = new (function ($) {
 		server.$speedChart
 			.css("flex-grow", "3")
 			.css("flex-basis", "600px")
-			.css("overflow", "hidden");
+			.css("min-width", "0");
 		server.$volumeChart
 			.css("flex-grow", "3")
 			.css("flex-basis", "600px")
-			.css("overflow", "hidden");
+			.css("min-width", "0");
 		server.$details.hide();
 		server.$speedChart.hide();
 		server.$volumeChart.hide();
@@ -964,7 +964,15 @@ var Statistics = new (function ($) {
 					},
 					stroke: '#3a87ad',
 					font: '13px sans-serif',
-					grid: { stroke: '#e0e0e0', width: 1 }
+					grid: { stroke: '#e0e0e0', width: 1 },
+					size: function(self, values) {
+						if (!values) return 70;
+						var maxLen = 0;
+						for (var i = 0; i < values.length; i++) {
+							if (values[i] && values[i].length > maxLen) maxLen = values[i].length;
+						}
+						return Math.max(70, maxLen * 9 + 16);
+					}
 				}
 			],
 			hooks: {
@@ -1183,7 +1191,15 @@ var Statistics = new (function ($) {
 					},
 					stroke: '#3a87ad',
 					font: '13px sans-serif',
-					grid: { stroke: '#e0e0e0', width: 1 }
+					grid: { stroke: '#e0e0e0', width: 1 },
+					size: function(self, values) {
+						if (!values) return 70;
+						var maxLen = 0;
+						for (var i = 0; i < values.length; i++) {
+							if (values[i] && values[i].length > maxLen) maxLen = values[i].length;
+						}
+						return Math.max(70, maxLen * 9 + 16);
+					}
 				}
 			],
 			hooks: {
