@@ -55,11 +55,11 @@ body {
 }
 
 .txt-success {
-    color: #5bb75b;
+    color: var(--bergamot-color-success);
 }
 
 .txt-important {
-    color: #b94a48;
+    color: var(--bergamot-color-danger);
 }
 
 .flex {
@@ -149,15 +149,15 @@ th {
 }
 
 .system-health-badge--important {
-    color: #b94a48;
+    color: var(--bergamot-color-danger);
 }
 
 .system-health-badge--warning {
-    color: #f89406;
+    color: var(--bergamot-color-warning);
 }
 
 .system-health-badge--info {
-    color: #468847;
+    color: var(--bergamot-color-success);
 }
 
 .system-health__err-icon {
@@ -170,7 +170,7 @@ th {
 }
 
 .help-text-error {
-    color: #b94a48;
+    color: var(--bergamot-color-danger);
 }
 
 #SysInfo_DiskSpeedTestBtn.btn--disabled {
@@ -178,7 +178,7 @@ th {
 }
 
 .spinner {
-    color: #0088cc;
+    color: var(--bergamot-color-link);
     animation: spin 1s linear infinite;
 }
 
@@ -2932,7 +2932,7 @@ table > thead > tr > th.table-selector {
 }
 
 #FeedFilterDialog_FilterNumbers .lineno {
-	color: #3A87AD;
+	color: var(--bergamot-color-info);
 	padding-right: 5px;
 	padding-top: 0;
 	text-align: right;
@@ -2976,7 +2976,7 @@ tr.drag-source > td {
 .table-striped tbody tr.drag-finish td,
 .table-striped tbody tr.drag-finish .progress,
 .table-striped tbody tr.drag-finish td a {
-	background-color: #E6FAE4;
+	background-color: var(--bergamot-color-drag-finish);
 }
 
 .uneditable-mulitline-input {

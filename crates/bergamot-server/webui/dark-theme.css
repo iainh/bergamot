@@ -16,6 +16,15 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+:root {
+	--bergamot-color-success: #479f76;
+	--bergamot-color-danger: #e35d6a;
+	--bergamot-color-warning: #ffc107;
+	--bergamot-color-info: #3a87ad;
+	--bergamot-color-link: #6ea8fe;
+	--bergamot-color-drag-finish: #1a3a1a;
+}
+
 
 html {
 	scrollbar-color: #a1a1a1 #626262;
