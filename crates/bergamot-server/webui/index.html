@@ -149,10 +149,6 @@
 			</div>
 
 
-			<!-- REFRESH MENU PLACE IN MINI-THEME -->
-			<div id="RefreshBlockPhone" class="phone-only">
-			</div>
-
 			<!-- SEARCH -->
 			<div class="btn-toolbar" id="SearchBlock">
 				<div class="navbar-search" style="display: none;">
@@ -189,20 +185,15 @@
 			<!-- TABS -->
 			<div class="nav" id="NavLinks">
 				<ul class="nav">
-					<li class="active"><a data-toggle="tab" href="#DownloadsTab" id="DownloadsTabLink"><span class="phone-hide" title="Downloads [Shift+D]">Downloads </span><i class="material-icon phone-only inline">download</i><br class="phone-only"><span class="badge" id="DownloadsTabBadge" style="display: none;"></span><span class="badge badge-empty" id="DownloadsTabBadgeEmpty">&nbsp;</span></a></li>
-					<li><a data-toggle="tab" href="#HistoryTab" id="HistoryTabLink"><span class="phone-hide" title="History [Shift+H]">History </span><i class="material-icon phone-only inline">calendar_today</i><br class="phone-only"><span class="badge" id="HistoryTabBadge" style="display: none;"></span><span class="badge badge-empty" id="HistoryTabBadgeEmpty">&nbsp;</span></a></li>
-					<li><a data-toggle="tab" href="#StatisticsTab" id="StatisticsTabLink"><span class="phone-hide" title="Statistics [Shift+I]">Statistics </span><i class="material-icon phone-only inline">analytics</i><br class="phone-only"><span class="badge" id="StatisticsTabBadge" style="display: none;"></span><span class="phone-only"><span class="badge badge-empty" id="StatisticsabBadgeEmpty">&nbsp;</span></span></a></li>
-					<li><a data-toggle="tab" href="#MessagesTab" id="MessagesTabLink"><span class="phone-hide" title="Messages [Shift+M]">Messages </span><i class="material-icon phone-only inline">mail</i><br class="phone-only"><span class="badge" id="MessagesTabBadge" style="display: none;"></span><span class="badge badge-empty" id="MessagesTabBadgeEmpty">&nbsp;</span></a></li>
+					<li class="active"><a data-toggle="tab" href="#DownloadsTab" id="DownloadsTabLink"><span class="phone-hide" title="Downloads [Shift+D]">Downloads </span><span class="badge" id="DownloadsTabBadge" style="display: none;"></span><span class="badge badge-empty" id="DownloadsTabBadgeEmpty">&nbsp;</span></a></li>
+					<li><a data-toggle="tab" href="#HistoryTab" id="HistoryTabLink"><span class="phone-hide" title="History [Shift+H]">History </span><span class="badge" id="HistoryTabBadge" style="display: none;"></span><span class="badge badge-empty" id="HistoryTabBadgeEmpty">&nbsp;</span></a></li>
+					<li><a data-toggle="tab" href="#StatisticsTab" id="StatisticsTabLink"><span class="phone-hide" title="Statistics [Shift+I]">Statistics </span><span class="badge" id="StatisticsTabBadge" style="display: none;"></span></a></li>
+					<li><a data-toggle="tab" href="#MessagesTab" id="MessagesTabLink"><span class="phone-hide" title="Messages [Shift+M]">Messages </span><span class="badge" id="MessagesTabBadge" style="display: none;"></span><span class="badge badge-empty" id="MessagesTabBadgeEmpty">&nbsp;</span></a></li>
 					<li>
 						<a data-toggle="tab" href="#ConfigTab" id="ConfigTabLink">
 							<span class="phone-hide" title="Settings [Shift+S]">Settings </span>
-							<i class="material-icon phone-only inline">settings</i>
-							<br class="phone-only">
 							<span class="badge" id="ConfigTabBadge" style="display: none;"></span>
 							<span id="ConfigTabAppHealthBadge" style="display: none;"><i class="material-icon system-health__err-icon">error</i></span>
-							<span class="phone-only">
-								<span class="badge badge-empty" id="ConfigTabBadgeEmpty">&nbsp;</span>
-							</span>
 						</a>
 					</li>
 				</ul>
@@ -255,11 +246,7 @@
 					<button class="btn btn-default" onclick="Downloads.resumeClick()" title="Resume selected nzb-files [R]"><i class="material-icon">play_arrow</i><span class="btn-caption"> Resume</span></button>
 					<button class="btn btn-default" onclick="Downloads.deleteClick()" title="Delete selected nzb-files [D]"><i class="material-icon">delete</i><span class="btn-caption"> Delete</span></button>
 				</div>
-				<div class="btn-group phone-only inline"><button class="btn btn-default" onclick="Downloads.editClick()" title="Edit selected nzb-files"><i class="material-icon">edit</i><span class="btn-caption"> Edit</span></button></div>
-				<div class="btn-group phone-only inline"><button class="btn btn-default" onclick="Downloads.mergeClick()" title="Merge selected nzb-files"><i class="material-icon">merge</i><span class="btn-caption"> Merge</span></button></div>
-				<div class="btn-group phone-only inline"><button class="btn btn-default" onclick="Downloads.pauseClick()" title="Pause selected nzb-files"><i class="material-icon">pause</i><span class="btn-caption"> Pause</span></button></div>
-				<div class="btn-group phone-only inline"><button class="btn btn-default" onclick="Downloads.resumeClick()" title="Resume selected nzb-files"><i class="material-icon">play_arrow</i><span class="btn-caption"> Resume</span></button></div>
-				<div class="btn-group phone-only inline"><button class="btn btn-default" onclick="Downloads.deleteClick()" title="Delete selected nzb-files"><i class="material-icon">delete</i><span class="btn-caption"> Delete</span></button></div>
+
 
 				<!-- MOVE BUTTONS -->
 				<div class="btn-group phone-hide">
@@ -268,22 +255,16 @@
 					<button class="btn btn-default" onclick="Downloads.moveClick('down')" title="Move selected nzb-files down [N]"><i class="material-icon">south</i></button>
 					<button class="btn btn-default" onclick="Downloads.moveClick('bottom')" title="Move selected nzb-files to the bottom [B]"><i class="material-icon">vertical_align_bottom</i></button>
 				</div>
-				<div class="btn-group phone-only inline"><button class="btn btn-default" onclick="Downloads.moveClick('top')" title="Move selected nzb-files to the top"><i class="material-icon">vertical_align_top</i></button></div>
-				<div class="btn-group phone-only inline"><button class="btn btn-default" onclick="Downloads.moveClick('up')" title="Move selected nzb-files up"><i class="material-icon">north</i></button></div>
-				<div class="btn-group phone-only inline"><button class="btn btn-default" onclick="Downloads.moveClick('down')" title="Move selected nzb-files down"><i class="material-icon">south</i></button></div>
-				<div class="btn-group phone-only inline"><button class="btn btn-default" onclick="Downloads.moveClick('bottom')" title="Move selected nzb-files to the bottom"><i class="material-icon">vertical_align_bottom</i></button></div>
+
 
 				<div class="btn-group" id="RssMenuBlock">
-					<button class="btn btn-default dropdown-toggle" data-toggle="dropdown" title="RSS Feeds"><i class="material-icon">rss_feed</i><span class="btn-caption"> Feeds </span><span class="phone-only inline">&nbsp;</span><span class="caret"></span></button>
+					<button class="btn btn-default dropdown-toggle" data-toggle="dropdown" title="RSS Feeds"><i class="material-icon">rss_feed</i><span class="btn-caption"> Feeds </span><span class="caret"></span></button>
 					<ul class="dropdown-menu menu-with-button" id="RssMenu">
 						<li class="menu-header">RSS Feeds</li>
 						<li class="feed-menu-template hide"><a href="#" title="Show feed"><span></span><button class="btn btn-primary" title="Fetch feed">Fetch</button></a></li>
 						<li class="divider" id="RssMenu_Divider"></li>
 						<li><a href="#" onclick="Feeds.fetchAll()">Fetch All Feeds</a></li>
 					</ul>
-				</div>
-
-				<div class="btn-group phone-only inline" id="DownloadsRecordsPerPageBlockPhone">
 				</div>
 
 			</div>
@@ -346,7 +327,7 @@
 			<div class="btn-toolbar form-inline section-toolbar" id ="HistoryTab_Toolbar">
 				<div class="btn-group">
 					<button class="btn btn-default" onclick="History.actionClick('DELETE')" title="Delete selected records [D]"><i class="material-icon">delete</i><span class="btn-caption"> Delete</span></button>
-					<button class="btn btn-default dropdown-toggle" data-toggle="dropdown" title="More actions"><span class="btn-caption"> More </span><span class="phone-only inline">&nbsp;</span><span class="caret"></span></button>
+					<button class="btn btn-default dropdown-toggle" data-toggle="dropdown" title="More actions"><span class="btn-caption"> More </span><span class="caret"></span></button>
 					<ul class="dropdown-menu">
 						<li class="menu-header">Actions</li>
 						<li><a href="#" id="HistoryTab_Reprocess" onclick="History.actionClick('REPROCESS')" title="Post-process selected records again [P]"><i class="material-icon">manufacturing</i> Post-Process Again</a></li>
@@ -365,17 +346,10 @@
 					<button class="btn btn-default history-filter" onclick="History.filter('DELETED')" title="Show only Deleted [L]">Deleted &nbsp;<span class="badge" id="History_Badge_DELETED">?</span></button>
 					<button class="btn btn-default history-filter" onclick="History.filter('DUPE')" title="Show only Dupe [U]">Dupe &nbsp;<span class="badge" id="History_Badge_DUPE">?</span></button>
 				</div>
-				<div class="btn-group phone-only inline"><button class="btn btn-default history-filter" onclick="History.filter('ALL')" title="Show All">A &nbsp;<span class="badge badge-active" id="History_Badge_ALL2">?</span></button></div>
-				<div class="btn-group phone-only inline"><button class="btn btn-default history-filter" onclick="History.filter('SUCCESS')" title="Show only Success">S &nbsp;<span class="badge" id="History_Badge_SUCCESS2">?</span></button></div>
-				<div class="btn-group phone-only inline"><button class="btn btn-default history-filter" onclick="History.filter('FAILURE')" title="Show only Failure">F &nbsp;<span class="badge" id="History_Badge_FAILURE2">?</span></button></div>
-				<div class="btn-group phone-only inline"><button class="btn btn-default history-filter" onclick="History.filter('DELETED')" title="Show only Warning">D &nbsp;<span class="badge" id="History_Badge_DELETED2">?</span></button></div>
-				<div class="btn-group phone-only inline"><button class="btn btn-default history-filter" onclick="History.filter('DUPE')" title="Show only Dupe">U &nbsp;<span class="badge" id="History_Badge_DUPE2">?</span></button></div>
+
 
 				<div class="btn-group">
 					<button class="btn btn-default" id="History_Dup" onclick="History.dupClick()" title="Show hidden records kept for duplicate check [H]"><i class="material-icon" id="History_DupIcon">visibility_off</i><span class="btn-caption"> Hidden</span></button>
-				</div>
-
-				<div class="btn-group phone-only inline" id="HistoryRecordsPerPageBlockPhone">
 				</div>
 
 			</div>
@@ -444,14 +418,7 @@
 					<button class="btn btn-default" onclick="Messages.filter('WARNING')" title="Show only Warning [W]">Warning &nbsp;<span class="badge" id="Messages_Badge_WARNING">?</span></button>
 					<button class="btn btn-default" onclick="Messages.filter('ERROR')" title="Show only Error [E]">Error &nbsp;<span class="badge" id="Messages_Badge_ERROR">?</span></button>
 				</div>
-				<div class="btn-group phone-only inline"><button class="btn btn-default btn-active" onclick="Messages.filter('ALL')" title="Show All">A &nbsp;<span class="badge badge-active" id="Messages_Badge_ALL2">?</span></button></div>
-				<div class="btn-group phone-only inline"><button class="btn btn-default" onclick="Messages.filter('DETAIL')" title="Show only Detail">D &nbsp;<span class="badge" id="Messages_Badge_DETAIL2">?</span></button></div>
-				<div class="btn-group phone-only inline"><button class="btn btn-default" onclick="Messages.filter('INFO')" title="Show only Info">I &nbsp;<span class="badge" id="Messages_Badge_INFO2">?</span></button></div>
-				<div class="btn-group phone-only inline"><button class="btn btn-default" onclick="Messages.filter('WARNING')" title="Show only Warning">W &nbsp;<span class="badge" id="Messages_Badge_WARNING2">?</span></button></div>
-				<div class="btn-group phone-only inline"><button class="btn btn-default" onclick="Messages.filter('ERROR')" title="Show only Error">E &nbsp;<span class="badge" id="Messages_Badge_ERROR2">?</span></button></div>
 
-				<div class="btn-group phone-only inline" id="MessagesRecordsPerPageBlockPhone">
-				</div>
 
 			</div>
 
@@ -1217,15 +1184,6 @@
 						</ul>
 					</div>
 
-					<div class="btn-group phone-only inline"><button class="btn btn-default btn-active volume-range" id="StatDialog_Volume_MIN2" onclick="StatDialog.chooseRange('MIN')" title="Show last 60 seconds">60 s</button></div>
-					<div class="btn-group phone-only inline"><button class="btn btn-default volume-range" id="StatDialog_Volume_HOUR2" onclick="StatDialog.chooseRange('HOUR')" title="Show last 60 minutes">60 m</button></div>
-					<div class="btn-group phone-only inline"><button class="btn btn-default volume-range" id="StatDialog_Volume_DAY2" onclick="StatDialog.chooseRange('DAY')" title="Show last 24 hours">24 h</button></div>
-					<div class="btn-group phone-only inline"><button class="btn btn-default volume-range" id="StatDialog_Volume_MONTH2" onclick="StatDialog.chooseRange('MONTH')" title="Show one month">Jan 2000</button></div>
-					<!-- MONTH MENU IN MINI-THEME -->
-					<div class="btn-group phone-only inline" id="StatDialog_MonthBlockPhone">
-					<button class="btn btn-default volume-range dropdown-toggle" id="StatDialog_Volume_MONTH4" data-toggle="dropdown"><span class="caret"></span></button>
-					</div>
-
 					<div class="btn-group">
 						<button class="btn btn-default dropdown-toggle" id="StatDialog_Server" data-toggle="dropdown" title="News server"> <span id="StatDialog_ServerCap">All news servers</span>&nbsp;<span class="caret"></span></button>
 						<ul class="dropdown-menu menu-check" id="StatDialog_ServerMenu">
@@ -1598,10 +1556,7 @@
 								<button class="btn btn-default" onclick="DownloadsEditDialog.editActionClick('delete')" title="Delete selected files"><i class="material-icon">delete</i><span class="btn-caption"> Delete</span></button>
 								<button class="btn btn-default" onclick="DownloadsEditDialog.editActionClick('split')" title="Split selected files into new download"><i class="material-icon">arrow_split</i><span class="btn-caption"> Split</span></button>
 							</div>
-							<div class="btn-group phone-only inline"><button class="btn btn-default" onclick="DownloadsEditDialog.editActionClick('pause')" title="Pause selected files"><i class="material-icon">pause</i><span class="btn-caption"> Pause</span></button></div>
-							<div class="btn-group phone-only inline"><button class="btn btn-default" onclick="DownloadsEditDialog.editActionClick('resume')" title="Resume selected files"><i class="material-icon">play_arrow</i><span class="btn-caption"> Resume</span></button></div>
-							<div class="btn-group phone-only inline"><button class="btn btn-default" onclick="DownloadsEditDialog.editActionClick('delete')" title="Delete selected files"><i class="material-icon">delete</i><span class="btn-caption"> Delete</span></button></div>
-							<div class="btn-group phone-only inline"><button class="btn btn-default" onclick="DownloadsEditDialog.editActionClick('split')" title="Split selected files into new download"><i class="material-icon">arrow_split</i><span class="btn-caption"> Split</span></button></div>
+
 
 							<!-- MOVE BUTTONS -->
 							<div class="btn-group phone-hide">
@@ -1610,10 +1565,7 @@
 								<button class="btn btn-default" onclick="DownloadsEditDialog.editActionClick('down')" title="Move selected files down"><i class="material-icon">south</i></button>
 								<button class="btn btn-default" onclick="DownloadsEditDialog.editActionClick('bottom')" title="Move selected files to the bottom"><i class="material-icon">vertical_align_bottom</i></button>
 							</div>
-							<div class="btn-group phone-only inline"><button class="btn btn-default" onclick="DownloadsEditDialog.editActionClick('top')" title="Move selected files to the top"><i class="material-icon">vertical_align_top</i></button></div>
-							<div class="btn-group phone-only inline"><button class="btn btn-default" onclick="DownloadsEditDialog.editActionClick('up')" title="Move selected files up"><i class="material-icon">north</i></button></div>
-							<div class="btn-group phone-only inline"><button class="btn btn-default" onclick="DownloadsEditDialog.editActionClick('down')" title="Move selected files down"><i class="material-icon">south</i></button></div>
-							<div class="btn-group phone-only inline"><button class="btn btn-default" onclick="DownloadsEditDialog.editActionClick('bottom')" title="Move selected files to the bottom"><i class="material-icon">vertical_align_bottom</i></button></div>
+
 						</div>
 						<div style="margin-left:auto; margin-bottom:10px;"><input id="DownloadsEdit_FileTable_filter" class="search-query" placeholder="Search" type="search"></div>
 					</div>
@@ -2177,18 +2129,14 @@
 								<button class="btn btn-default" onclick="FeedDialog.filter('FETCHED')" title="Show only Fetched">Fetched &nbsp;<span class="badge" id="FeedDialog_Badge_FETCHED">?</span></button>
 								<button class="btn btn-default" onclick="FeedDialog.filter('BACKLOG')" title="Show only Backlog">Backlog &nbsp;<span class="badge" id="FeedDialog_Badge_BACKLOG">?</span></button>
 							</div>
-							<div class="btn-group phone-only inline"><button class="btn btn-default btn-active" onclick="FeedDialog.filter('ALL')" title="Show All">All <span class="badge badge-active" id="FeedDialog_Badge_ALL2">?</span></button></div>
-							<div class="btn-group phone-only inline"><button class="btn btn-default" onclick="FeedDialog.filter('NEW')" title="Show only New">New <span class="badge" id="FeedDialog_Badge_NEW2">?</span></button></div>
-							<div class="btn-group phone-only inline"><button class="btn btn-default" onclick="FeedDialog.filter('FETCHED')" title="Show only Fetched">Fetched <span class="badge" id="FeedDialog_Badge_FETCHED2">?</span></button></div>
-							<div class="btn-group phone-only inline"><button class="btn btn-default" onclick="FeedDialog.filter('BACKLOG')" title="Show only Backlog">Backlog <span class="badge" id="FeedDialog_Badge_BACKLOG2">?</span></button></div>
+
 
 							<!-- TITLE/FILENAME BUTTONS -->
 							<div class="btn-group phone-hide">
 								<button class="btn btn-default btn-active FeedDialog-names" id="FeedDialog_Titles" onclick="FeedDialog.setFilenameMode(false)" title="Show Titles">Titles</button>
 								<button class="btn btn-default FeedDialog-names" id="FeedDialog_Filenames" onclick="FeedDialog.setFilenameMode(true)" title="Show Filenames">Filenames</button>
 							</div>
-							<div class="btn-group phone-only inline"><button class="btn btn-default btn-active FeedDialog-names" id="FeedDialog_Titles2" onclick="FeedDialog.setFilenameMode(false)" title="Show Titles">Titles</button></div>
-							<div class="btn-group phone-only inline"><button class="btn btn-default FeedDialog-names" id="FeedDialog_Filenames2" onclick="FeedDialog.setFilenameMode(true)" title="Show Filenames">Filenames</button></div>
+
 
 						</div>
 						<div style="margin-left:auto; margin-bottom:10px;"><input id="FeedDialog_ItemTable_filter" class="search-query" placeholder="Search" type="search"></div>
@@ -2244,18 +2192,14 @@
 							<button class="btn btn-default" onclick="FeedFilterDialog.filter('REJECTED')" title="Show only Rejected">Rejected &nbsp;<span class="badge" id="FeedFilterDialog_Badge_REJECTED">?</span></button>
 							<button class="btn btn-default" onclick="FeedFilterDialog.filter('IGNORED')" title="Show only Ignored">Ignored &nbsp;<span class="badge" id="FeedFilterDialog_Badge_IGNORED">?</span></button>
 						</div>
-						<div class="btn-group phone-only inline FeedFilterDialog-filter"><button class="btn btn-default btn-active" onclick="FeedFilterDialog.filter('ALL')" title="Show All">All <span class="badge badge-active" id="FeedFilterDialog_Badge_ALL2">?</span></button></div>
-						<div class="btn-group phone-only inline FeedFilterDialog-filter"><button class="btn btn-default" onclick="FeedFilterDialog.filter('ACCEPTED')" title="Show only Accepted">Accepted <span class="badge" id="FeedFilterDialog_Badge_ACCEPTED2">?</span></button></div>
-						<div class="btn-group phone-only inline FeedFilterDialog-filter"><button class="btn btn-default" onclick="FeedFilterDialog.filter('REJECTED')" title="Show only Rejected">Rejected <span class="badge" id="FeedFilterDialog_Badge_REJECTED2">?</span></button></div>
-						<div class="btn-group phone-only inline FeedFilterDialog-filter"><button class="btn btn-default" onclick="FeedFilterDialog.filter('IGNORED')" title="Show only Ignored">Rejected <span class="badge" id="FeedFilterDialog_Badge_IGNORED2">?</span></button></div>
+
 
 						<!-- TITLE/FILENAME BUTTONS -->
 						<div class="btn-group phone-hide FeedFilterDialog-filter">
 							<button class="btn btn-default btn-active FeedFilterDialog-names" id="FeedFilterDialog_Titles" onclick="FeedFilterDialog.setFilenameMode(false)" title="Show Titles">Titles</button>
 							<button class="btn btn-default FeedFilterDialog-names" id="FeedFilterDialog_Filenames" onclick="FeedFilterDialog.setFilenameMode(true)" title="Show Filenames">Filenames</button>
 						</div>
-						<div class="btn-group phone-only inline FeedFilterDialog-filter"><button class="btn btn-default btn-active FeedFilterDialog-names" id="FeedFilterDialog_Titles2" onclick="FeedFilterDialog.setFilenameMode(false)" title="Show Titles">Titles</button></div>
-						<div class="btn-group phone-only inline FeedFilterDialog-filter"><button class="btn btn-default FeedFilterDialog-names" id="FeedFilterDialog_Filenames2" onclick="FeedFilterDialog.setFilenameMode(true)" title="Show Filenames">Filenames</button></div>
+
 
 					</div>
 				</div>
