@@ -3182,3 +3182,619 @@ td:hover span.none-category {
     }
 }
 /* END: MEDIA SMALL SCREENS */
+
+/* ==========================================================================
+   Theme: Light & Dark (Pico data-theme)
+   ========================================================================== */
+
+.progress {
+	margin-bottom: 0px;
+	background: #f0f0f0;
+}
+
+.progress-none.progress-striped .bar {
+	background-color: #c0c0c0;
+	background-image: linear-gradient(-45deg, rgba(255, 255, 255, 0.15) 25%, transparent 25%, transparent 50%, rgba(255, 255, 255, 0.15) 50%, rgba(255, 255, 255, 0.15) 75%, transparent 75%, transparent);
+}
+
+div.check {
+	width: 12px;
+	height: 12px;
+	margin-top: 2px;
+	margin-bottom: 3px;
+	border-radius: 2px;
+}
+div.check:hover {
+	border: 1px solid #0088cc;
+}
+
+.dropdown-menu li:not(:hover) .empty-item {
+	color: #bbb;
+}
+
+html[data-theme="light"] {
+	--bergamot-color-success: #468847;
+	--bergamot-color-danger: #b94a48;
+	--bergamot-color-warning: #f89406;
+	--bergamot-color-info: #3a87ad;
+	--bergamot-color-link: #0088cc;
+	--bergamot-color-drag-finish: #E6FAE4;
+	scrollbar-color: #bbb #f5f5f5;
+}
+
+html[data-theme="light"] .system-health-badge--info,
+html[data-theme="light"] .txt-success {
+	color: #468847;
+}
+
+html[data-theme="light"] .system-health-badge--important,
+html[data-theme="light"] .txt-error,
+html[data-theme="light"] .txt-important {
+	color: #b94a48;
+}
+
+html[data-theme="light"] .system-health-badge--warning,
+html[data-theme="light"] .txt-warning {
+	color: #f89406;
+}
+
+html[data-theme="light"] .txt-info {
+	color: #3a87ad;
+}
+
+html[data-theme="light"] #PlayCaret {
+	border-top-color: #ffffff;
+	border-bottom-color: #ffffff;
+}
+
+html[data-theme="light"] #InfoBlock div:hover {
+	color: #fff;
+}
+
+html[data-theme="light"] .menu-header {
+	color: #999999;
+	text-shadow: 0 1px 0 rgba(255, 255, 255, 0.5);
+}
+
+html[data-theme="light"] .search-caret-button .caret {
+	border-top-color: #ffffff;
+	border-bottom-color: #ffffff;
+}
+
+html[data-theme="light"] .focused .search-caret-button .caret {
+	border-top-color: #000;
+	border-bottom-color: #000;
+}
+
+html[data-theme="light"] .badge-active {
+	background-color: #FFFFFF;
+	color: #000000;
+}
+
+html[data-theme="light"] table {
+	border-left: 1px solid #dddddd;
+}
+
+html[data-theme="light"] table tbody tr:nth-child(odd) {
+	background-color: #f9f9f9;
+}
+
+html[data-theme="light"] .table tbody tr:hover {
+	background-color: #f5f5f5;
+}
+
+html[data-theme="light"] table > thead > tr > th.table-selector {
+	background: repeating-linear-gradient(-45deg, #FFFFD8, #FFFFD8 6px, #E7E8D1 6px, #E7E8D1 12px);
+	text-shadow: 0 -1px 0 rgba(255, 255, 255, 0.75), 0 1px 0 rgba(255, 255, 255, 0.75), -1px 0 0 rgba(255, 255, 255, 0.75);
+}
+
+html[data-theme="light"] div.check {
+	border: 1px solid #DDDDDD;
+}
+
+html[data-theme="light"] tr.checked,
+html[data-theme="light"] tr.checked td,
+html[data-theme="light"] tr.checked:nth-child(odd) .progress {
+	background-color: #FFFFE8;
+}
+
+html[data-theme="light"] table tbody tr.checked:nth-child(odd) td,
+html[data-theme="light"] .checked .progress {
+	background-color: #FFFFD8;
+}
+
+html[data-theme="light"] .table tbody tr.checked:hover,
+html[data-theme="light"] .table tbody tr.checked:hover td {
+	background-color: #FFFFC0;
+}
+
+html[data-theme="light"] .table.check-simple tbody tr.checked:hover,
+html[data-theme="light"] .table.check-simple tbody tr.checked:hover td {
+	background-color: #f5f5f5;
+}
+
+html[data-theme="light"] .checked .progress {
+	background-color: #FFFFE1;
+}
+
+html[data-theme="light"] .table a {
+	color: #000000;
+}
+
+html[data-theme="light"] .table a:hover {
+	color: #000000;
+}
+
+html[data-theme="light"] td.dropdown-cell > div:not(.dropdown-disabled):hover::after {
+	border-top: 4px solid #888;
+	border-right: 4px solid transparent;
+	border-left: 4px solid transparent;
+	content: "";
+	position: absolute;
+	margin-bottom: 8px;
+	margin-left: 2px;
+}
+
+html[data-theme="light"] .dropdown-warning {
+	text-align: center;
+	background: repeating-linear-gradient(-45deg, #FFFFD8, #FFFFD8 6px, #E7E8D1 6px, #E7E8D1 12px);
+	padding: 2px;
+	font-size: 12px;
+	line-height: 14px;
+	color: #966C38;
+	text-shadow: 0 -1px 0 rgba(255, 255, 255, 0.75), 0 1px 0 rgba(255, 255, 255, 0.75), -1px 0 0 rgba(255, 255, 255, 0.75);
+	border-top: solid 1px #ccc;
+	border-bottom: solid 1px #ccc;
+	margin-bottom: 1px;
+}
+
+html[data-theme="light"] .uneditable-mulitline-input {
+	background-color: #ffffff;
+	border-color: #eee;
+	border: 1px solid #eee;
+}
+
+html[data-theme="light"] .dragover,
+html[data-theme="light"] .dragover table tbody tr:nth-child(odd) td,
+html[data-theme="light"] .dragover table tbody tr:nth-child(odd) th {
+	background-color: #dff0d8;
+}
+
+html[data-theme="light"] .confirm-help-block {
+	color: #555555;
+}
+
+html[data-theme="light"] #StatDialog_Custom a,
+html[data-theme="light"] #StatDialog_Custom a:hover,
+html[data-theme="light"] #AddDialog_Files a,
+html[data-theme="light"] #AddDialog_Files a:hover {
+	color: #000000;
+	cursor: pointer;
+}
+
+html[data-theme="light"] #ConfigNav.nav-list a {
+	color: #000;
+}
+
+html[data-theme="light"] #ConfigNav.nav-list > .active > a,
+html[data-theme="light"] #ConfigNav.nav-list > .active > a:hover {
+	color: #ffffff;
+	background-color: #505050;
+}
+
+html[data-theme="light"] #ConfigNav {
+	border: 1px solid #eeeeee;
+	background-color: #F7F7F9;
+}
+
+html[data-theme="light"] #ConfigContent .config-header {
+	border-bottom: 1px solid #eeeeee;
+}
+
+html[data-theme="light"] .config-header .btn {
+	background-color: #ffffff;
+}
+
+html[data-theme="light"] span.help-option-title {
+	color: #8D1212;
+}
+
+html[data-theme="light"] .failure-message {
+	color: #8D1212;
+}
+
+html[data-theme="light"] .config-settitle {
+	color: #ffffff;
+	border-bottom: 1px solid #eeeeee;
+}
+
+html[data-theme="light"] #DownloadsEdit_ParamTab div.control-group.wants-divider,
+html[data-theme="light"] #HistoryEdit_ParamTab div.control-group.wants-divider,
+html[data-theme="light"] #ConfigContent div.control-group,
+html[data-theme="light"] #ConfigContent.search div.control-group.multiset {
+	border-bottom: 1px solid #eeeeee;
+}
+
+html[data-theme="light"] .table .update-release-notes {
+	color: #005580;
+}
+
+html[data-theme="light"] .log-dialog .modal-body pre {
+	background-color: #222222;
+	color: #cccccc;
+}
+
+html[data-theme="light"] #FeedFilterDialog_FilterBlock {
+	border: 1px solid rgba(0, 0, 0, 0.15);
+}
+
+html[data-theme="light"] #FeedFilterDialog_FilterHeader {
+	border-bottom: 1px solid #ccc;
+	border-bottom: 1px solid rgba(0, 0, 0, 0.15);
+}
+
+html[data-theme="light"] #FeedFilterDialog_FilterLines {
+	background-color: #ffffff;
+	border-right: 1px solid rgba(0, 0, 0, 0.15);
+}
+
+html[data-theme="light"] #TableDragBox {
+	border: 1px solid #ccc;
+	background-color: #f8f8f8;
+}
+
+html[data-theme="light"] #TableDragBox .badge {
+	color: #fff;
+	background-color: #D70015;
+}
+
+html[data-theme="light"] tr.drag-source > td {
+	background-color: #fff !important;
+	color: #fff !important;
+}
+
+html[data-theme="dark"] {
+	--bergamot-color-success: #479f76;
+	--bergamot-color-danger: #e35d6a;
+	--bergamot-color-warning: #ffc107;
+	--bergamot-color-info: #3a87ad;
+	--bergamot-color-link: #6ea8fe;
+	--bergamot-color-drag-finish: #1a3a1a;
+	scrollbar-color: #a1a1a1 #626262;
+}
+
+html[data-theme="dark"] body {
+	background-color: #333;
+	color: #f5f5f5;
+}
+
+html[data-theme="dark"] ::-webkit-calendar-picker-indicator {
+	filter: invert(1);
+}
+
+html[data-theme="dark"] textarea {
+	color: inherit;
+	background-color: #212529;
+	background-origin: border-box;
+}
+
+html[data-theme="dark"] .back {
+	color: inherit;
+}
+
+html[data-theme="dark"] .modal .input-xlarge {
+	background-color: #212529;
+}
+
+html[data-theme="dark"] .system-health-badge--info,
+html[data-theme="dark"] .txt-success {
+	color: #479f76;
+}
+
+html[data-theme="dark"] .system-health-badge--important,
+html[data-theme="dark"] .txt-error,
+html[data-theme="dark"] .txt-important {
+	color: #e35d6a;
+}
+
+html[data-theme="dark"] .system-health-badge--warning,
+html[data-theme="dark"] .txt-warning {
+	color: #ffc107;
+}
+
+html[data-theme="dark"] .txt-info {
+	color: #3a87ad;
+}
+
+html[data-theme="dark"] #InfoBlock div:hover,
+html[data-theme="dark"] .close,
+html[data-theme="dark"] label,
+html[data-theme="dark"] .control-label,
+html[data-theme="dark"] .dropdown-menu li a,
+html[data-theme="dark"] #AddDialog_URLProp,
+html[data-theme="dark"] .help-block,
+html[data-theme="dark"] .table a:hover,
+html[data-theme="dark"] #StatDialog_Back,
+html[data-theme="dark"] .table a {
+	color: inherit;
+}
+
+html[data-theme="dark"] .close:hover,
+html[data-theme="dark"] a:hover {
+	color: #fff;
+}
+
+html[data-theme="dark"] .table td:hover {
+	background-color: #212529;
+}
+
+html[data-theme="dark"] .table tbody tr:hover td,
+html[data-theme="dark"] .table-hover tbody tr:hover th {
+	background-color: #333;
+}
+
+html[data-theme="dark"] details,
+html[data-theme="dark"] summary,
+html[data-theme="dark"] .table th,
+html[data-theme="dark"] .table td {
+	border: 0.5px solid #626262;
+}
+
+html[data-theme="dark"] table tbody tr:nth-child(odd) td,
+html[data-theme="dark"] table tbody tr:nth-child(odd) th {
+	background-color: #212529;
+}
+
+html[data-theme="dark"] .progress-block {
+	color: #212529;
+}
+
+html[data-theme="dark"] .caret,
+html[data-theme="dark"] .dropup .caret {
+	border-top: 4px solid #f5f5f5;
+}
+
+html[data-theme="dark"] .input-prepend .add-on,
+html[data-theme="dark"] .input-append .add-on,
+html[data-theme="dark"] .add-on {
+	background-color: #626262;
+	color: inherit;
+	text-shadow: none;
+	border: 1px solid #626262;
+}
+
+html[data-theme="dark"] input {
+	background-color: #212529;
+	color: inherit;
+	border: 1px solid #626262;
+}
+
+html[data-theme="dark"] table.table-cancheck tr.checked div.img-check {
+	background-position: -467px -19px;
+}
+
+html[data-theme="dark"] table.table-cancheck tr.checkremove div.img-check {
+	background-position: -466px -114px;
+}
+
+html[data-theme="dark"] .modal,
+html[data-theme="dark"] .modal-body,
+html[data-theme="dark"] .modal-footer {
+	background-color: #212529;
+	color: inherit;
+}
+
+html[data-theme="dark"] .modal-header {
+	border-bottom: 1px solid #626262;
+}
+
+html[data-theme="dark"] .modal-footer {
+	border-top: 1px solid #626262;
+}
+
+html[data-theme="dark"] .nav > li > a:hover {
+	background-color: #005580;
+}
+
+html[data-theme="dark"] .nav-list .divider {
+	background-color: #626262;
+	border: 1px solid #626262;
+}
+
+html[data-theme="dark"] .btn-group.open .btn.dropdown-toggle:not(.btn-active),
+html[data-theme="dark"] .config-header .btn,
+html[data-theme="dark"] .dropdown-menu,
+html[data-theme="dark"] select {
+	color: inherit;
+	background-color: #212529;
+}
+
+html[data-theme="dark"] .dropup .caret,
+html[data-theme="dark"] .navbar-fixed-bottom .dropdown .caret {
+	border-top: none;
+	border-bottom: 4px solid #f5f5f5;
+}
+
+html[data-theme="dark"] .menu-header {
+	color: #f5f5f5;
+	text-shadow: 0 1px 0 rgba(0, 0, 0, 0.5);
+}
+
+html[data-theme="dark"] .search-caret-button .caret {
+	border-top-color: #f5f5f5;
+	border-bottom-color: #f5f5f5;
+}
+
+html[data-theme="dark"] .focused .search-caret-button .caret {
+	border-top-color: #f5f5f5;
+	border-bottom-color: #f5f5f5;
+}
+
+html[data-theme="dark"] .badge-active {
+	background-color: #3a87ad;
+	color: #fff;
+}
+
+html[data-theme="dark"] table {
+	border: 1px solid #626262;
+}
+
+html[data-theme="dark"] .table tbody tr:hover td,
+html[data-theme="dark"] .table tbody tr:hover th,
+html[data-theme="dark"] .table tbody tr:hover {
+	background-color: #212529;
+}
+
+html[data-theme="dark"] hr {
+	border: 1px solid #626262;
+}
+
+html[data-theme="dark"] table > thead > tr > th.table-selector {
+	background: repeating-linear-gradient(-45deg, #1a1a1a, #333 6px, #666 6px, #666 12px);
+}
+
+html[data-theme="dark"] div.check {
+	border: 1px solid #626262;
+}
+
+html[data-theme="dark"] tr.checked,
+html[data-theme="dark"] tr.checked td,
+html[data-theme="dark"] tr.checked:nth-child(odd) {
+	background-color: #005580;
+}
+
+html[data-theme="dark"] table tbody tr.checked:nth-child(odd) td,
+html[data-theme="dark"] .checked .progress {
+	background-color: #005580;
+}
+
+html[data-theme="dark"] .table tbody tr.checked:hover,
+html[data-theme="dark"] .table tbody tr.checked:hover td {
+	background-color: #005580;
+}
+
+html[data-theme="dark"] .table.check-simple tbody tr.checked:hover,
+html[data-theme="dark"] .table.check-simple tbody tr.checked:hover td {
+	background-color: #005580;
+}
+
+html[data-theme="dark"] .checked .progress {
+	background-color: #f5f5f5;
+}
+
+html[data-theme="dark"] td.dropdown-cell > div:not(.dropdown-disabled):hover::after {
+	border-top: 4px solid #f5f5f5;
+	border-right: 4px solid transparent;
+	border-left: 4px solid transparent;
+	content: "";
+	position: absolute;
+	margin-bottom: 8px;
+	margin-left: 2px;
+}
+
+html[data-theme="dark"] .dropdown-warning {
+	text-align: center;
+	background: repeating-linear-gradient(-45deg, #1a1a1a, #333 6px, #666 6px, #666 12px);
+	padding: 2px;
+	font-size: 12px;
+	line-height: 14px;
+	border-top: solid 1px #626262;
+	border-bottom: solid 1px #626262;
+	margin-bottom: 1px;
+}
+
+html[data-theme="dark"] .uneditable-mulitline-input {
+	background-color: #f5f5f5;
+	border-color: #eee;
+	border: 1px solid #626262;
+}
+
+html[data-theme="dark"] .dragover,
+html[data-theme="dark"] .dragover table tbody tr:nth-child(odd) td,
+html[data-theme="dark"] .dragover table tbody tr:nth-child(odd) th {
+	background-color: #414141;
+}
+
+html[data-theme="dark"] .confirm-help-block {
+	color: #f5f5f5;
+}
+
+html[data-theme="dark"] #StatDialog_Custom a,
+html[data-theme="dark"] #StatDialog_Custom a:hover,
+html[data-theme="dark"] #AddDialog_Files a,
+html[data-theme="dark"] #AddDialog_Files a:hover {
+	cursor: pointer;
+}
+
+html[data-theme="dark"] #ConfigNav.nav-list a {
+	color: #f5f5f5;
+}
+
+html[data-theme="dark"] #ConfigNav.nav-list > .active > a,
+html[data-theme="dark"] #ConfigNav.nav-list > .active > a:hover {
+	color: #f5f5f5;
+	background-color: #005580;
+}
+
+html[data-theme="dark"] #ConfigNav {
+	border: 1px solid #626262;
+	background-color: #212529;
+}
+
+html[data-theme="dark"] #ConfigContent .config-header {
+	border-bottom: 1px solid #626262;
+}
+
+html[data-theme="dark"] .failure-message,
+html[data-theme="dark"] span.help-option-title {
+	color: #ffda6a;
+}
+
+html[data-theme="dark"] .config-settitle {
+	color: #f5f5f5;
+	border-bottom: 1px solid #626262;
+}
+
+html[data-theme="dark"] #DownloadsEdit_ParamTab div.control-group.wants-divider,
+html[data-theme="dark"] #HistoryEdit_ParamTab div.control-group.wants-divider,
+html[data-theme="dark"] #ConfigContent div.control-group,
+html[data-theme="dark"] #ConfigContent.search div.control-group.multiset {
+	border-bottom: 1px solid #626262;
+}
+
+html[data-theme="dark"] .table .update-release-notes {
+	color: #0074cc;
+}
+
+html[data-theme="dark"] .log-dialog .modal-body pre {
+	background-color: #222222;
+	border: 1px solid #626262;
+	color: #cccccc;
+}
+
+html[data-theme="dark"] #FeedFilterDialog_FilterBlock {
+	border: 1px solid #626262;
+}
+
+html[data-theme="dark"] #FeedFilterDialog_FilterHeader {
+	border-bottom: 1px solid rgba(0, 0, 0, 0.15);
+}
+
+html[data-theme="dark"] #FeedFilterDialog_FilterLines {
+	border-right: 1px solid #626262;
+}
+
+html[data-theme="dark"] #TableDragBox {
+	border: 1px solid #626262;
+	background-color: #f8f8f8;
+}
+
+html[data-theme="dark"] #TableDragBox .badge {
+	color: #f5f5f5;
+	background-color: #D70015;
+}
+
+html[data-theme="dark"] tr.drag-source > td {
+	background-color: #f5f5f5 !important;
+	color: #f5f5f5 !important;
+}

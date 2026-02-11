@@ -158,10 +158,7 @@ var UISettings = (new function($)
 $(document).ready(function()
 {
 	Frontend.init();
-	var lightThemeStyleSheet = 'light-theme.css';
-	var darkThemeStyleSheet = 'dark-theme.css';
 	var themeToggleBtn = $('#ThemeToggle');
-	var themeStyleSheet = $('#ThemeStyleSheet');
 	var darkThemeToggleBtn = $('<i class="material-icon" title="Switch to dark theme">dark_mode</i>');
 	var lightThemeToggleBtn = $('<i class="material-icon" title="Switch to light theme">light_mode</i>');
 	var savedTheme = getSavedTheme();
@@ -202,13 +199,13 @@ $(document).ready(function()
 
 	function turnOnLightTheme()
 	{
-		themeStyleSheet.attr('href', lightThemeStyleSheet);
+		document.documentElement.dataset.theme = 'light';
 		themeToggleBtn.children().replaceWith(darkThemeToggleBtn);
 	}
 
 	function turnOnDarkTheme()
 	{
-		themeStyleSheet.attr('href', darkThemeStyleSheet);
+		document.documentElement.dataset.theme = 'dark';
 		themeToggleBtn.children().replaceWith(lightThemeToggleBtn);
 	}
 
@@ -224,7 +221,7 @@ $(document).ready(function()
 
 	function isDarkTheme()
 	{
-		return themeStyleSheet.attr('href') === lightThemeStyleSheet;
+		return document.documentElement.dataset.theme === 'dark';
 	}
 
 	function subscribe()
@@ -232,12 +229,12 @@ $(document).ready(function()
 		themeToggleBtn.on('click', function() {
 			if (isDarkTheme()) 
 			{
-				turnOnDarkTheme();
-				saveTheme('dark')
-			} else 
-			{
 				turnOnLightTheme();
 				saveTheme('light');
+			} else 
+			{
+				turnOnDarkTheme();
+				saveTheme('dark');
 			}
 		});
 	}

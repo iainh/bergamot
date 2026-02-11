@@ -20,9 +20,16 @@
  *
  -->
 
-<html lang="en">
+<html lang="en" data-theme="light">
 <head>
 	<meta charset="utf-8">
+	<script>
+		(function() {
+			var saved = localStorage.getItem('Theme');
+			var systemDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+			document.documentElement.dataset.theme = saved ? saved : (systemDark ? 'dark' : 'light');
+		})();
+	</script>
 	<title>Bergamot</title>
 	<meta name="description" content="Bergamot web-interface">
 
@@ -61,7 +68,7 @@
 	<link rel="stylesheet" href="lib/pico.min.css" />
 	<link rel="stylesheet" href="bootstrap-compat.css" />
 	<link rel="stylesheet" href="style.css" />
-	<link id="ThemeStyleSheet" rel="stylesheet" href="light-theme.css">
+
 
 	<!-- fav and touch icons -->
 
