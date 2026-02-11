@@ -2877,10 +2877,18 @@ table > thead > tr > th.table-selector {
 	border-radius: 3px;
 	padding: 8px 15px;
 	margin-bottom: 15px;
+	display: flex;
+	flex-direction: column;
+	align-items: stretch;
+}
+
+#ConfigNav > li {
+	display: block;
 }
 
 #ConfigNav.nav-list a {
 	text-decoration: none;
+	text-shadow: none;
 	padding-top: 5px;
 	padding-bottom: 5px;
 	font-size: 12px;
