@@ -169,6 +169,12 @@ th {
     gap: 10px;
 }
 
+.dist-speedtest__select--width {
+    width: 80px;
+    margin-bottom: 0;
+    --pico-form-element-spacing-vertical: 0.25rem;
+}
+
 .help-text-error {
     color: var(--bergamot-color-danger);
 }
@@ -898,6 +904,10 @@ div.btn-group + div.toolbox-length {
 div.toolbox-length select {
     width: 75px;
     height: 28px;
+    margin-bottom: 0;
+    --pico-form-element-spacing-vertical: 0.125rem;
+    --pico-form-element-spacing-horizontal: 0.5rem;
+    padding-right: calc(var(--pico-form-element-spacing-horizontal) + 1.5rem);
 }
 
 .toolbox-info {
@@ -2769,6 +2779,8 @@ body.phone,
 
 .phone div.toolbox-length select {
     height: 36px;
+    --pico-form-element-spacing-vertical: 0.25rem;
+    --pico-form-element-spacing-horizontal: 0.5rem;
 }
 
 .phone .navbar .btn-toolbar {

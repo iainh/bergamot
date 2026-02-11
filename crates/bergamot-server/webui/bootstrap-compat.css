@@ -768,17 +768,22 @@ table.no-border td {
 }
 
 .input-append input,
-.input-prepend input {
+.input-prepend input,
+.input-append select,
+.input-prepend select {
 	border-radius: 0;
+	margin-bottom: 0;
 }
 
 .input-prepend input:first-child,
+.input-prepend select:first-child,
 .input-prepend .add-on:first-child {
 	border-top-left-radius: var(--pico-border-radius, 4px);
 	border-bottom-left-radius: var(--pico-border-radius, 4px);
 }
 
-.input-append input:first-child {
+.input-append input:first-child,
+.input-append select:first-child {
 	border-top-left-radius: var(--pico-border-radius, 4px);
 	border-bottom-left-radius: var(--pico-border-radius, 4px);
 }

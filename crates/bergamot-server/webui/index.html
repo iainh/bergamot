@@ -280,7 +280,7 @@
 
 			<div class="form-inline toolbox-top" id="DownloadsTableTopBlock">
 				<div class="toolbox-length" id="DownloadsRecordsPerPageBlock">
-					<select size="1" id="DownloadsRecordsPerPage" onchange="Downloads.recordsPerPageChange()">
+					<select id="DownloadsRecordsPerPage" onchange="Downloads.recordsPerPageChange()">
 						<option value="5">5</option>
 						<option selected="selected" value="10">10</option>
 						<option value="15">15</option>
@@ -365,7 +365,7 @@
 
 			<div class="form-inline toolbox-top" id="HistoryTableTopBlock">
 				<div class="toolbox-length" id="HistoryRecordsPerPageBlock">
-					<select size="1" id="HistoryRecordsPerPage" onchange="History.recordsPerPageChange()">
+					<select id="HistoryRecordsPerPage" onchange="History.recordsPerPageChange()">
 						<option value="5">5</option>
 						<option selected="selected" value="10">10</option>
 						<option value="15">15</option>
@@ -433,7 +433,7 @@
 
 			<div class="form-inline toolbox-top" id="MessagesTableTopBlock">
 				<div class="toolbox-length" id="MessagesRecordsPerPageBlock">
-					<select size="1" id="MessagesRecordsPerPage" onchange="Messages.recordsPerPageChange()">
+					<select id="MessagesRecordsPerPage" onchange="Messages.recordsPerPageChange()">
 						<option value="5">5</option>
 						<option selected="selected" value="10">10</option>
 						<option value="15">15</option>
@@ -1618,7 +1618,7 @@
 							<button class="btn btn-default" onclick="LogTab.export()" title="Save log into file"><i class="material-icon">save</i><span class="btn-caption"> Save To File</span></button>
 						</div>
 						<div id="DownloadsLogRecordsPerPageBlock" class="toolbox-length">
-							<select size="1" id="DownloadsLogRecordsPerPage" onchange="LogTab.recordsPerPageChange('Downloads')">
+							<select id="DownloadsLogRecordsPerPage" onchange="LogTab.recordsPerPageChange('Downloads')">
 								<option value="5">5</option>
 								<option selected="selected" value="10">10</option>
 								<option value="15">15</option>
@@ -1666,7 +1666,7 @@
 						<div class="control-group">
 							<label class="control-label" for="DownloadsEdit_DupeMode">Duplicate mode</label>
 							<div class="controls">
-								<select id="DownloadsEdit_DupeMode" class="input-small">
+								<select id="DownloadsEdit_DupeMode">
 									<option value="SCORE">Score</option>
 									<option value="ALL">All</option>
 									<option value="FORCE">Force</option>
@@ -1978,7 +1978,7 @@
 							<button class="btn btn-default" onclick="LogTab.export()" title="Save log into file"><i class="material-icon">save</i><span class="btn-caption"> Save To File</span></button>
 						</div>
 						<div id="HistoryLogRecordsPerPageBlock" class="toolbox-length">
-							<select size="1" id="HistoryLogRecordsPerPage" onchange="LogTab.recordsPerPageChange('History')">
+							<select id="HistoryLogRecordsPerPage" onchange="LogTab.recordsPerPageChange('History')">
 								<option value="5">5</option>
 								<option selected="selected" value="10">10</option>
 								<option value="15">15</option>
