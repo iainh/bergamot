@@ -298,9 +298,7 @@ td.dropdown-cell > div:not(.dropdown-disabled):hover::after {
 	background-color: #414141;
 }
 
-.alert-inverse {
-	color: #f5f5f5;
-}
+/* .alert-inverse — now handled via Pico variables in style.css */
 
 .confirm-help-block {
 	color: #f5f5f5;

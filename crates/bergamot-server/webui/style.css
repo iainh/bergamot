@@ -939,8 +939,67 @@ h2 {
     margin-right: 20px;
 }
 
+/* ==========================================================================
+   Alerts (Pico-native replacements for Bootstrap alerts)
+   ========================================================================== */
+
+.alert {
+    padding: var(--pico-form-element-spacing-vertical) var(--pico-form-element-spacing-horizontal);
+    margin-bottom: var(--pico-spacing);
+    border: 1px solid var(--pico-muted-border-color);
+    border-radius: var(--pico-border-radius);
+    color: var(--pico-color);
+    background-color: var(--pico-card-background-color);
+}
+
+.alert-block {
+    padding-top: calc(var(--pico-form-element-spacing-vertical) * 2);
+    padding-bottom: calc(var(--pico-form-element-spacing-vertical) * 2);
+}
+
+.alert-block > p,
+.alert-block > ul {
+    margin-bottom: 0;
+}
+
+.alert-block > p + p {
+    margin-top: 5px;
+}
+
 .alert-heading {
     margin-bottom: 10px;
+    font-weight: bold;
+}
+
+.alert-info {
+    --pico-color: #3a87ad;
+    background-color: #d9edf7;
+    border-color: #bce8f1;
+}
+
+.alert-success {
+    --pico-color: #468847;
+    background-color: #dff0d8;
+    border-color: #d6e9c6;
+}
+
+.alert-danger,
+.alert-error {
+    --pico-color: #b94a48;
+    background-color: #f2dede;
+    border-color: #eed3d7;
+}
+
+.alert-warning {
+    --pico-color: #c09853;
+    background-color: #fcf8e3;
+    border-color: #fbeed5;
+}
+
+.alert-inverse {
+    color: var(--pico-primary-inverse);
+    background-color: var(--pico-card-sectioning-background-color, #363636);
+    border-color: var(--pico-muted-border-color);
 }
 
 /* remove focus border */
@@ -1522,15 +1581,15 @@ ul.help > li {
 }
 
 .alert-error.alert-center {
-    border-color: #b94a48;
+    border-color: var(--pico-color, #b94a48);
 }
 
 .alert-success.alert-center {
-    border-color: #468847;
+    border-color: var(--pico-color, #468847);
 }
 
 .alert-info.alert-center {
-    border-color: #3a87ad;
+    border-color: var(--pico-color, #3a87ad);
 }
 /* END: PopupNotification alerts */
 
