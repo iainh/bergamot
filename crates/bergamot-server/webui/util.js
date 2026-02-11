@@ -357,11 +357,9 @@ var Util = (new function($)
 
 	this.setMenuMark = function(menu, data)
 	{
-		// remove marks from all items
-		$('li table tr td:first-child', menu).html('');
-		// set mark on selected item
+		$('li .menu-icon', menu).html('');
 		var mark = $('li[data="mark"]', menu).html();
-		$('li[data="' + data + '"] table tr td:first-child', menu).html(mark);
+		$('li[data="' + data + '"] .menu-icon', menu).html(mark);
 	}
 
 	this.show = function(jqSelector, visible, display)

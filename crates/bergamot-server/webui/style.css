@@ -468,19 +468,6 @@ body.navfixed.scrolled .navbar-fixed-top .navbar-inner {
     background: none;
 }
 
-/* for checkboxes in dropdown menu */
-.menu-refresh td:first-child,
-.menu-check td:first-child {
-    width: 18px;
-}
-
-/* for checkboxes in dropdown menu "Refresh" */
-.menu-refresh td:nth-child(2) {
-    width: 20px;
-    text-align: right;
-    padding-right: 5px;
-}
-
 /* Search box */
 .navbar-search {
     margin: 0px 10px;
@@ -604,9 +591,6 @@ ul.dropdown-menu > li > a {
     line-height: 20px;
 }
 
-ul.dropdown-menu > li > a.has-table {
-    line-height: 18px;
-}
 
 ul.dropdown-menu > li > a > i {
     margin-right: 5px;

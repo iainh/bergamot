@@ -323,7 +323,6 @@ var Frontend = (new function($)
 		$('#Navbar a[data-toggle="tab"]').on('shown', afterTabShow);
 		setupSearch();
 
-		$('li > a:has(table)').addClass('has-table');
 		$(document).on('keydown', keyDown);
 		$(window).scroll(windowScrolled);
 	}

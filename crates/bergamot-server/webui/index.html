@@ -103,16 +103,16 @@
 					<button id="PlayCaretButton" class="dropdown-toggle" data-toggle="dropdown"><span id="PlayCaret" class="caret"></span></button>
 					<ul class="dropdown-menu menu-check" id="PlayMenu">
 						<li class="menu-header">Pause activities</li>
-						<li><a href="#" onclick="Status.pauseClick('download')"><table><tr><td><i class="material-icon" id="CHPauseDownload">done</i></td><td>Pause Download</td></tr></table></a></li>
-						<li><a href="#" onclick="Status.pauseClick('post')"><table><tr><td><i class="material-icon" id="CHPausePostProcess">done</i></td><td>Pause Post-Processing</td></tr></table></a></li>
-						<li><a href="#" onclick="Status.pauseClick('scan')"><table><tr><td><i class="material-icon" id="CHPauseScan">done</i></td><td>Pause NZB Scan</td></tr></table></a></li>
+						<li><a href="#" onclick="Status.pauseClick('download')" class="menu-item-flex"><span class="menu-icon"><i class="material-icon" id="CHPauseDownload">done</i></span><span>Pause Download</span></a></li>
+						<li><a href="#" onclick="Status.pauseClick('post')" class="menu-item-flex"><span class="menu-icon"><i class="material-icon" id="CHPausePostProcess">done</i></span><span>Pause Post-Processing</span></a></li>
+						<li><a href="#" onclick="Status.pauseClick('scan')" class="menu-item-flex"><span class="menu-icon"><i class="material-icon" id="CHPauseScan">done</i></span><span>Pause NZB Scan</span></a></li>
 						<li class="divider"></li>
 						<li class="menu-header">Pause for</li>
-						<li><a href="#" onclick="Status.scheduledPauseClick(30*60)"><table><tr><td></td><td>30 Minutes</td></tr></table></a></li>
-						<li><a href="#" onclick="Status.scheduledPauseClick(3*60*60)"><table><tr><td></td><td>3 Hours</td></tr></table></a></li>
-						<li><a href="#" onclick="Status.scheduledPauseDialogClick()" id="ScheduledPauseButton" title="Temporary pause for... [Shift+T]"><table><tr><td></td><td>Custom...</td></tr></table></a></li>
+						<li><a href="#" onclick="Status.scheduledPauseClick(30*60)" class="menu-item-flex"><span class="menu-icon"></span><span>30 Minutes</span></a></li>
+						<li><a href="#" onclick="Status.scheduledPauseClick(3*60*60)" class="menu-item-flex"><span class="menu-icon"></span><span>3 Hours</span></a></li>
+						<li><a href="#" onclick="Status.scheduledPauseDialogClick()" id="ScheduledPauseButton" title="Temporary pause for... [Shift+T]" class="menu-item-flex"><span class="menu-icon"></span><span>Custom...</span></a></li>
 						<li class="divider"></li>
-						<li><a data-toggle="modal" href="#PauseHelp"><table><tr><td></td><td>Quick Help</td></tr></table></a></li>
+						<li><a data-toggle="modal" href="#PauseHelp" class="menu-item-flex"><span class="menu-icon"></span><span>Quick Help</span></a></li>
 					</ul>
 				</div>
 			</div>
@@ -130,15 +130,15 @@
 						<button class="btn btn-inverse dropdown-toggle" data-toggle="dropdown"><span class="caret"></span></button>
 						<ul class="dropdown-menu menu-refresh" id="RefreshMenu">
 							<li class="menu-header">Automatic refresh</li>
-							<li data="0.1"><a href="#"><table><tr><td></td><td>0.1</td><td>Second</td></tr></table></a></li>
-							<li data="0.2"><a href="#"><table><tr><td></td><td>0.2</td><td>Second</td></tr></table></a></li>
-							<li data="0.5"><a href="#"><table><tr><td></td><td>0.5</td><td>Second</td></tr></table></a></li>
-							<li data="1"><a href="#"><table><tr><td></td><td>1</td><td>Second</td></tr></table></a></li>
-							<li data="5"><a href="#"><table><tr><td></td><td>5</td><td>Seconds</td></tr></table></a></li>
-							<li data="15"><a href="#"><table><tr><td></td><td>15</td><td>Seconds</td></tr></table></a></li>
-							<li data="30"><a href="#"><table><tr><td></td><td>30</td><td>Seconds</td></tr></table></a></li>
-							<li data="60"><a href="#"><table><tr><td></td><td>1</td><td>Minute</td></tr></table></a></li>
-							<li data="0"><a href="#"><table><tr><td></td><td style="width:0"></td><td>Off</td></tr></table></a></li>
+							<li data="0.1"><a href="#" class="menu-item-flex"><span class="menu-icon"></span><span class="menu-value">0.1</span><span>Second</span></a></li>
+							<li data="0.2"><a href="#" class="menu-item-flex"><span class="menu-icon"></span><span class="menu-value">0.2</span><span>Second</span></a></li>
+							<li data="0.5"><a href="#" class="menu-item-flex"><span class="menu-icon"></span><span class="menu-value">0.5</span><span>Second</span></a></li>
+							<li data="1"><a href="#" class="menu-item-flex"><span class="menu-icon"></span><span class="menu-value">1</span><span>Second</span></a></li>
+							<li data="5"><a href="#" class="menu-item-flex"><span class="menu-icon"></span><span class="menu-value">5</span><span>Seconds</span></a></li>
+							<li data="15"><a href="#" class="menu-item-flex"><span class="menu-icon"></span><span class="menu-value">15</span><span>Seconds</span></a></li>
+							<li data="30"><a href="#" class="menu-item-flex"><span class="menu-icon"></span><span class="menu-value">30</span><span>Seconds</span></a></li>
+							<li data="60"><a href="#" class="menu-item-flex"><span class="menu-icon"></span><span class="menu-value">1</span><span>Minute</span></a></li>
+							<li data="0"><a href="#" class="menu-item-flex"><span class="menu-icon"></span><span class="menu-value"></span><span>Off</span></a></li>
 							<li data="mark" style="display: none;"><i class="material-icon">done</i></li>
 						</ul>
 						<button class="btn btn-inverse" style="margin-left: 6px;" id="ThemeToggle">

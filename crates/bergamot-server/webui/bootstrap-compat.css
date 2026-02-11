@@ -549,6 +549,25 @@ input, select, textarea, button {
 	width: 18px;
 }
 
+.menu-item-flex {
+	display: flex;
+	align-items: center;
+	gap: 2px;
+}
+
+.menu-item-flex .menu-icon {
+	width: 18px;
+	flex-shrink: 0;
+	text-align: center;
+}
+
+.menu-item-flex .menu-value {
+	width: 20px;
+	text-align: right;
+	padding-right: 5px;
+	flex-shrink: 0;
+}
+
 .menu-with-button a {
 	position: relative;
 }
