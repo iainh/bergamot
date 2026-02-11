@@ -1024,7 +1024,9 @@ form {
     padding: 6px;
 }
 
-.modal-max {
+.modal-max,
+.modal-max.fade,
+.modal-max.fade.in {
     inset: 15px;
     transform: none;
     width: auto;

@@ -605,11 +605,6 @@ input, select, textarea, button {
 	transform: translate(-50%, -50%);
 }
 
-.modal-max.fade,
-.modal-max.fade.in {
-	transform: none;
-}
-
 .modal-header {
 	padding: 9px 15px;
 	border-bottom: 1px solid var(--pico-form-element-border-color, #eee);
@@ -674,49 +669,6 @@ button.close,
 .close:hover {
 	opacity: 0.4;
 	text-decoration: none;
-}
-
-.modal-mini {
-	max-width: 420px;
-}
-
-.modal-small {
-	max-width: 480px;
-}
-
-.modal-max {
-	inset: 15px;
-	transform: none;
-	width: auto;
-	max-width: none;
-	height: auto;
-}
-
-.modal-padded .modal-body {
-	padding-left: 40px;
-	padding-right: 40px;
-}
-
-.modal-padded-small .modal-body {
-	padding-left: 25px;
-	padding-right: 25px;
-}
-
-.modal-2 {
-	z-index: 1060;
-}
-
-.modal-backdrop.modal-2 {
-	z-index: 1055;
-	opacity: 0.6;
-}
-
-.modal.no-footer .modal-body {
-	max-height: 420px;
-}
-
-.log-dialog {
-	max-width: 640px;
 }
 
 
