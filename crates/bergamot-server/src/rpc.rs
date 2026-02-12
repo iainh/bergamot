@@ -23,90 +23,14 @@ pub struct JsonRpcResponse {
     pub id: serde_json::Value,
 }
 
-pub async fn dispatch_rpc(
-    method: &str,
-    params: &serde_json::Value,
-    state: &AppState,
-) -> Result<serde_json::Value, JsonRpcError> {
-    match method {
-        "version" => Ok(serde_json::json!(state.version())),
-        "status" => Ok(
-            serde_json::to_value(state.status()).map_err(|err| JsonRpcError {
-                code: -32000,
-                message: err.to_string(),
-            })?,
-        ),
-        "append" => rpc_append(params, state).await,
-        "listgroups" => rpc_listgroups(state).await,
-        "editqueue" => rpc_editqueue(params, state).await,
-        "shutdown" => rpc_shutdown(state).await,
-        "listfiles" => rpc_listfiles(params, state).await,
-        "postqueue" => rpc_postqueue(state),
-        "writelog" => rpc_writelog(params, state),
-        "loadlog" => rpc_loadlog(params, state),
-        "log" => rpc_loadlog(params, state),
-        "servervolumes" => rpc_servervolumes(state),
-        "schedulerstats" => rpc_schedulerstats(state).await,
-        "resetservervolume" => rpc_resetservervolume(params, state),
-        "config" | "loadconfig" => rpc_loadconfig(state),
-        "saveconfig" => rpc_saveconfig(params, state),
-        "configtemplates" => rpc_configtemplates(),
-        "history" => rpc_history(params, state).await,
-        "rate" => rpc_rate(params, state).await,
-        "pausedownload" => rpc_pausedownload(state).await,
-        "resumedownload" => rpc_resumedownload(state).await,
-        "pausepost" => rpc_pausepost(state),
-        "resumepost" => rpc_resumepost(state),
-        "pausescan" => rpc_pausescan(state),
-        "resumescan" => rpc_resumescan(state),
-        "scan" => rpc_scan(state).await,
-        "feeds" => rpc_feeds(state).await,
-        "sysinfo" => rpc_sysinfo(state),
-        "systemhealth" => rpc_systemhealth(state),
-        "loadextensions" => Ok(serde_json::json!([])),
-        "testserver" => rpc_testserver(params).await,
-        "editserver" => rpc_editserver(params, state),
-        "scheduleresume" => rpc_scheduleresume(params, state),
-        "reload" => rpc_reload(state),
-        "clearlog" => {
-            if let Some(buffer) = state.log_buffer() {
-                buffer.clear();
-            }
-            Ok(serde_json::json!(true))
-        }
-        "readurl" => {
-            let arr = params.as_array();
-            let url = arr
-                .and_then(|a| a.first())
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            match reqwest::get(url).await {
-                Ok(resp) => {
-                    let body = resp.text().await.unwrap_or_default();
-                    Ok(serde_json::json!(body))
-                }
-                Err(e) => Err(JsonRpcError {
-                    code: -32000,
-                    message: e.to_string(),
-                }),
-            }
-        }
-        "testextension" => Ok(serde_json::json!("")),
-        _ => Err(JsonRpcError {
-            code: -32601,
-            message: format!("Method not found: {method}"),
-        }),
-    }
-}
-
-fn require_queue(state: &AppState) -> Result<&bergamot_queue::QueueHandle, JsonRpcError> {
+pub(crate) fn require_queue(state: &AppState) -> Result<&bergamot_queue::QueueHandle, JsonRpcError> {
     state.queue_handle().ok_or_else(|| JsonRpcError {
         code: -32000,
         message: "Queue not available".to_string(),
     })
 }
 
-fn rpc_error(msg: impl std::fmt::Display) -> JsonRpcError {
+pub(crate) fn rpc_error(msg: impl std::fmt::Display) -> JsonRpcError {
     JsonRpcError {
         code: -32000,
         message: msg.to_string(),
@@ -143,7 +67,7 @@ async fn fetch_nzb_url(url: &str) -> Result<(String, Vec<u8>), JsonRpcError> {
     Ok((filename, bytes.to_vec()))
 }
 
-async fn rpc_append(
+pub(crate) async fn rpc_append(
     params: &serde_json::Value,
     state: &AppState,
 ) -> Result<serde_json::Value, JsonRpcError> {
@@ -213,7 +137,7 @@ async fn rpc_append(
     Ok(serde_json::json!(id))
 }
 
-async fn rpc_listgroups(state: &AppState) -> Result<serde_json::Value, JsonRpcError> {
+pub(crate) async fn rpc_listgroups(state: &AppState) -> Result<serde_json::Value, JsonRpcError> {
     let queue = require_queue(state)?;
     let snapshot = queue.get_queue_snapshot().await.map_err(rpc_error)?;
 
@@ -299,7 +223,7 @@ async fn rpc_listgroups(state: &AppState) -> Result<serde_json::Value, JsonRpcEr
     Ok(serde_json::json!(entries))
 }
 
-async fn rpc_editqueue(
+pub(crate) async fn rpc_editqueue(
     params: &serde_json::Value,
     state: &AppState,
 ) -> Result<serde_json::Value, JsonRpcError> {
@@ -414,14 +338,14 @@ async fn rpc_editqueue_history(
     Ok(serde_json::json!(true))
 }
 
-async fn rpc_shutdown(state: &AppState) -> Result<serde_json::Value, JsonRpcError> {
+pub(crate) async fn rpc_shutdown(state: &AppState) -> Result<serde_json::Value, JsonRpcError> {
     if let Some(shutdown) = state.shutdown_handle() {
         shutdown.trigger();
     }
     Ok(serde_json::json!(true))
 }
 
-async fn rpc_listfiles(
+pub(crate) async fn rpc_listfiles(
     params: &serde_json::Value,
     state: &AppState,
 ) -> Result<serde_json::Value, JsonRpcError> {
@@ -457,7 +381,7 @@ async fn rpc_listfiles(
     Ok(serde_json::json!(entries))
 }
 
-fn rpc_postqueue(state: &AppState) -> Result<serde_json::Value, JsonRpcError> {
+pub(crate) fn rpc_postqueue(state: &AppState) -> Result<serde_json::Value, JsonRpcError> {
     let paused = state
         .postproc_paused()
         .load(std::sync::atomic::Ordering::Relaxed);
@@ -467,42 +391,42 @@ fn rpc_postqueue(state: &AppState) -> Result<serde_json::Value, JsonRpcError> {
     }))
 }
 
-fn rpc_pausepost(state: &AppState) -> Result<serde_json::Value, JsonRpcError> {
+pub(crate) fn rpc_pausepost(state: &AppState) -> Result<serde_json::Value, JsonRpcError> {
     state
         .postproc_paused()
         .store(true, std::sync::atomic::Ordering::Relaxed);
     Ok(serde_json::json!(true))
 }
 
-fn rpc_resumepost(state: &AppState) -> Result<serde_json::Value, JsonRpcError> {
+pub(crate) fn rpc_resumepost(state: &AppState) -> Result<serde_json::Value, JsonRpcError> {
     state
         .postproc_paused()
         .store(false, std::sync::atomic::Ordering::Relaxed);
     Ok(serde_json::json!(true))
 }
 
-fn rpc_pausescan(state: &AppState) -> Result<serde_json::Value, JsonRpcError> {
+pub(crate) fn rpc_pausescan(state: &AppState) -> Result<serde_json::Value, JsonRpcError> {
     state
         .scan_paused()
         .store(true, std::sync::atomic::Ordering::Relaxed);
     Ok(serde_json::json!(true))
 }
 
-fn rpc_resumescan(state: &AppState) -> Result<serde_json::Value, JsonRpcError> {
+pub(crate) fn rpc_resumescan(state: &AppState) -> Result<serde_json::Value, JsonRpcError> {
     state
         .scan_paused()
         .store(false, std::sync::atomic::Ordering::Relaxed);
     Ok(serde_json::json!(true))
 }
 
-async fn rpc_scan(state: &AppState) -> Result<serde_json::Value, JsonRpcError> {
+pub(crate) async fn rpc_scan(state: &AppState) -> Result<serde_json::Value, JsonRpcError> {
     if let Some(tx) = state.scan_trigger() {
         let _ = tx.send(()).await;
     }
     Ok(serde_json::json!(true))
 }
 
-async fn rpc_feeds(state: &AppState) -> Result<serde_json::Value, JsonRpcError> {
+pub(crate) async fn rpc_feeds(state: &AppState) -> Result<serde_json::Value, JsonRpcError> {
     let Some(feed_handle) = state.feed_handle() else {
         return Ok(serde_json::json!([]));
     };
@@ -525,7 +449,7 @@ async fn rpc_feeds(state: &AppState) -> Result<serde_json::Value, JsonRpcError> 
     Ok(serde_json::json!(entries))
 }
 
-fn rpc_sysinfo(state: &AppState) -> Result<serde_json::Value, JsonRpcError> {
+pub(crate) fn rpc_sysinfo(state: &AppState) -> Result<serde_json::Value, JsonRpcError> {
     let uptime_sec = state.start_time().elapsed().as_secs();
     Ok(serde_json::json!({
         "Version": state.version(),
@@ -547,7 +471,7 @@ fn rpc_sysinfo(state: &AppState) -> Result<serde_json::Value, JsonRpcError> {
     }))
 }
 
-fn rpc_systemhealth(state: &AppState) -> Result<serde_json::Value, JsonRpcError> {
+pub(crate) fn rpc_systemhealth(state: &AppState) -> Result<serde_json::Value, JsonRpcError> {
     let queue_available = state.queue_handle().is_some();
     Ok(serde_json::json!({
         "Healthy": queue_available,
@@ -557,7 +481,7 @@ fn rpc_systemhealth(state: &AppState) -> Result<serde_json::Value, JsonRpcError>
     }))
 }
 
-fn rpc_reload(state: &AppState) -> Result<serde_json::Value, JsonRpcError> {
+pub(crate) fn rpc_reload(state: &AppState) -> Result<serde_json::Value, JsonRpcError> {
     let config_arc = state
         .config()
         .ok_or_else(|| rpc_error("Config not available"))?;
@@ -579,7 +503,7 @@ fn rpc_reload(state: &AppState) -> Result<serde_json::Value, JsonRpcError> {
     Ok(serde_json::json!(true))
 }
 
-fn rpc_editserver(
+pub(crate) fn rpc_editserver(
     params: &serde_json::Value,
     state: &AppState,
 ) -> Result<serde_json::Value, JsonRpcError> {
@@ -615,7 +539,7 @@ fn rpc_editserver(
     Ok(serde_json::json!(true))
 }
 
-fn rpc_scheduleresume(
+pub(crate) fn rpc_scheduleresume(
     params: &serde_json::Value,
     state: &AppState,
 ) -> Result<serde_json::Value, JsonRpcError> {
@@ -640,7 +564,7 @@ fn rpc_scheduleresume(
     Ok(serde_json::json!(true))
 }
 
-fn rpc_resetservervolume(
+pub(crate) fn rpc_resetservervolume(
     params: &serde_json::Value,
     state: &AppState,
 ) -> Result<serde_json::Value, JsonRpcError> {
@@ -655,7 +579,7 @@ fn rpc_resetservervolume(
     Ok(serde_json::json!(true))
 }
 
-fn rpc_loadconfig(state: &AppState) -> Result<serde_json::Value, JsonRpcError> {
+pub(crate) fn rpc_loadconfig(state: &AppState) -> Result<serde_json::Value, JsonRpcError> {
     let config = state
         .config()
         .ok_or_else(|| rpc_error("Config not available"))?;
@@ -675,7 +599,7 @@ fn rpc_loadconfig(state: &AppState) -> Result<serde_json::Value, JsonRpcError> {
     Ok(serde_json::json!(entries))
 }
 
-fn rpc_saveconfig(
+pub(crate) fn rpc_saveconfig(
     params: &serde_json::Value,
     state: &AppState,
 ) -> Result<serde_json::Value, JsonRpcError> {
@@ -710,7 +634,7 @@ fn rpc_saveconfig(
     Ok(serde_json::json!(true))
 }
 
-fn rpc_configtemplates() -> Result<serde_json::Value, JsonRpcError> {
+pub(crate) fn rpc_configtemplates() -> Result<serde_json::Value, JsonRpcError> {
     let template = include_str!("nzbget.conf.template");
     let templates = vec![serde_json::json!({
         "Name": "",
@@ -727,7 +651,7 @@ fn rpc_configtemplates() -> Result<serde_json::Value, JsonRpcError> {
     Ok(serde_json::json!(templates))
 }
 
-fn rpc_writelog(
+pub(crate) fn rpc_writelog(
     params: &serde_json::Value,
     state: &AppState,
 ) -> Result<serde_json::Value, JsonRpcError> {
@@ -800,7 +724,7 @@ fn empty_server_volume(server_id: u32) -> serde_json::Value {
     })
 }
 
-fn rpc_servervolumes(state: &AppState) -> Result<serde_json::Value, JsonRpcError> {
+pub(crate) fn rpc_servervolumes(state: &AppState) -> Result<serde_json::Value, JsonRpcError> {
     let (tracked, tracker_date) = state
         .stats_tracker()
         .map(|t| t.snapshot_with_date())
@@ -908,7 +832,7 @@ fn build_server_volume(
     })
 }
 
-async fn rpc_schedulerstats(state: &AppState) -> Result<serde_json::Value, JsonRpcError> {
+pub(crate) async fn rpc_schedulerstats(state: &AppState) -> Result<serde_json::Value, JsonRpcError> {
     let queue = require_queue(state)?;
     let stats = queue.get_scheduler_stats().await.map_err(rpc_error)?;
     let entries: Vec<serde_json::Value> = stats
@@ -941,7 +865,7 @@ fn size_json(bytes: u64) -> serde_json::Value {
     })
 }
 
-fn rpc_loadlog(
+pub(crate) fn rpc_loadlog(
     params: &serde_json::Value,
     state: &AppState,
 ) -> Result<serde_json::Value, JsonRpcError> {
@@ -986,7 +910,7 @@ fn rpc_loadlog(
     Ok(serde_json::json!(entries))
 }
 
-async fn rpc_rate(
+pub(crate) async fn rpc_rate(
     params: &serde_json::Value,
     state: &AppState,
 ) -> Result<serde_json::Value, JsonRpcError> {
@@ -1002,7 +926,7 @@ async fn rpc_rate(
     Ok(serde_json::json!(true))
 }
 
-async fn rpc_history(
+pub(crate) async fn rpc_history(
     _params: &serde_json::Value,
     state: &AppState,
 ) -> Result<serde_json::Value, JsonRpcError> {
@@ -1190,7 +1114,7 @@ fn format_mark_status(s: bergamot_core::models::MarkStatus) -> &'static str {
     }
 }
 
-async fn rpc_testserver(params: &serde_json::Value) -> Result<serde_json::Value, JsonRpcError> {
+pub(crate) async fn rpc_testserver(params: &serde_json::Value) -> Result<serde_json::Value, JsonRpcError> {
     let arr = params
         .as_array()
         .ok_or_else(|| rpc_error("params must be an array"))?;
@@ -1251,7 +1175,7 @@ async fn rpc_testserver(params: &serde_json::Value) -> Result<serde_json::Value,
     }
 }
 
-async fn rpc_pausedownload(state: &AppState) -> Result<serde_json::Value, JsonRpcError> {
+pub(crate) async fn rpc_pausedownload(state: &AppState) -> Result<serde_json::Value, JsonRpcError> {
     let queue = require_queue(state)?;
     queue.pause_all().await.map_err(rpc_error)?;
     state
@@ -1260,7 +1184,7 @@ async fn rpc_pausedownload(state: &AppState) -> Result<serde_json::Value, JsonRp
     Ok(serde_json::json!(true))
 }
 
-async fn rpc_resumedownload(state: &AppState) -> Result<serde_json::Value, JsonRpcError> {
+pub(crate) async fn rpc_resumedownload(state: &AppState) -> Result<serde_json::Value, JsonRpcError> {
     let queue = require_queue(state)?;
     queue.resume_all().await.map_err(rpc_error)?;
     state
@@ -1319,22 +1243,17 @@ mod tests {
         (state, handle, coordinator_handle)
     }
 
-    #[tokio::test]
-    async fn dispatch_rpc_returns_version() {
+    #[test]
+    fn version_returns_expected() {
         let state = AppState::default();
-        let result = dispatch_rpc("version", &serde_json::json!([]), &state)
-            .await
-            .expect("version");
-        assert_eq!(result, serde_json::json!("26.0"));
+        assert_eq!(state.version(), "26.0");
     }
 
     #[tokio::test]
     async fn dispatch_append_adds_nzb_and_returns_id() {
         let (state, handle, _coord) = state_with_queue();
         let params = serde_json::json!(["test.nzb", nzb_base64(), "", 0]);
-        let result = dispatch_rpc("append", &params, &state)
-            .await
-            .expect("append");
+        let result = rpc_append(&params, &state).await.expect("append");
         assert_eq!(result, serde_json::json!(1));
         handle.shutdown().await.expect("shutdown");
     }
@@ -1360,9 +1279,7 @@ mod tests {
             .with_disk(disk.clone());
 
         let params = serde_json::json!(["test.nzb", nzb_base64(), "", 0]);
-        let result = dispatch_rpc("append", &params, &state)
-            .await
-            .expect("append");
+        let result = rpc_append(&params, &state).await.expect("append");
         let id = result.as_u64().expect("id") as u32;
 
         let saved = disk.load_nzb_file(id).expect("load saved nzb");
@@ -1376,9 +1293,7 @@ mod tests {
     async fn dispatch_append_with_category_and_priority() {
         let (state, handle, _coord) = state_with_queue();
         let params = serde_json::json!(["test.nzb", nzb_base64(), "movies", 50]);
-        let result = dispatch_rpc("append", &params, &state)
-            .await
-            .expect("append");
+        let result = rpc_append(&params, &state).await.expect("append");
         assert_eq!(result, serde_json::json!(1));
 
         let list = handle.get_nzb_list().await.expect("list");
@@ -1398,7 +1313,7 @@ mod tests {
     async fn dispatch_append_url_returns_error_for_unreachable_host() {
         let (state, handle, _coord) = state_with_queue();
         let params = serde_json::json!(["", "http://127.0.0.1:1/nonexistent.nzb", "", 0]);
-        let result = dispatch_rpc("append", &params, &state).await;
+        let result = rpc_append(&params, &state).await;
         assert!(result.is_err());
         handle.shutdown().await.expect("shutdown");
     }
@@ -1412,9 +1327,7 @@ mod tests {
             .await
             .expect("add");
 
-        let result = dispatch_rpc("listgroups", &serde_json::json!([]), &state)
-            .await
-            .expect("listgroups");
+        let result = rpc_listgroups(&state).await.expect("listgroups");
         let groups = result.as_array().expect("array");
         assert_eq!(groups.len(), 1);
         assert_eq!(groups[0]["NZBID"], 1);
@@ -1432,9 +1345,7 @@ mod tests {
             .expect("add");
 
         let params = serde_json::json!(["GroupPause", "", [id]]);
-        let result = dispatch_rpc("editqueue", &params, &state)
-            .await
-            .expect("editqueue");
+        let result = rpc_editqueue(&params, &state).await.expect("editqueue");
         assert_eq!(result, serde_json::json!(true));
         handle.shutdown().await.expect("shutdown");
     }
@@ -1453,17 +1364,15 @@ mod tests {
             .with_queue(handle.clone())
             .with_shutdown(shutdown_handle);
 
-        let result = dispatch_rpc("shutdown", &serde_json::json!([]), &state)
-            .await
-            .expect("shutdown");
+        let result = rpc_shutdown(&state).await.expect("shutdown");
         assert_eq!(result, serde_json::json!(true));
         assert!(*rx.borrow());
     }
 
     #[tokio::test]
-    async fn dispatch_rpc_without_queue_returns_error() {
+    async fn rpc_without_queue_returns_error() {
         let state = AppState::default();
-        let result = dispatch_rpc("listgroups", &serde_json::json!([]), &state).await;
+        let result = rpc_listgroups(&state).await;
         assert!(result.is_err());
     }
 
@@ -1476,7 +1385,7 @@ mod tests {
             .await
             .expect("add");
 
-        let result = dispatch_rpc("listfiles", &serde_json::json!([id]), &state)
+        let result = rpc_listfiles(&serde_json::json!([id]), &state)
             .await
             .expect("listfiles");
         let files = result.as_array().expect("array");
@@ -1487,12 +1396,10 @@ mod tests {
         handle.shutdown().await.expect("shutdown");
     }
 
-    #[tokio::test]
-    async fn dispatch_postqueue_returns_paused_status() {
+    #[test]
+    fn dispatch_postqueue_returns_paused_status() {
         let state = AppState::default();
-        let result = dispatch_rpc("postqueue", &serde_json::json!([]), &state)
-            .await
-            .expect("postqueue");
+        let result = rpc_postqueue(&state).expect("postqueue");
         assert_eq!(result["Paused"], false);
     }
 
@@ -1501,16 +1408,11 @@ mod tests {
         AppState::default().with_log_buffer(buffer)
     }
 
-    #[tokio::test]
-    async fn dispatch_writelog_adds_to_buffer() {
+    #[test]
+    fn dispatch_writelog_adds_to_buffer() {
         let state = state_with_log();
-        let result = dispatch_rpc(
-            "writelog",
-            &serde_json::json!(["info", "test message"]),
-            &state,
-        )
-        .await
-        .expect("writelog");
+        let params = serde_json::json!(["info", "test message"]);
+        let result = rpc_writelog(&params, &state).expect("writelog");
         assert_eq!(result, serde_json::json!(true));
 
         let messages = state.log_buffer().unwrap().messages_since(0);
@@ -1518,47 +1420,35 @@ mod tests {
         assert_eq!(messages[0].text, "test message");
     }
 
-    #[tokio::test]
-    async fn dispatch_loadlog_returns_written_messages() {
+    #[test]
+    fn dispatch_loadlog_returns_written_messages() {
         let state = state_with_log();
-        dispatch_rpc("writelog", &serde_json::json!(["warning", "hello"]), &state)
-            .await
-            .expect("writelog");
+        rpc_writelog(&serde_json::json!(["warning", "hello"]), &state).expect("writelog");
 
-        let result = dispatch_rpc("loadlog", &serde_json::json!([0]), &state)
-            .await
-            .expect("loadlog");
+        let params = serde_json::json!([0]);
+        let result = rpc_loadlog(&params, &state).expect("loadlog");
         let entries = result.as_array().expect("array");
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0]["Text"], "hello");
         assert_eq!(entries[0]["Kind"], "WARNING");
     }
 
-    #[tokio::test]
-    async fn dispatch_log_returns_same_as_loadlog() {
+    #[test]
+    fn dispatch_log_returns_same_as_loadlog() {
         let state = state_with_log();
-        dispatch_rpc(
-            "writelog",
-            &serde_json::json!(["info", "log entry"]),
-            &state,
-        )
-        .await
-        .expect("writelog");
+        rpc_writelog(&serde_json::json!(["info", "log entry"]), &state).expect("writelog");
 
-        let result = dispatch_rpc("log", &serde_json::json!([0]), &state)
-            .await
-            .expect("log");
+        let params = serde_json::json!([0]);
+        let result = rpc_loadlog(&params, &state).expect("log");
         let entries = result.as_array().expect("array");
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0]["Text"], "log entry");
     }
 
-    #[tokio::test]
-    async fn dispatch_servervolumes_returns_total_volume() {
+    #[test]
+    fn dispatch_servervolumes_returns_total_volume() {
         let state = AppState::default();
-        let result = dispatch_rpc("servervolumes", &serde_json::json!([]), &state)
-            .await
-            .expect("servervolumes");
+        let result = rpc_servervolumes(&state).expect("servervolumes");
         let volumes = result.as_array().expect("array");
         assert_eq!(volumes.len(), 1);
         assert_eq!(volumes[0]["ServerID"], 0);
@@ -1576,45 +1466,36 @@ mod tests {
         (state, tmp)
     }
 
-    #[tokio::test]
-    async fn dispatch_loadconfig_returns_config_entries() {
+    #[test]
+    fn dispatch_loadconfig_returns_config_entries() {
         let (state, _tmp) = state_with_config();
-        let result = dispatch_rpc("loadconfig", &serde_json::json!([]), &state)
-            .await
-            .expect("loadconfig");
+        let result = rpc_loadconfig(&state).expect("loadconfig");
         let entries = result.as_array().expect("array");
         assert!(entries.iter().any(|e| e["Name"] == "ControlPort"));
     }
 
-    #[tokio::test]
-    async fn dispatch_config_returns_same_as_loadconfig() {
+    #[test]
+    fn dispatch_config_returns_same_as_loadconfig() {
         let (state, _tmp) = state_with_config();
-        let result = dispatch_rpc("config", &serde_json::json!([]), &state)
-            .await
-            .expect("config");
+        let result = rpc_loadconfig(&state).expect("config");
         let entries = result.as_array().expect("array");
         assert!(entries.iter().any(|e| e["Name"] == "MainDir"));
     }
 
-    #[tokio::test]
-    async fn dispatch_saveconfig_persists_changes() {
+    #[test]
+    fn dispatch_saveconfig_persists_changes() {
         let (state, tmp) = state_with_config();
         let params = serde_json::json!([{"Name": "DownloadRate", "Value": "500"}]);
-        let result = dispatch_rpc("saveconfig", &params, &state)
-            .await
-            .expect("saveconfig");
+        let result = rpc_saveconfig(&params, &state).expect("saveconfig");
         assert_eq!(result, serde_json::json!(true));
 
         let saved = std::fs::read_to_string(tmp.path().join("bergamot.conf")).expect("read");
         assert!(saved.contains("DownloadRate=500"));
     }
 
-    #[tokio::test]
-    async fn dispatch_configtemplates_returns_known_options() {
-        let state = AppState::default();
-        let result = dispatch_rpc("configtemplates", &serde_json::json!([]), &state)
-            .await
-            .expect("configtemplates");
+    #[test]
+    fn dispatch_configtemplates_returns_known_options() {
+        let result = rpc_configtemplates().expect("configtemplates");
         let entries = result.as_array().expect("array");
         assert!(entries.iter().any(|e| e["Name"] == ""));
         let template = entries[0]["Template"].as_str().expect("template string");
@@ -1625,9 +1506,8 @@ mod tests {
     #[tokio::test]
     async fn dispatch_history_returns_empty_array() {
         let (state, handle, _coord) = state_with_queue();
-        let result = dispatch_rpc("history", &serde_json::json!([false]), &state)
-            .await
-            .expect("history");
+        let params = serde_json::json!([false]);
+        let result = rpc_history(&params, &state).await.expect("history");
         assert_eq!(result, serde_json::json!([]));
         handle.shutdown().await.expect("shutdown");
     }
@@ -1635,9 +1515,8 @@ mod tests {
     #[tokio::test]
     async fn dispatch_rate_sets_download_rate() {
         let (state, handle, _coord) = state_with_queue();
-        let result = dispatch_rpc("rate", &serde_json::json!([500]), &state)
-            .await
-            .expect("rate");
+        let params = serde_json::json!([500]);
+        let result = rpc_rate(&params, &state).await.expect("rate");
         assert_eq!(result, serde_json::json!(true));
         handle.shutdown().await.expect("shutdown");
     }
@@ -1645,9 +1524,7 @@ mod tests {
     #[tokio::test]
     async fn dispatch_pausedownload_returns_true() {
         let (state, handle, _coord) = state_with_queue();
-        let result = dispatch_rpc("pausedownload", &serde_json::json!([]), &state)
-            .await
-            .expect("pausedownload");
+        let result = rpc_pausedownload(&state).await.expect("pausedownload");
         assert_eq!(result, serde_json::json!(true));
         handle.shutdown().await.expect("shutdown");
     }
@@ -1655,19 +1532,15 @@ mod tests {
     #[tokio::test]
     async fn dispatch_resumedownload_returns_true() {
         let (state, handle, _coord) = state_with_queue();
-        let result = dispatch_rpc("resumedownload", &serde_json::json!([]), &state)
-            .await
-            .expect("resumedownload");
+        let result = rpc_resumedownload(&state).await.expect("resumedownload");
         assert_eq!(result, serde_json::json!(true));
         handle.shutdown().await.expect("shutdown");
     }
 
-    #[tokio::test]
-    async fn dispatch_pausepost_sets_paused_state() {
+    #[test]
+    fn dispatch_pausepost_sets_paused_state() {
         let state = AppState::default();
-        let result = dispatch_rpc("pausepost", &serde_json::json!([]), &state)
-            .await
-            .expect("pausepost");
+        let result = rpc_pausepost(&state).expect("pausepost");
         assert_eq!(result, serde_json::json!(true));
         assert!(
             state
@@ -1675,21 +1548,17 @@ mod tests {
                 .load(std::sync::atomic::Ordering::Relaxed)
         );
 
-        let pq = dispatch_rpc("postqueue", &serde_json::json!([]), &state)
-            .await
-            .expect("postqueue");
+        let pq = rpc_postqueue(&state).expect("postqueue");
         assert_eq!(pq["Paused"], true);
     }
 
-    #[tokio::test]
-    async fn dispatch_resumepost_clears_paused_state() {
+    #[test]
+    fn dispatch_resumepost_clears_paused_state() {
         let state = AppState::default();
         state
             .postproc_paused()
             .store(true, std::sync::atomic::Ordering::Relaxed);
-        let result = dispatch_rpc("resumepost", &serde_json::json!([]), &state)
-            .await
-            .expect("resumepost");
+        let result = rpc_resumepost(&state).expect("resumepost");
         assert_eq!(result, serde_json::json!(true));
         assert!(
             !state
@@ -1698,12 +1567,10 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn dispatch_pausescan_sets_scan_paused() {
+    #[test]
+    fn dispatch_pausescan_sets_scan_paused() {
         let state = AppState::default();
-        let result = dispatch_rpc("pausescan", &serde_json::json!([]), &state)
-            .await
-            .expect("pausescan");
+        let result = rpc_pausescan(&state).expect("pausescan");
         assert_eq!(result, serde_json::json!(true));
         assert!(
             state
@@ -1712,15 +1579,13 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn dispatch_resumescan_clears_scan_paused() {
+    #[test]
+    fn dispatch_resumescan_clears_scan_paused() {
         let state = AppState::default();
         state
             .scan_paused()
             .store(true, std::sync::atomic::Ordering::Relaxed);
-        let result = dispatch_rpc("resumescan", &serde_json::json!([]), &state)
-            .await
-            .expect("resumescan");
+        let result = rpc_resumescan(&state).expect("resumescan");
         assert_eq!(result, serde_json::json!(true));
         assert!(
             !state
@@ -1733,44 +1598,39 @@ mod tests {
     async fn dispatch_scan_triggers_scan() {
         let (tx, mut rx) = tokio::sync::mpsc::channel(1);
         let state = AppState::default().with_scan_trigger(tx);
-        let result = dispatch_rpc("scan", &serde_json::json!([]), &state)
-            .await
-            .expect("scan");
+        let result = rpc_scan(&state).await.expect("scan");
         assert_eq!(result, serde_json::json!(true));
         assert!(rx.try_recv().is_ok());
     }
 
-    #[tokio::test]
-    async fn dispatch_sysinfo_returns_version_and_os() {
+    #[test]
+    fn dispatch_sysinfo_returns_version_and_os() {
         let state = AppState::default();
-        let result = dispatch_rpc("sysinfo", &serde_json::json!([]), &state)
-            .await
-            .expect("sysinfo");
+        let result = rpc_sysinfo(&state).expect("sysinfo");
         assert_eq!(result["Version"], "26.0");
         assert!(result["OS"]["Name"].as_str().is_some());
         assert!(result["CPU"]["Arch"].as_str().is_some());
         assert!(result["UptimeSec"].as_u64().is_some());
     }
 
-    #[tokio::test]
-    async fn dispatch_systemhealth_reports_queue_status() {
+    #[test]
+    fn dispatch_systemhealth_reports_queue_status() {
         let state = AppState::default();
-        let result = dispatch_rpc("systemhealth", &serde_json::json!([]), &state)
-            .await
-            .expect("systemhealth");
+        let result = rpc_systemhealth(&state).expect("systemhealth");
         assert_eq!(result["QueueAvailable"], false);
+    }
 
+    #[tokio::test]
+    async fn dispatch_systemhealth_reports_queue_available() {
         let (state, handle, _coord) = state_with_queue();
-        let result = dispatch_rpc("systemhealth", &serde_json::json!([]), &state)
-            .await
-            .expect("systemhealth");
+        let result = rpc_systemhealth(&state).expect("systemhealth");
         assert_eq!(result["QueueAvailable"], true);
         assert_eq!(result["Healthy"], true);
         handle.shutdown().await.expect("shutdown");
     }
 
-    #[tokio::test]
-    async fn dispatch_reload_rereads_config_from_disk() {
+    #[test]
+    fn dispatch_reload_rereads_config_from_disk() {
         let (state, tmp) = state_with_config();
         let config_path = tmp.path().join("bergamot.conf");
         std::fs::write(
@@ -1779,33 +1639,29 @@ mod tests {
         )
         .expect("write");
 
-        let result = dispatch_rpc("reload", &serde_json::json!([]), &state)
-            .await
-            .expect("reload");
+        let result = rpc_reload(&state).expect("reload");
         assert_eq!(result, serde_json::json!(true));
 
         let config = state.config().unwrap().read().unwrap();
         assert_eq!(config.download_rate, 999);
     }
 
-    #[tokio::test]
-    async fn dispatch_reload_no_config_returns_error() {
+    #[test]
+    fn dispatch_reload_no_config_returns_error() {
         let state = AppState::default();
-        let result = dispatch_rpc("reload", &serde_json::json!([]), &state).await;
+        let result = rpc_reload(&state);
         assert!(result.is_err());
     }
 
-    #[tokio::test]
-    async fn dispatch_editserver_updates_config() {
+    #[test]
+    fn dispatch_editserver_updates_config() {
         let (state, tmp) = state_with_config();
         let params = serde_json::json!([
             {"Name": "Server1.Host", "Value": "news.example.com"},
             {"Name": "Server1.Port", "Value": "563"},
             {"Name": "Server1.Connections", "Value": "8"}
         ]);
-        let result = dispatch_rpc("editserver", &params, &state)
-            .await
-            .expect("editserver");
+        let result = rpc_editserver(&params, &state).expect("editserver");
         assert_eq!(result, serde_json::json!(true));
 
         let saved = std::fs::read_to_string(tmp.path().join("bergamot.conf")).expect("read");
@@ -1813,24 +1669,21 @@ mod tests {
         assert!(saved.contains("Server1.Port=563"));
     }
 
-    #[tokio::test]
-    async fn dispatch_editserver_no_config_returns_error() {
+    #[test]
+    fn dispatch_editserver_no_config_returns_error() {
         let state = AppState::default();
         let params = serde_json::json!([{"Name": "Server1.Host", "Value": "test"}]);
-        let result = dispatch_rpc("editserver", &params, &state).await;
+        let result = rpc_editserver(&params, &state);
         assert!(result.is_err());
     }
 
     #[tokio::test]
     async fn dispatch_scheduleresume_sets_resume_time() {
         let (state, handle, _coord) = state_with_queue();
-        dispatch_rpc("pausedownload", &serde_json::json!([]), &state)
-            .await
-            .expect("pause");
+        rpc_pausedownload(&state).await.expect("pause");
 
-        let result = dispatch_rpc("scheduleresume", &serde_json::json!([60]), &state)
-            .await
-            .expect("scheduleresume");
+        let params = serde_json::json!([60]);
+        let result = rpc_scheduleresume(&params, &state).expect("scheduleresume");
         assert_eq!(result, serde_json::json!(true));
 
         let resume_at = state.resume_at().load(std::sync::atomic::Ordering::Relaxed);
@@ -1842,16 +1695,15 @@ mod tests {
         handle.shutdown().await.expect("shutdown");
     }
 
-    #[tokio::test]
-    async fn dispatch_scheduleresume_zero_clears_timer() {
+    #[test]
+    fn dispatch_scheduleresume_zero_clears_timer() {
         let state = AppState::default();
         state
             .resume_at()
             .store(9999, std::sync::atomic::Ordering::Relaxed);
 
-        let result = dispatch_rpc("scheduleresume", &serde_json::json!([0]), &state)
-            .await
-            .expect("scheduleresume");
+        let params = serde_json::json!([0]);
+        let result = rpc_scheduleresume(&params, &state).expect("scheduleresume");
         assert_eq!(result, serde_json::json!(true));
         assert_eq!(
             state.resume_at().load(std::sync::atomic::Ordering::Relaxed),
@@ -1859,17 +1711,16 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn dispatch_resetservervolume_returns_true() {
+    #[test]
+    fn dispatch_resetservervolume_returns_true() {
         let state = AppState::default();
-        let result = dispatch_rpc("resetservervolume", &serde_json::json!([0]), &state)
-            .await
-            .expect("resetservervolume");
+        let params = serde_json::json!([0]);
+        let result = rpc_resetservervolume(&params, &state).expect("resetservervolume");
         assert_eq!(result, serde_json::json!(true));
     }
 
-    #[tokio::test]
-    async fn dispatch_resetservervolume_clears_tracker() {
+    #[test]
+    fn dispatch_resetservervolume_clears_tracker() {
         let config_raw = bergamot_config::parse_config("Server1.Host=test\n").expect("parse");
         let config = bergamot_config::Config::from_raw(config_raw);
         let tracker = bergamot_scheduler::StatsTracker::from_config(&config);
@@ -1877,9 +1728,8 @@ mod tests {
         shared.record_bytes(1, 1024);
         let state = AppState::default().with_stats_tracker(shared.clone());
 
-        let result = dispatch_rpc("resetservervolume", &serde_json::json!([1]), &state)
-            .await
-            .expect("resetservervolume");
+        let params = serde_json::json!([1]);
+        let result = rpc_resetservervolume(&params, &state).expect("resetservervolume");
         assert_eq!(result, serde_json::json!(true));
 
         let volumes = shared.snapshot_volumes();
@@ -1890,7 +1740,6 @@ mod tests {
 
     #[tokio::test]
     async fn dispatch_testserver_connects_to_unreachable_host() {
-        let state = AppState::default();
         let params = serde_json::json!([
             "unreachable.invalid", // host
             119,                   // port
@@ -1899,7 +1748,7 @@ mod tests {
             "no",                  // encryption
             1                      // connections
         ]);
-        let result = dispatch_rpc("testserver", &params, &state)
+        let result = rpc_testserver(&params)
             .await
             .expect("testserver should return Ok with error message");
         let msg = result.as_str().expect("should be a string");
@@ -1908,17 +1757,14 @@ mod tests {
 
     #[tokio::test]
     async fn dispatch_testserver_missing_params_returns_error() {
-        let state = AppState::default();
-        let result = dispatch_rpc("testserver", &serde_json::json!([]), &state).await;
+        let result = rpc_testserver(&serde_json::json!([])).await;
         assert!(result.is_err());
     }
 
     #[tokio::test]
     async fn dispatch_feeds_returns_empty_array() {
         let state = AppState::default();
-        let result = dispatch_rpc("feeds", &serde_json::json!([]), &state)
-            .await
-            .expect("feeds");
+        let result = rpc_feeds(&state).await.expect("feeds");
         assert_eq!(result, serde_json::json!([]));
     }
 
@@ -2010,9 +1856,8 @@ mod tests {
     #[tokio::test]
     async fn dispatch_history_returns_entries() {
         let (state, handle, _coord) = state_with_history();
-        let result = dispatch_rpc("history", &serde_json::json!([false]), &state)
-            .await
-            .expect("history");
+        let params = serde_json::json!([false]);
+        let result = rpc_history(&params, &state).await.expect("history");
         let entries = result.as_array().expect("array");
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0]["NZBID"], 1);
@@ -2027,19 +1872,14 @@ mod tests {
     async fn dispatch_editqueue_history_return() {
         let (state, handle, _coord) = state_with_history();
         let params = serde_json::json!(["HistoryReturn", "", [1]]);
-        let result = dispatch_rpc("editqueue", &params, &state)
-            .await
-            .expect("editqueue");
+        let result = rpc_editqueue(&params, &state).await.expect("editqueue");
         assert_eq!(result, serde_json::json!(true));
 
-        let history = dispatch_rpc("history", &serde_json::json!([false]), &state)
-            .await
-            .expect("history");
+        let history_params = serde_json::json!([false]);
+        let history = rpc_history(&history_params, &state).await.expect("history");
         assert_eq!(history.as_array().expect("array").len(), 0);
 
-        let groups = dispatch_rpc("listgroups", &serde_json::json!([]), &state)
-            .await
-            .expect("listgroups");
+        let groups = rpc_listgroups(&state).await.expect("listgroups");
         assert_eq!(groups.as_array().expect("array").len(), 1);
 
         handle.shutdown().await.expect("shutdown");
@@ -2049,14 +1889,11 @@ mod tests {
     async fn dispatch_editqueue_history_mark_bad() {
         let (state, handle, _coord) = state_with_history();
         let params = serde_json::json!(["HistoryMarkBad", "", [1]]);
-        let result = dispatch_rpc("editqueue", &params, &state)
-            .await
-            .expect("editqueue");
+        let result = rpc_editqueue(&params, &state).await.expect("editqueue");
         assert_eq!(result, serde_json::json!(true));
 
-        let history = dispatch_rpc("history", &serde_json::json!([false]), &state)
-            .await
-            .expect("history");
+        let history_params = serde_json::json!([false]);
+        let history = rpc_history(&history_params, &state).await.expect("history");
         let entries = history.as_array().expect("array");
         assert_eq!(entries[0]["Status"], "FAILURE/BAD");
 
@@ -2067,14 +1904,11 @@ mod tests {
     async fn dispatch_editqueue_history_delete() {
         let (state, handle, _coord) = state_with_history();
         let params = serde_json::json!(["HistoryDelete", "", [1]]);
-        let result = dispatch_rpc("editqueue", &params, &state)
-            .await
-            .expect("editqueue");
+        let result = rpc_editqueue(&params, &state).await.expect("editqueue");
         assert_eq!(result, serde_json::json!(true));
 
-        let history = dispatch_rpc("history", &serde_json::json!([false]), &state)
-            .await
-            .expect("history");
+        let history_params = serde_json::json!([false]);
+        let history = rpc_history(&history_params, &state).await.expect("history");
         assert_eq!(history.as_array().expect("array").len(), 0);
 
         handle.shutdown().await.expect("shutdown");
@@ -2084,19 +1918,14 @@ mod tests {
     async fn dispatch_editqueue_history_redownload() {
         let (state, handle, _coord) = state_with_history();
         let params = serde_json::json!(["HistoryRedownload", "", [1]]);
-        let result = dispatch_rpc("editqueue", &params, &state)
-            .await
-            .expect("editqueue");
+        let result = rpc_editqueue(&params, &state).await.expect("editqueue");
         assert_eq!(result, serde_json::json!(true));
 
-        let history = dispatch_rpc("history", &serde_json::json!([false]), &state)
-            .await
-            .expect("history");
+        let history_params = serde_json::json!([false]);
+        let history = rpc_history(&history_params, &state).await.expect("history");
         assert_eq!(history.as_array().expect("array").len(), 0);
 
-        let groups = dispatch_rpc("listgroups", &serde_json::json!([]), &state)
-            .await
-            .expect("listgroups");
+        let groups = rpc_listgroups(&state).await.expect("listgroups");
         assert_eq!(groups.as_array().expect("array").len(), 1);
 
         handle.shutdown().await.expect("shutdown");
