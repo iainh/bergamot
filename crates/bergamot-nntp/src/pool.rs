@@ -5,9 +5,11 @@ use std::time::{Duration, Instant};
 use futures::stream::{FuturesUnordered, StreamExt};
 use tokio::sync::{Mutex, Semaphore};
 
+use tokio_rustls::rustls::ClientConfig;
+
 use crate::error::NntpError;
-use crate::model::NewsServer;
-use crate::protocol::NntpConnection;
+use crate::model::{Encryption, NewsServer};
+use crate::protocol::{self, NntpConnection};
 
 pub trait StatsRecorder: Send + Sync {
     fn record_bytes(&self, server_id: u32, bytes: u64);
@@ -19,14 +21,19 @@ pub trait ConnectionFactory: Send + Sync {
     fn connect(
         &self,
         server: &NewsServer,
+        tls_config: Option<Arc<ClientConfig>>,
     ) -> impl std::future::Future<Output = Result<NntpConnection, NntpError>> + Send;
 }
 
 pub struct RealConnectionFactory;
 
 impl ConnectionFactory for RealConnectionFactory {
-    async fn connect(&self, server: &NewsServer) -> Result<NntpConnection, NntpError> {
-        NntpConnection::connect(server).await
+    async fn connect(
+        &self,
+        server: &NewsServer,
+        tls_config: Option<Arc<ClientConfig>>,
+    ) -> Result<NntpConnection, NntpError> {
+        NntpConnection::connect_with_tls_config(server, tls_config).await
     }
 }
 
@@ -37,6 +44,7 @@ struct ServerState {
     backoff_until_ms: AtomicU64,
     fail_count: AtomicU32,
     epoch: Instant,
+    tls_config: Option<Arc<ClientConfig>>,
 }
 
 pub struct ServerPool<F: ConnectionFactory = RealConnectionFactory> {
@@ -62,12 +70,19 @@ impl<F: ConnectionFactory> ServerPool<F> {
             .filter(|s| s.active)
             .map(|server| {
                 let max_conns = server.connections.max(1) as usize;
+                let tls_config = match server.encryption {
+                    Encryption::Tls | Encryption::StartTls => {
+                        protocol::build_tls_config(server.cert_verification).ok()
+                    }
+                    Encryption::None => None,
+                };
                 Arc::new(ServerState {
                     semaphore: Arc::new(Semaphore::new(max_conns)),
                     idle_connections: Mutex::new(Vec::new()),
                     backoff_until_ms: AtomicU64::new(0),
                     fail_count: AtomicU32::new(0),
                     epoch,
+                    tls_config,
                     server,
                 })
             })
@@ -291,26 +306,11 @@ impl<F: ConnectionFactory> ServerPool<F> {
     ) -> Result<Vec<u8>, NntpError> {
         let mut conn = self.acquire_connection(state).await?;
 
-        if state.server.join_group {
-            let mut group_joined = false;
-            for group in groups {
-                match conn.join_group(group).await {
-                    Ok(()) => {
-                        group_joined = true;
-                        break;
-                    }
-                    Err(NntpError::UnexpectedResponse(411, _)) => continue,
-                    Err(err) => return Err(err),
-                }
-            }
-            if !group_joined && !groups.is_empty() {
-                return Err(NntpError::ProtocolError(
-                    "no group accepted by server".into(),
-                ));
-            }
-        }
-
-        let mut reader = conn.fetch_body(message_id).await?;
+        let mut reader = if state.server.join_group && !groups.is_empty() {
+            conn.fetch_body_pipelined(&groups[0], message_id).await?
+        } else {
+            conn.fetch_body(message_id).await?
+        };
         let mut data = Vec::new();
         let mut first = true;
         while let Some(line) = reader.read_line().await? {
@@ -340,7 +340,10 @@ impl<F: ConnectionFactory> ServerPool<F> {
             }
         }
 
-        let mut conn = self.factory.connect(&state.server).await?;
+        let mut conn = self
+            .factory
+            .connect(&state.server, state.tls_config.clone())
+            .await?;
         if let (Some(user), Some(pass)) = (&state.server.username, &state.server.password)
             && !user.is_empty()
         {
@@ -498,7 +501,7 @@ impl ServerPoolManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{Encryption, IpVersion};
+    use crate::model::IpVersion;
     use std::sync::atomic::{AtomicU32, Ordering};
     use tokio::io::{AsyncWriteExt, BufReader, duplex};
 
@@ -521,6 +524,28 @@ mod tests {
             join_group: true,
             ip_version: IpVersion::Auto,
             cert_verification: false,
+        }
+    }
+
+    fn test_server_tls(id: u32, level: u32, group: u32, connections: u32) -> NewsServer {
+        NewsServer {
+            id,
+            name: format!("server-{id}"),
+            active: true,
+            host: "localhost".into(),
+            port: 563,
+            username: None,
+            password: None,
+            encryption: Encryption::Tls,
+            cipher: None,
+            connections,
+            retention: 0,
+            level,
+            optional: false,
+            group,
+            join_group: true,
+            ip_version: IpVersion::Auto,
+            cert_verification: true,
         }
     }
 
@@ -549,7 +574,11 @@ mod tests {
     }
 
     impl ConnectionFactory for FakeFactory {
-        async fn connect(&self, server: &NewsServer) -> Result<NntpConnection, NntpError> {
+        async fn connect(
+            &self,
+            server: &NewsServer,
+            _tls_config: Option<Arc<ClientConfig>>,
+        ) -> Result<NntpConnection, NntpError> {
             self.connect_count.fetch_add(1, Ordering::SeqCst);
             if self.should_fail {
                 return Err(NntpError::Timeout);
@@ -565,24 +594,28 @@ mod tests {
             tokio::spawn(async move {
                 server_end.write_all(&response).await.unwrap();
 
-                let mut buf = vec![0u8; 1024];
-                loop {
+                let mut buf = vec![0u8; 4096];
+                let mut leftover = String::new();
+                'outer: loop {
                     match tokio::io::AsyncReadExt::read(&mut server_end, &mut buf).await {
                         Ok(0) => break,
                         Ok(n) => {
-                            let cmd = String::from_utf8_lossy(&buf[..n]);
-                            if cmd.starts_with("GROUP") {
-                                server_end.write_all(b"211 0 0 0 group\r\n").await.unwrap();
-                            } else if cmd.starts_with("BODY") {
-                                server_end.write_all(b"222 body\r\n").await.unwrap();
-                                for line in body.split(|&b| b == b'\n') {
-                                    server_end.write_all(line).await.unwrap();
-                                    server_end.write_all(b"\r\n").await.unwrap();
+                            leftover.push_str(&String::from_utf8_lossy(&buf[..n]));
+                            while let Some(pos) = leftover.find("\r\n") {
+                                let cmd: String = leftover.drain(..pos + 2).collect();
+                                if cmd.starts_with("GROUP") {
+                                    server_end.write_all(b"211 0 0 0 group\r\n").await.unwrap();
+                                } else if cmd.starts_with("BODY") {
+                                    server_end.write_all(b"222 body\r\n").await.unwrap();
+                                    for line in body.split(|&b| b == b'\n') {
+                                        server_end.write_all(line).await.unwrap();
+                                        server_end.write_all(b"\r\n").await.unwrap();
+                                    }
+                                    server_end.write_all(b".\r\n").await.unwrap();
+                                } else if cmd.starts_with("QUIT") {
+                                    server_end.write_all(b"205 bye\r\n").await.unwrap();
+                                    break 'outer;
                                 }
-                                server_end.write_all(b".\r\n").await.unwrap();
-                            } else if cmd.starts_with("QUIT") {
-                                server_end.write_all(b"205 bye\r\n").await.unwrap();
-                                break;
                             }
                         }
                         Err(_) => break,
@@ -643,7 +676,11 @@ mod tests {
         }
 
         impl ConnectionFactory for FailFirstFactory {
-            async fn connect(&self, server: &NewsServer) -> Result<NntpConnection, NntpError> {
+            async fn connect(
+                &self,
+                server: &NewsServer,
+                _tls_config: Option<Arc<ClientConfig>>,
+            ) -> Result<NntpConnection, NntpError> {
                 if server.id == self.fail_server_id {
                     return Err(NntpError::Timeout);
                 }
@@ -652,24 +689,28 @@ mod tests {
                 let body = self.response_body.clone();
                 tokio::spawn(async move {
                     server_end.write_all(b"200 Welcome\r\n").await.unwrap();
-                    let mut buf = vec![0u8; 1024];
-                    loop {
+                    let mut buf = vec![0u8; 4096];
+                    let mut leftover = String::new();
+                    'outer: loop {
                         match tokio::io::AsyncReadExt::read(&mut server_end, &mut buf).await {
                             Ok(0) => break,
                             Ok(n) => {
-                                let cmd = String::from_utf8_lossy(&buf[..n]);
-                                if cmd.starts_with("GROUP") {
-                                    server_end.write_all(b"211 0 0 0 group\r\n").await.unwrap();
-                                } else if cmd.starts_with("BODY") {
-                                    server_end.write_all(b"222 body\r\n").await.unwrap();
-                                    for line in body.split(|&b| b == b'\n') {
-                                        server_end.write_all(line).await.unwrap();
-                                        server_end.write_all(b"\r\n").await.unwrap();
+                                leftover.push_str(&String::from_utf8_lossy(&buf[..n]));
+                                while let Some(pos) = leftover.find("\r\n") {
+                                    let cmd: String = leftover.drain(..pos + 2).collect();
+                                    if cmd.starts_with("GROUP") {
+                                        server_end.write_all(b"211 0 0 0 group\r\n").await.unwrap();
+                                    } else if cmd.starts_with("BODY") {
+                                        server_end.write_all(b"222 body\r\n").await.unwrap();
+                                        for line in body.split(|&b| b == b'\n') {
+                                            server_end.write_all(line).await.unwrap();
+                                            server_end.write_all(b"\r\n").await.unwrap();
+                                        }
+                                        server_end.write_all(b".\r\n").await.unwrap();
+                                    } else if cmd.starts_with("QUIT") {
+                                        server_end.write_all(b"205 bye\r\n").await.unwrap();
+                                        break 'outer;
                                     }
-                                    server_end.write_all(b".\r\n").await.unwrap();
-                                } else if cmd.starts_with("QUIT") {
-                                    server_end.write_all(b"205 bye\r\n").await.unwrap();
-                                    break;
                                 }
                             }
                             Err(_) => break,
@@ -810,7 +851,10 @@ mod tests {
         let pool = ServerPool::with_factory(vec![server], factory.clone());
 
         {
-            let conn = factory.connect(&pool.servers[0].server).await.unwrap();
+            let conn = factory
+                .connect(&pool.servers[0].server, None)
+                .await
+                .unwrap();
             let mut idle = pool.servers[0].idle_connections.lock().await;
             idle.push((conn, Instant::now() - Duration::from_secs(120)));
         }
@@ -829,7 +873,10 @@ mod tests {
         let pool = ServerPool::with_factory(vec![server], factory.clone());
 
         for _ in 0..3 {
-            let conn = factory.connect(&pool.servers[0].server).await.unwrap();
+            let conn = factory
+                .connect(&pool.servers[0].server, None)
+                .await
+                .unwrap();
             let mut idle = pool.servers[0].idle_connections.lock().await;
             idle.push((conn, Instant::now() - Duration::from_secs(120)));
         }
@@ -919,37 +966,45 @@ mod tests {
         }
 
         impl ConnectionFactory for NotFoundThenSuccessFactory {
-            async fn connect(&self, server: &NewsServer) -> Result<NntpConnection, NntpError> {
+            async fn connect(
+                &self,
+                server: &NewsServer,
+                _tls_config: Option<Arc<ClientConfig>>,
+            ) -> Result<NntpConnection, NntpError> {
                 let (client, mut server_end) = duplex(4096);
                 let not_found = server.id == self.not_found_server_id;
                 let body = self.response_body.clone();
                 tokio::spawn(async move {
                     server_end.write_all(b"200 Welcome\r\n").await.unwrap();
-                    let mut buf = vec![0u8; 1024];
-                    loop {
+                    let mut buf = vec![0u8; 4096];
+                    let mut leftover = String::new();
+                    'outer: loop {
                         match tokio::io::AsyncReadExt::read(&mut server_end, &mut buf).await {
                             Ok(0) => break,
                             Ok(n) => {
-                                let cmd = String::from_utf8_lossy(&buf[..n]);
-                                if cmd.starts_with("GROUP") {
-                                    server_end.write_all(b"211 0 0 0 group\r\n").await.unwrap();
-                                } else if cmd.starts_with("BODY") {
-                                    if not_found {
-                                        server_end
-                                            .write_all(b"430 No Such Article\r\n")
-                                            .await
-                                            .unwrap();
-                                    } else {
-                                        server_end.write_all(b"222 body\r\n").await.unwrap();
-                                        for line in body.split(|&b| b == b'\n') {
-                                            server_end.write_all(line).await.unwrap();
-                                            server_end.write_all(b"\r\n").await.unwrap();
+                                leftover.push_str(&String::from_utf8_lossy(&buf[..n]));
+                                while let Some(pos) = leftover.find("\r\n") {
+                                    let cmd: String = leftover.drain(..pos + 2).collect();
+                                    if cmd.starts_with("GROUP") {
+                                        server_end.write_all(b"211 0 0 0 group\r\n").await.unwrap();
+                                    } else if cmd.starts_with("BODY") {
+                                        if not_found {
+                                            server_end
+                                                .write_all(b"430 No Such Article\r\n")
+                                                .await
+                                                .unwrap();
+                                        } else {
+                                            server_end.write_all(b"222 body\r\n").await.unwrap();
+                                            for line in body.split(|&b| b == b'\n') {
+                                                server_end.write_all(line).await.unwrap();
+                                                server_end.write_all(b"\r\n").await.unwrap();
+                                            }
+                                            server_end.write_all(b".\r\n").await.unwrap();
                                         }
-                                        server_end.write_all(b".\r\n").await.unwrap();
+                                    } else if cmd.starts_with("QUIT") {
+                                        server_end.write_all(b"205 bye\r\n").await.unwrap();
+                                        break 'outer;
                                     }
-                                } else if cmd.starts_with("QUIT") {
-                                    server_end.write_all(b"205 bye\r\n").await.unwrap();
-                                    break;
                                 }
                             }
                             Err(_) => break,
@@ -985,26 +1040,34 @@ mod tests {
         struct AllNotFoundFactory;
 
         impl ConnectionFactory for AllNotFoundFactory {
-            async fn connect(&self, server: &NewsServer) -> Result<NntpConnection, NntpError> {
+            async fn connect(
+                &self,
+                server: &NewsServer,
+                _tls_config: Option<Arc<ClientConfig>>,
+            ) -> Result<NntpConnection, NntpError> {
                 let (client, mut server_end) = duplex(4096);
                 tokio::spawn(async move {
                     server_end.write_all(b"200 Welcome\r\n").await.unwrap();
-                    let mut buf = vec![0u8; 1024];
-                    loop {
+                    let mut buf = vec![0u8; 4096];
+                    let mut leftover = String::new();
+                    'outer: loop {
                         match tokio::io::AsyncReadExt::read(&mut server_end, &mut buf).await {
                             Ok(0) => break,
                             Ok(n) => {
-                                let cmd = String::from_utf8_lossy(&buf[..n]);
-                                if cmd.starts_with("GROUP") {
-                                    server_end.write_all(b"211 0 0 0 group\r\n").await.unwrap();
-                                } else if cmd.starts_with("BODY") {
-                                    server_end
-                                        .write_all(b"430 No Such Article\r\n")
-                                        .await
-                                        .unwrap();
-                                } else if cmd.starts_with("QUIT") {
-                                    server_end.write_all(b"205 bye\r\n").await.unwrap();
-                                    break;
+                                leftover.push_str(&String::from_utf8_lossy(&buf[..n]));
+                                while let Some(pos) = leftover.find("\r\n") {
+                                    let cmd: String = leftover.drain(..pos + 2).collect();
+                                    if cmd.starts_with("GROUP") {
+                                        server_end.write_all(b"211 0 0 0 group\r\n").await.unwrap();
+                                    } else if cmd.starts_with("BODY") {
+                                        server_end
+                                            .write_all(b"430 No Such Article\r\n")
+                                            .await
+                                            .unwrap();
+                                    } else if cmd.starts_with("QUIT") {
+                                        server_end.write_all(b"205 bye\r\n").await.unwrap();
+                                        break 'outer;
+                                    }
                                 }
                             }
                             Err(_) => break,
@@ -1044,7 +1107,11 @@ mod tests {
         }
 
         impl ConnectionFactory for SlowNotFoundFactory {
-            async fn connect(&self, server: &NewsServer) -> Result<NntpConnection, NntpError> {
+            async fn connect(
+                &self,
+                server: &NewsServer,
+                _tls_config: Option<Arc<ClientConfig>>,
+            ) -> Result<NntpConnection, NntpError> {
                 let (client, mut server_end) = duplex(4096);
                 let is_slow = server.id == self.slow_server_id;
                 let body = self.response_body.clone();
@@ -1055,35 +1122,39 @@ mod tests {
                 };
                 tokio::spawn(async move {
                     server_end.write_all(b"200 Welcome\r\n").await.unwrap();
-                    let mut buf = vec![0u8; 1024];
-                    loop {
+                    let mut buf = vec![0u8; 4096];
+                    let mut leftover = String::new();
+                    'outer: loop {
                         match tokio::io::AsyncReadExt::read(&mut server_end, &mut buf).await {
                             Ok(0) => break,
                             Ok(n) => {
-                                let cmd = String::from_utf8_lossy(&buf[..n]);
-                                if cmd.starts_with("GROUP") {
-                                    server_end.write_all(b"211 0 0 0 group\r\n").await.unwrap();
-                                } else if cmd.starts_with("BODY") {
-                                    if is_slow {
-                                        if let Some(ref flag) = slow_started {
-                                            flag.store(true, Ordering::SeqCst);
+                                leftover.push_str(&String::from_utf8_lossy(&buf[..n]));
+                                while let Some(pos) = leftover.find("\r\n") {
+                                    let cmd: String = leftover.drain(..pos + 2).collect();
+                                    if cmd.starts_with("GROUP") {
+                                        server_end.write_all(b"211 0 0 0 group\r\n").await.unwrap();
+                                    } else if cmd.starts_with("BODY") {
+                                        if is_slow {
+                                            if let Some(ref flag) = slow_started {
+                                                flag.store(true, Ordering::SeqCst);
+                                            }
+                                            tokio::time::sleep(Duration::from_millis(500)).await;
+                                            server_end
+                                                .write_all(b"430 No Such Article\r\n")
+                                                .await
+                                                .unwrap();
+                                        } else {
+                                            server_end.write_all(b"222 body\r\n").await.unwrap();
+                                            for line in body.split(|&b| b == b'\n') {
+                                                server_end.write_all(line).await.unwrap();
+                                                server_end.write_all(b"\r\n").await.unwrap();
+                                            }
+                                            server_end.write_all(b".\r\n").await.unwrap();
                                         }
-                                        tokio::time::sleep(Duration::from_millis(500)).await;
-                                        server_end
-                                            .write_all(b"430 No Such Article\r\n")
-                                            .await
-                                            .unwrap();
-                                    } else {
-                                        server_end.write_all(b"222 body\r\n").await.unwrap();
-                                        for line in body.split(|&b| b == b'\n') {
-                                            server_end.write_all(line).await.unwrap();
-                                            server_end.write_all(b"\r\n").await.unwrap();
-                                        }
-                                        server_end.write_all(b".\r\n").await.unwrap();
+                                    } else if cmd.starts_with("QUIT") {
+                                        server_end.write_all(b"205 bye\r\n").await.unwrap();
+                                        break 'outer;
                                     }
-                                } else if cmd.starts_with("QUIT") {
-                                    server_end.write_all(b"205 bye\r\n").await.unwrap();
-                                    break;
                                 }
                             }
                             Err(_) => break,
@@ -1124,7 +1195,10 @@ mod tests {
         let pool = ServerPool::with_factory(vec![server], factory.clone());
 
         for _ in 0..5 {
-            let conn = factory.connect(&pool.servers[0].server).await.unwrap();
+            let conn = factory
+                .connect(&pool.servers[0].server, None)
+                .await
+                .unwrap();
             pool.return_connection(&pool.servers[0], conn).await;
         }
 
@@ -1164,6 +1238,40 @@ mod tests {
             .expect("fetch should complete")
             .expect("task should not panic");
         assert!(result.is_ok(), "fetch should succeed after permit released");
+    }
+
+    #[tokio::test]
+    async fn tls_config_stored_for_tls_servers() {
+        let server = test_server_tls(1, 0, 0, 2);
+        let factory = Arc::new(FakeFactory::new(b"data"));
+        let pool = ServerPool::with_factory(vec![server], factory);
+        assert!(
+            pool.servers[0].tls_config.is_some(),
+            "TLS server should have a tls_config"
+        );
+    }
+
+    #[tokio::test]
+    async fn tls_config_none_for_plaintext_servers() {
+        let server = test_server(1, 0, 0, 2);
+        let factory = Arc::new(FakeFactory::new(b"data"));
+        let pool = ServerPool::with_factory(vec![server], factory);
+        assert!(
+            pool.servers[0].tls_config.is_none(),
+            "plaintext server should not have a tls_config"
+        );
+    }
+
+    #[tokio::test]
+    async fn tls_config_shared_across_connections() {
+        let s1 = test_server_tls(1, 0, 0, 2);
+        let s2 = test_server_tls(2, 0, 0, 2);
+        let factory = Arc::new(FakeFactory::new(b"data"));
+        let pool = ServerPool::with_factory(vec![s1, s2], factory);
+
+        let cfg1 = pool.servers[0].tls_config.as_ref().unwrap();
+        let cfg1_clone = cfg1.clone();
+        assert!(Arc::ptr_eq(cfg1, &cfg1_clone));
     }
 
     #[tokio::test]

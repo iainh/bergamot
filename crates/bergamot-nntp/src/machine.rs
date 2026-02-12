@@ -20,6 +20,7 @@ pub enum Output {
     NeedResponseLine,
     NeedBodyLine,
     UpgradeToTls,
+    UpgradeToDeflate,
     Event(Event),
 }
 
@@ -40,6 +41,7 @@ pub enum Event {
     StatResult { exists: bool },
     BodyChunk(Vec<u8>),
     BodyEnd,
+    CompressActive,
     QuitAck,
     Error(ProtoError),
 }
@@ -56,6 +58,9 @@ enum State {
     ReadingBody,
     AwaitStartTlsResponse,
     AwaitStartTlsGreeting,
+    AwaitPipelinedGroupResponse,
+    AwaitPipelinedBodyResponse,
+    AwaitCompressResponse,
     AwaitQuit,
     Done,
 }
@@ -114,6 +119,14 @@ impl NntpMachine {
         self.state = State::AwaitStartTlsResponse;
     }
 
+    /// Negotiate NNTP compression ([RFC 8054](https://datatracker.ietf.org/doc/html/rfc8054)).
+    pub fn request_compress(&mut self) {
+        self.outputs
+            .push_back(Output::SendCommand("COMPRESS DEFLATE".to_string()));
+        self.outputs.push_back(Output::NeedResponseLine);
+        self.state = State::AwaitCompressResponse;
+    }
+
     /// Authenticate with AUTHINFO USER/PASS ([RFC 4643 §2.3](https://datatracker.ietf.org/doc/html/rfc4643#section-2.3)).
     pub fn request_auth(&mut self, user: &str, pass: &str) {
         self.pending_password = Some(pass.to_string());
@@ -127,8 +140,9 @@ impl NntpMachine {
     /// Skips the command if the group is already selected.
     pub fn request_group(&mut self, group: &str) {
         if self.current_group.as_deref() == Some(group) {
-            self.outputs
-                .push_back(Output::Event(Event::GroupJoined { group: group.to_string() }));
+            self.outputs.push_back(Output::Event(Event::GroupJoined {
+                group: group.to_string(),
+            }));
             return;
         }
         self.pending_group = Some(group.to_string());
@@ -144,6 +158,26 @@ impl NntpMachine {
             .push_back(Output::SendCommand(format!("STAT <{message_id}>")));
         self.outputs.push_back(Output::NeedResponseLine);
         self.state = State::AwaitStat;
+    }
+
+    /// Pipeline GROUP and BODY commands ([RFC 3977 §3.5](https://datatracker.ietf.org/doc/html/rfc3977#section-3.5)).
+    ///
+    /// Sends both commands back-to-back before reading any responses,
+    /// saving one network round-trip compared to sequential execution.
+    /// If the group is already selected, falls back to a simple BODY request.
+    pub fn request_group_body(&mut self, group: &str, message_id: &str) {
+        if self.current_group.as_deref() == Some(group) {
+            self.request_body(message_id);
+            return;
+        }
+        self.pending_group = Some(group.to_string());
+        self.pending_message_id = Some(message_id.to_string());
+        self.outputs
+            .push_back(Output::SendCommand(format!("GROUP {group}")));
+        self.outputs
+            .push_back(Output::SendCommand(format!("BODY <{message_id}>")));
+        self.outputs.push_back(Output::NeedResponseLine);
+        self.state = State::AwaitPipelinedGroupResponse;
     }
 
     /// Fetch article body with BODY ([RFC 3977 §6.2.3](https://datatracker.ietf.org/doc/html/rfc3977#section-6.2.3)).
@@ -176,88 +210,121 @@ impl NntpMachine {
                 self.state = State::Done;
             }
 
-            (State::AwaitGreeting, Input::ResponseLine(line)) => {
-                match parse_response(line) {
-                    Ok(resp) => {
-                        if resp.code == 200 || resp.code == 201 {
+            (State::AwaitGreeting, Input::ResponseLine(line)) => match parse_response(line) {
+                Ok(resp) => {
+                    if resp.code == 200 || resp.code == 201 {
+                        self.outputs
+                            .push_back(Output::Event(Event::GreetingOk { code: resp.code }));
+                        self.state = State::Idle;
+                    } else {
+                        self.emit_error(ProtoError::UnexpectedResponse(resp.code, resp.message));
+                        self.state = State::Done;
+                    }
+                }
+                Err(e) => {
+                    self.emit_error(e);
+                    self.state = State::Done;
+                }
+            },
+
+            (State::AwaitAuthUser, Input::ResponseLine(line)) => match parse_response(line) {
+                Ok(resp) => match resp.code {
+                    281 => {
+                        self.authenticated = true;
+                        self.pending_password = None;
+                        self.outputs.push_back(Output::Event(Event::Authenticated));
+                        self.state = State::Idle;
+                    }
+                    381 => {
+                        if let Some(pass) = self.pending_password.take() {
                             self.outputs
-                                .push_back(Output::Event(Event::GreetingOk { code: resp.code }));
-                            self.state = State::Idle;
+                                .push_back(Output::SendCommand(format!("AUTHINFO PASS {pass}")));
+                            self.outputs.push_back(Output::NeedResponseLine);
+                            self.state = State::AwaitAuthPass;
                         } else {
-                            self.emit_error(ProtoError::UnexpectedResponse(
-                                resp.code,
-                                resp.message,
+                            self.emit_error(ProtoError::AuthFailed(
+                                "password required but not provided".into(),
                             ));
                             self.state = State::Done;
                         }
                     }
-                    Err(e) => {
-                        self.emit_error(e);
-                        self.state = State::Done;
-                    }
-                }
-            }
-
-            (State::AwaitAuthUser, Input::ResponseLine(line)) => {
-                match parse_response(line) {
-                    Ok(resp) => match resp.code {
-                        281 => {
-                            self.authenticated = true;
-                            self.pending_password = None;
-                            self.outputs
-                                .push_back(Output::Event(Event::Authenticated));
-                            self.state = State::Idle;
-                        }
-                        381 => {
-                            if let Some(pass) = self.pending_password.take() {
-                                self.outputs.push_back(Output::SendCommand(format!(
-                                    "AUTHINFO PASS {pass}"
-                                )));
-                                self.outputs.push_back(Output::NeedResponseLine);
-                                self.state = State::AwaitAuthPass;
-                            } else {
-                                self.emit_error(ProtoError::AuthFailed(
-                                    "password required but not provided".into(),
-                                ));
-                                self.state = State::Done;
-                            }
-                        }
-                        _ => {
-                            self.pending_password = None;
-                            self.emit_error(ProtoError::AuthFailed(resp.message));
-                            self.state = State::Done;
-                        }
-                    },
-                    Err(e) => {
+                    _ => {
                         self.pending_password = None;
-                        self.emit_error(e);
+                        self.emit_error(ProtoError::AuthFailed(resp.message));
                         self.state = State::Done;
                     }
+                },
+                Err(e) => {
+                    self.pending_password = None;
+                    self.emit_error(e);
+                    self.state = State::Done;
                 }
-            }
+            },
 
-            (State::AwaitAuthPass, Input::ResponseLine(line)) => {
-                match parse_response(line) {
-                    Ok(resp) => match resp.code {
-                        281 => {
-                            self.authenticated = true;
-                            self.outputs
-                                .push_back(Output::Event(Event::Authenticated));
-                            self.state = State::Idle;
-                        }
-                        _ => {
-                            self.emit_error(ProtoError::AuthFailed(resp.message));
-                            self.state = State::Done;
-                        }
-                    },
-                    Err(e) => {
-                        self.emit_error(e);
+            (State::AwaitAuthPass, Input::ResponseLine(line)) => match parse_response(line) {
+                Ok(resp) => match resp.code {
+                    281 => {
+                        self.authenticated = true;
+                        self.outputs.push_back(Output::Event(Event::Authenticated));
+                        self.state = State::Idle;
+                    }
+                    _ => {
+                        self.emit_error(ProtoError::AuthFailed(resp.message));
                         self.state = State::Done;
                     }
+                },
+                Err(e) => {
+                    self.emit_error(e);
+                    self.state = State::Done;
                 }
-            }
+            },
 
-            (State::AwaitGroup, Input::ResponseLine(line)) => {
+            (State::AwaitGroup, Input::ResponseLine(line)) => match parse_response(line) {
+                Ok(resp) => {
+                    if resp.code == 211 {
+                        let group = self.pending_group.take().unwrap_or_default();
+                        self.current_group = Some(group.clone());
+                        self.outputs
+                            .push_back(Output::Event(Event::GroupJoined { group }));
+                        self.state = State::Idle;
+                    } else {
+                        let group = self.pending_group.take();
+                        self.emit_error(ProtoError::UnexpectedResponse(resp.code, resp.message));
+                        let _ = group;
+                        self.state = State::Idle;
+                    }
+                }
+                Err(e) => {
+                    self.pending_group = None;
+                    self.emit_error(e);
+                    self.state = State::Done;
+                }
+            },
+
+            (State::AwaitStat, Input::ResponseLine(line)) => match parse_response(line) {
+                Ok(resp) => match resp.code {
+                    223 => {
+                        self.outputs
+                            .push_back(Output::Event(Event::StatResult { exists: true }));
+                        self.state = State::Idle;
+                    }
+                    430 => {
+                        self.outputs
+                            .push_back(Output::Event(Event::StatResult { exists: false }));
+                        self.state = State::Idle;
+                    }
+                    _ => {
+                        self.emit_error(ProtoError::UnexpectedResponse(resp.code, resp.message));
+                        self.state = State::Idle;
+                    }
+                },
+                Err(e) => {
+                    self.emit_error(e);
+                    self.state = State::Done;
+                }
+            },
+
+            (State::AwaitPipelinedGroupResponse, Input::ResponseLine(line)) => {
                 match parse_response(line) {
                     Ok(resp) => {
                         if resp.code == 211 {
@@ -265,54 +332,28 @@ impl NntpMachine {
                             self.current_group = Some(group.clone());
                             self.outputs
                                 .push_back(Output::Event(Event::GroupJoined { group }));
-                            self.state = State::Idle;
+                            self.outputs.push_back(Output::NeedResponseLine);
+                            self.state = State::AwaitPipelinedBodyResponse;
                         } else {
-                            let group = self.pending_group.take();
+                            self.pending_group = None;
+                            self.pending_message_id = None;
                             self.emit_error(ProtoError::UnexpectedResponse(
                                 resp.code,
                                 resp.message,
                             ));
-                            let _ = group;
-                            self.state = State::Idle;
+                            self.state = State::Done;
                         }
                     }
                     Err(e) => {
                         self.pending_group = None;
+                        self.pending_message_id = None;
                         self.emit_error(e);
                         self.state = State::Done;
                     }
                 }
             }
 
-            (State::AwaitStat, Input::ResponseLine(line)) => {
-                match parse_response(line) {
-                    Ok(resp) => match resp.code {
-                        223 => {
-                            self.outputs
-                                .push_back(Output::Event(Event::StatResult { exists: true }));
-                            self.state = State::Idle;
-                        }
-                        430 => {
-                            self.outputs
-                                .push_back(Output::Event(Event::StatResult { exists: false }));
-                            self.state = State::Idle;
-                        }
-                        _ => {
-                            self.emit_error(ProtoError::UnexpectedResponse(
-                                resp.code,
-                                resp.message,
-                            ));
-                            self.state = State::Idle;
-                        }
-                    },
-                    Err(e) => {
-                        self.emit_error(e);
-                        self.state = State::Done;
-                    }
-                }
-            }
-
-            (State::AwaitBodyResponse, Input::ResponseLine(line)) => {
+            (State::AwaitPipelinedBodyResponse, Input::ResponseLine(line)) => {
                 match parse_response(line) {
                     Ok(resp) => match resp.code {
                         222 => {
@@ -348,6 +389,38 @@ impl NntpMachine {
                     }
                 }
             }
+
+            (State::AwaitBodyResponse, Input::ResponseLine(line)) => match parse_response(line) {
+                Ok(resp) => match resp.code {
+                    222 => {
+                        self.outputs.push_back(Output::NeedBodyLine);
+                        self.state = State::ReadingBody;
+                    }
+                    430 => {
+                        let msg_id = self
+                            .pending_message_id
+                            .take()
+                            .unwrap_or_else(|| "unknown".to_string());
+                        self.emit_error(ProtoError::ArticleNotFound(msg_id));
+                        self.state = State::Idle;
+                    }
+                    480 => {
+                        self.pending_message_id = None;
+                        self.emit_error(ProtoError::AuthRequired);
+                        self.state = State::Idle;
+                    }
+                    _ => {
+                        self.pending_message_id = None;
+                        self.emit_error(ProtoError::UnexpectedResponse(resp.code, resp.message));
+                        self.state = State::Idle;
+                    }
+                },
+                Err(e) => {
+                    self.pending_message_id = None;
+                    self.emit_error(e);
+                    self.state = State::Done;
+                }
+            },
 
             (State::ReadingBody, Input::BodyEnd) => {
                 self.pending_message_id = None;
@@ -408,6 +481,28 @@ impl NntpMachine {
                     Err(e) => {
                         self.emit_error(e);
                         self.state = State::Done;
+                    }
+                }
+            }
+
+            (State::AwaitCompressResponse, Input::ResponseLine(line)) => {
+                match parse_response(line) {
+                    Ok(resp) => {
+                        if resp.code == 206 {
+                            self.outputs.push_back(Output::UpgradeToDeflate);
+                            self.outputs.push_back(Output::Event(Event::CompressActive));
+                            self.state = State::Idle;
+                        } else {
+                            self.emit_error(ProtoError::UnexpectedResponse(
+                                resp.code,
+                                resp.message,
+                            ));
+                            self.state = State::Idle;
+                        }
+                    }
+                    Err(e) => {
+                        self.emit_error(e);
+                        self.state = State::Idle;
                     }
                 }
             }
@@ -506,10 +601,7 @@ mod tests {
 
         m.handle_input(Input::ResponseLine("200 Welcome"));
         let out = drain_outputs(&mut m);
-        assert_eq!(
-            find_event(&out),
-            Some(&Event::GreetingOk { code: 200 })
-        );
+        assert_eq!(find_event(&out), Some(&Event::GreetingOk { code: 200 }));
     }
 
     #[test]
@@ -518,10 +610,7 @@ mod tests {
         drain_outputs(&mut m);
         m.handle_input(Input::ResponseLine("201 No posting"));
         let out = drain_outputs(&mut m);
-        assert_eq!(
-            find_event(&out),
-            Some(&Event::GreetingOk { code: 201 })
-        );
+        assert_eq!(find_event(&out), Some(&Event::GreetingOk { code: 201 }));
     }
 
     #[test]
@@ -574,7 +663,10 @@ mod tests {
 
         m.handle_input(Input::ResponseLine("452 Auth failed"));
         let out = drain_outputs(&mut m);
-        assert!(matches!(find_event(&out), Some(Event::Error(ProtoError::AuthFailed(_)))));
+        assert!(matches!(
+            find_event(&out),
+            Some(Event::Error(ProtoError::AuthFailed(_)))
+        ));
     }
 
     #[test]
@@ -622,10 +714,7 @@ mod tests {
 
         m.handle_input(Input::ResponseLine("223 0 <test@example>"));
         let out = drain_outputs(&mut m);
-        assert_eq!(
-            find_event(&out),
-            Some(&Event::StatResult { exists: true })
-        );
+        assert_eq!(find_event(&out), Some(&Event::StatResult { exists: true }));
     }
 
     #[test]
@@ -636,10 +725,7 @@ mod tests {
 
         m.handle_input(Input::ResponseLine("430 No Such Article"));
         let out = drain_outputs(&mut m);
-        assert_eq!(
-            find_event(&out),
-            Some(&Event::StatResult { exists: false })
-        );
+        assert_eq!(find_event(&out), Some(&Event::StatResult { exists: false }));
     }
 
     #[test]
@@ -722,10 +808,7 @@ mod tests {
 
         m.handle_input(Input::ResponseLine("200 Welcome (TLS)"));
         let out = drain_outputs(&mut m);
-        assert_eq!(
-            find_event(&out),
-            Some(&Event::GreetingOk { code: 200 })
-        );
+        assert_eq!(find_event(&out), Some(&Event::GreetingOk { code: 200 }));
     }
 
     #[test]
@@ -1063,7 +1146,12 @@ mod tests {
         m.handle_input(Input::ResponseLine("222 body follows"));
         drain_outputs(&mut m);
 
-        let lines: &[&[u8]] = &[b"normal line", b"..stuffed", b"another normal", b"...double"];
+        let lines: &[&[u8]] = &[
+            b"normal line",
+            b"..stuffed",
+            b"another normal",
+            b"...double",
+        ];
         let expected: &[&[u8]] = &[b"normal line", b".stuffed", b"another normal", b"..double"];
 
         for (line, exp) in lines.iter().zip(expected.iter()) {
@@ -1073,6 +1161,73 @@ mod tests {
             assert_eq!(events[0], &Event::BodyChunk(exp.to_vec()));
         }
 
+        m.handle_input(Input::BodyEnd);
+        let out = drain_outputs(&mut m);
+        assert_eq!(find_event(&out), Some(&Event::BodyEnd));
+    }
+
+    // --- RFC 8054: COMPRESS ---
+
+    #[test]
+    fn compress_sends_command_and_awaits_response() {
+        let mut m = NntpMachine::new_after_greeting();
+        m.request_compress();
+        let out = drain_outputs(&mut m);
+        assert_eq!(out[0], Output::SendCommand("COMPRESS DEFLATE".to_string()));
+        assert_eq!(out[1], Output::NeedResponseLine);
+    }
+
+    #[test]
+    fn compress_206_emits_upgrade_to_deflate() {
+        let mut m = NntpMachine::new_after_greeting();
+        m.request_compress();
+        drain_outputs(&mut m);
+        m.handle_input(Input::ResponseLine("206 Compression active"));
+        let out = drain_outputs(&mut m);
+        assert!(out.contains(&Output::UpgradeToDeflate));
+        assert_eq!(find_event(&out), Some(&Event::CompressActive));
+    }
+
+    #[test]
+    fn compress_403_emits_error() {
+        let mut m = NntpMachine::new_after_greeting();
+        m.request_compress();
+        drain_outputs(&mut m);
+        m.handle_input(Input::ResponseLine("403 Unable to activate compression"));
+        let out = drain_outputs(&mut m);
+        assert!(matches!(
+            find_event(&out),
+            Some(Event::Error(ProtoError::UnexpectedResponse(403, _)))
+        ));
+    }
+
+    #[test]
+    fn compress_malformed_response_errors() {
+        let mut m = NntpMachine::new_after_greeting();
+        m.request_compress();
+        drain_outputs(&mut m);
+        m.handle_input(Input::ResponseLine("garbage"));
+        let out = drain_outputs(&mut m);
+        assert!(matches!(
+            find_event(&out),
+            Some(Event::Error(ProtoError::ProtocolError(_)))
+        ));
+    }
+
+    #[test]
+    fn body_works_after_compress() {
+        let mut m = NntpMachine::new_after_greeting();
+        m.request_compress();
+        drain_outputs(&mut m);
+        m.handle_input(Input::ResponseLine("206 Compression active"));
+        drain_outputs(&mut m);
+
+        m.request_body("test@example");
+        drain_outputs(&mut m);
+        m.handle_input(Input::ResponseLine("222 body follows"));
+        drain_outputs(&mut m);
+        m.handle_input(Input::BodyLine(b"data"));
+        drain_outputs(&mut m);
         m.handle_input(Input::BodyEnd);
         let out = drain_outputs(&mut m);
         assert_eq!(find_event(&out), Some(&Event::BodyEnd));
@@ -1152,7 +1307,9 @@ mod tests {
         let mut m = NntpMachine::new_after_greeting();
         m.request_starttls();
         drain_outputs(&mut m);
-        m.handle_input(Input::ResponseLine("502 STARTTLS not allowed with active TLS layer"));
+        m.handle_input(Input::ResponseLine(
+            "502 STARTTLS not allowed with active TLS layer",
+        ));
         let out = drain_outputs(&mut m);
         assert!(matches!(
             find_event(&out),
@@ -1188,6 +1345,114 @@ mod tests {
         ));
     }
 
+    // --- RFC 3977 §3.5: Pipelining ---
+
+    #[test]
+    fn pipelined_group_body_emits_two_commands_before_read() {
+        let mut m = NntpMachine::new_after_greeting();
+        m.request_group_body("alt.test", "msg@example");
+        let out = drain_outputs(&mut m);
+        assert_eq!(out[0], Output::SendCommand("GROUP alt.test".to_string()));
+        assert_eq!(
+            out[1],
+            Output::SendCommand("BODY <msg@example>".to_string())
+        );
+        assert_eq!(out[2], Output::NeedResponseLine);
+    }
+
+    #[test]
+    fn pipelined_group_body_happy_path() {
+        let mut m = NntpMachine::new_after_greeting();
+        m.request_group_body("alt.test", "msg@example");
+        drain_outputs(&mut m);
+
+        m.handle_input(Input::ResponseLine("211 5 1 5 alt.test"));
+        let out = drain_outputs(&mut m);
+        assert_eq!(
+            find_event(&out),
+            Some(&Event::GroupJoined {
+                group: "alt.test".to_string()
+            })
+        );
+        assert!(out.contains(&Output::NeedResponseLine));
+
+        m.handle_input(Input::ResponseLine("222 body follows"));
+        let out = drain_outputs(&mut m);
+        assert!(out.contains(&Output::NeedBodyLine));
+
+        m.handle_input(Input::BodyLine(b"data"));
+        drain_outputs(&mut m);
+        m.handle_input(Input::BodyEnd);
+        let out = drain_outputs(&mut m);
+        assert_eq!(find_event(&out), Some(&Event::BodyEnd));
+    }
+
+    #[test]
+    fn pipelined_group_body_group_error_goes_done() {
+        let mut m = NntpMachine::new_after_greeting();
+        m.request_group_body("no.such", "msg@example");
+        drain_outputs(&mut m);
+
+        m.handle_input(Input::ResponseLine("411 No such group"));
+        let out = drain_outputs(&mut m);
+        assert!(matches!(
+            find_event(&out),
+            Some(Event::Error(ProtoError::UnexpectedResponse(411, _)))
+        ));
+    }
+
+    #[test]
+    fn pipelined_group_body_article_not_found() {
+        let mut m = NntpMachine::new_after_greeting();
+        m.request_group_body("alt.test", "missing@example");
+        drain_outputs(&mut m);
+
+        m.handle_input(Input::ResponseLine("211 5 1 5 alt.test"));
+        drain_outputs(&mut m);
+
+        m.handle_input(Input::ResponseLine("430 No Such Article"));
+        let out = drain_outputs(&mut m);
+        assert!(matches!(
+            find_event(&out),
+            Some(Event::Error(ProtoError::ArticleNotFound(_)))
+        ));
+    }
+
+    #[test]
+    fn pipelined_group_body_skips_group_if_already_selected() {
+        let mut m = NntpMachine::new_after_greeting();
+        m.request_group("alt.test");
+        drain_outputs(&mut m);
+        m.handle_input(Input::ResponseLine("211 5 1 5 alt.test"));
+        drain_outputs(&mut m);
+
+        m.request_group_body("alt.test", "msg@example");
+        let out = drain_outputs(&mut m);
+        assert_eq!(
+            out[0],
+            Output::SendCommand("BODY <msg@example>".to_string())
+        );
+        assert_eq!(out[1], Output::NeedResponseLine);
+        assert_eq!(out.len(), 2);
+    }
+
+    #[test]
+    fn pipelined_group_body_auth_required_on_body() {
+        let mut m = NntpMachine::new_after_greeting();
+        m.request_group_body("alt.test", "test@example");
+        drain_outputs(&mut m);
+
+        m.handle_input(Input::ResponseLine("211 5 1 5 alt.test"));
+        drain_outputs(&mut m);
+
+        m.handle_input(Input::ResponseLine("480 Auth required"));
+        let out = drain_outputs(&mut m);
+        assert!(matches!(
+            find_event(&out),
+            Some(Event::Error(ProtoError::AuthRequired))
+        ));
+    }
+
     // --- Recovery: commands work after error responses ---
 
     #[test]
@@ -1202,10 +1467,7 @@ mod tests {
         drain_outputs(&mut m);
         m.handle_input(Input::ResponseLine("223 0 <other@example>"));
         let out = drain_outputs(&mut m);
-        assert_eq!(
-            find_event(&out),
-            Some(&Event::StatResult { exists: true })
-        );
+        assert_eq!(find_event(&out), Some(&Event::StatResult { exists: true }));
     }
 
     #[test]
