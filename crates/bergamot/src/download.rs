@@ -67,7 +67,7 @@ pub async fn download_worker(
 
     let watcher_limiter = limiter.clone();
     let mut watcher_rx = rate_rx.clone();
-    tokio::spawn(async move {
+    let rate_watcher = tokio::spawn(async move {
         while watcher_rx.changed().await.is_ok() {
             let rate = *watcher_rx.borrow();
             watcher_limiter.set_rate(rate).await;
@@ -77,6 +77,7 @@ pub async fn download_worker(
     tracing::debug!("download worker started");
 
     let concurrency = Arc::new(tokio::sync::Semaphore::new(max_concurrent));
+    let mut in_flight = tokio::task::JoinSet::new();
 
     while let Some(assignment) = assignment_rx.recv().await {
         tracing::debug!(
@@ -97,7 +98,7 @@ pub async fn download_worker(
         let limiter = limiter.clone();
         let cache = cache.clone();
         let writer_pool = writer_pool.clone();
-        tokio::spawn(async move {
+        in_flight.spawn(async move {
             let _permit = permit;
             limiter.acquire(assignment.expected_size).await;
 
@@ -162,6 +163,15 @@ pub async fn download_worker(
             let _ = handle.report_download(download_result).await;
         });
     }
+
+    while let Some(result) = in_flight.join_next().await {
+        if let Err(err) = result
+            && err.is_panic()
+        {
+            tracing::error!("download task panicked: {err}");
+        }
+    }
+    rate_watcher.abort();
 
     tracing::debug!("download worker shutting down");
 }
