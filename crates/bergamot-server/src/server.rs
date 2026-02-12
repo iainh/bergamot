@@ -552,16 +552,22 @@ async fn call_rpc_via_module(
                 }
                 (parsed.get("result").cloned(), None)
             } else {
-                (None, Some(JsonRpcError {
-                    code: -32603,
-                    message: "Internal error".to_string(),
-                }))
+                (
+                    None,
+                    Some(JsonRpcError {
+                        code: -32603,
+                        message: "Internal error".to_string(),
+                    }),
+                )
             }
         }
-        Err(_) => (None, Some(JsonRpcError {
-            code: -32700,
-            message: "Parse error".to_string(),
-        })),
+        Err(_) => (
+            None,
+            Some(JsonRpcError {
+                code: -32700,
+                message: "Parse error".to_string(),
+            }),
+        ),
     }
 }
 

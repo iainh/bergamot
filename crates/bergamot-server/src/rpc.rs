@@ -23,7 +23,9 @@ pub struct JsonRpcResponse {
     pub id: serde_json::Value,
 }
 
-pub(crate) fn require_queue(state: &AppState) -> Result<&bergamot_queue::QueueHandle, JsonRpcError> {
+pub(crate) fn require_queue(
+    state: &AppState,
+) -> Result<&bergamot_queue::QueueHandle, JsonRpcError> {
     state.queue_handle().ok_or_else(|| JsonRpcError {
         code: -32000,
         message: "Queue not available".to_string(),
@@ -832,7 +834,9 @@ fn build_server_volume(
     })
 }
 
-pub(crate) async fn rpc_schedulerstats(state: &AppState) -> Result<serde_json::Value, JsonRpcError> {
+pub(crate) async fn rpc_schedulerstats(
+    state: &AppState,
+) -> Result<serde_json::Value, JsonRpcError> {
     let queue = require_queue(state)?;
     let stats = queue.get_scheduler_stats().await.map_err(rpc_error)?;
     let entries: Vec<serde_json::Value> = stats
@@ -1114,7 +1118,9 @@ fn format_mark_status(s: bergamot_core::models::MarkStatus) -> &'static str {
     }
 }
 
-pub(crate) async fn rpc_testserver(params: &serde_json::Value) -> Result<serde_json::Value, JsonRpcError> {
+pub(crate) async fn rpc_testserver(
+    params: &serde_json::Value,
+) -> Result<serde_json::Value, JsonRpcError> {
     let arr = params
         .as_array()
         .ok_or_else(|| rpc_error("params must be an array"))?;
@@ -1184,7 +1190,9 @@ pub(crate) async fn rpc_pausedownload(state: &AppState) -> Result<serde_json::Va
     Ok(serde_json::json!(true))
 }
 
-pub(crate) async fn rpc_resumedownload(state: &AppState) -> Result<serde_json::Value, JsonRpcError> {
+pub(crate) async fn rpc_resumedownload(
+    state: &AppState,
+) -> Result<serde_json::Value, JsonRpcError> {
     let queue = require_queue(state)?;
     queue.resume_all().await.map_err(rpc_error)?;
     state

@@ -75,6 +75,11 @@ fn main() -> Result<()> {
 
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
+        .thread_name_fn(|| {
+            static IDX: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+            let i = IDX.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            format!("bergamot-{i}")
+        })
         .build()
         .context("building tokio runtime")?;
 

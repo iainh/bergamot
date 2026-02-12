@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
-use jsonrpsee::types::ErrorObjectOwned;
 use jsonrpsee::RpcModule;
+use jsonrpsee::types::ErrorObjectOwned;
 
 use crate::error::JsonRpcError;
 use crate::rpc;
