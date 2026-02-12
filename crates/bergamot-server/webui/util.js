@@ -692,7 +692,7 @@ var RPC = (new function($)
 		else
 		{
 			xhr.open('post', this.rpcUrl);
-			xhr._request = JSON.stringify({nocache: new Date().getTime(), method: method, params: params});
+			xhr._request = JSON.stringify({jsonrpc: '2.0', method: method, params: params, id: new Date().getTime()});
 			xhr._reportRequest = xhr._request;
 		}
 

@@ -4,6 +4,7 @@ mod auth;
 mod config;
 mod error;
 mod rpc;
+mod rpc_module;
 mod server;
 mod shutdown;
 mod status;

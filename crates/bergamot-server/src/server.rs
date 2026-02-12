@@ -10,13 +10,16 @@ use tokio::net::TcpListener;
 use tower_http::compression::CompressionLayer;
 use tower_http::cors::CorsLayer;
 
+use jsonrpsee::Methods;
+
 use crate::auth::{
     AccessLevel, AuthState, auth_middleware, authenticate, extract_access, required_access,
     unauthorized_response,
 };
 use crate::config::ServerConfig;
 use crate::error::{JsonRpcError, JsonRpcErrorBody};
-use crate::rpc::{JsonRpcRequest, JsonRpcResponse, dispatch_rpc};
+use crate::rpc::JsonRpcResponse;
+use crate::rpc_module::build_rpc_module;
 use crate::shutdown::ShutdownHandle;
 use crate::status::StatusResponse;
 use crate::xmlrpc;
@@ -346,14 +349,23 @@ pub fn spawn_stats_updater(
     })
 }
 
+#[derive(Clone)]
+struct RpcState {
+    methods: Arc<Methods>,
+}
+
 pub struct WebServer {
     config: Arc<ServerConfig>,
-    state: Arc<AppState>,
+    rpc_methods: Methods,
 }
 
 impl WebServer {
     pub fn new(config: Arc<ServerConfig>, state: Arc<AppState>) -> Self {
-        Self { config, state }
+        let rpc_methods: Methods = build_rpc_module(state).into();
+        Self {
+            config,
+            rpc_methods,
+        }
     }
 
     pub fn validate_tls_config(config: &ServerConfig) -> Result<(), Box<dyn std::error::Error>> {
@@ -372,6 +384,9 @@ impl WebServer {
         let auth_state = AuthState {
             config: (*self.config).clone(),
         };
+        let rpc_state = RpcState {
+            methods: Arc::new(self.rpc_methods.clone()),
+        };
         let mut app = Router::new()
             .route("/jsonrpc", post(handle_jsonrpc))
             .route("/jsonprpc", get(handle_jsonprpc))
@@ -381,7 +396,7 @@ impl WebServer {
                 auth_state.clone(),
                 auth_middleware,
             ))
-            .with_state(self.state.clone());
+            .with_state(rpc_state);
 
         if self.config.form_auth {
             let login_auth = auth_state.clone();
@@ -394,10 +409,10 @@ impl WebServer {
                 .route("/logout", post(handle_logout));
         }
 
-        let fallback_state = self.state.clone();
+        let fallback_methods = Arc::new(self.rpc_methods.clone());
         let fallback_auth = auth_state;
         let fallback = axum::routing::any(move |req: axum::http::Request<axum::body::Body>| {
-            let state = fallback_state.clone();
+            let methods = fallback_methods.clone();
             let auth = fallback_auth.clone();
             async move {
                 let path = req.uri().path().to_string();
@@ -411,20 +426,21 @@ impl WebServer {
                         return unauthorized_response().into_response();
                     }
                     let params = parse_query_params(req.uri().query());
-                    let result = dispatch_rpc(method, &params, &state).await;
-                    let response = match result {
-                        Ok(value) => JsonRpcResponse {
-                            jsonrpc: "2.0".to_string(),
-                            result: Some(value),
-                            error: None,
-                            id: serde_json::json!(0),
-                        },
-                        Err(err) => JsonRpcResponse {
+                    let (result, err) = call_rpc_via_module(&methods, method, &params).await;
+                    let response = if let Some(err) = err {
+                        JsonRpcResponse {
                             jsonrpc: "2.0".to_string(),
                             result: None,
                             error: Some(serde_json::to_value(JsonRpcErrorBody::from(err)).unwrap()),
                             id: serde_json::json!(0),
-                        },
+                        }
+                    } else {
+                        JsonRpcResponse {
+                            jsonrpc: "2.0".to_string(),
+                            result,
+                            error: None,
+                            id: serde_json::json!(0),
+                        }
                     };
                     return Json(response).into_response();
                 }
@@ -466,48 +482,91 @@ impl WebServer {
 }
 
 async fn handle_jsonrpc(
-    axum::extract::State(state): axum::extract::State<Arc<AppState>>,
+    axum::extract::State(rpc): axum::extract::State<RpcState>,
     axum::Extension(access): axum::Extension<AccessLevel>,
     body: String,
-) -> Json<JsonRpcResponse> {
-    let payload: JsonRpcRequest = match serde_json::from_str(&body) {
-        Ok(p) => p,
-        Err(err) => {
-            return Json(JsonRpcResponse {
-                jsonrpc: "2.0".to_string(),
-                result: None,
-                error: Some(
-                    serde_json::to_value(JsonRpcErrorBody::from(JsonRpcError {
-                        code: -32700,
-                        message: format!("Parse error: {err}"),
-                    }))
-                    .unwrap(),
-                ),
-                id: serde_json::json!(0),
-            });
-        }
-    };
-    let response = match dispatch_rpc(&payload.method, &payload.params, &state).await {
-        Ok(result) => JsonRpcResponse {
-            jsonrpc: "2.0".to_string(),
-            result: Some(result),
-            error: None,
-            id: payload.id.unwrap_or_else(|| serde_json::json!(0)),
-        },
-        Err(err) => JsonRpcResponse {
-            jsonrpc: "2.0".to_string(),
-            result: None,
-            error: Some(serde_json::to_value(JsonRpcErrorBody::from(err)).unwrap()),
-            id: payload.id.unwrap_or_else(|| serde_json::json!(0)),
-        },
-    };
-
+) -> axum::response::Response {
     let _ = access;
-    Json(response)
+    let normalized = normalize_jsonrpc_request(&body);
+    match rpc.methods.raw_json_request(&normalized, 1).await {
+        Ok((response, _rx)) => axum::response::Response::builder()
+            .header("Content-Type", "application/json")
+            .body(axum::body::Body::from(response))
+            .unwrap()
+            .into_response(),
+        Err(_) => {
+            let err_response = serde_json::json!({
+                "jsonrpc": "2.0",
+                "error": {"code": -32700, "message": "Parse error"},
+                "id": null
+            });
+            axum::response::Response::builder()
+                .header("Content-Type", "application/json")
+                .body(axum::body::Body::from(err_response.to_string()))
+                .unwrap()
+                .into_response()
+        }
+    }
+}
+
+fn normalize_jsonrpc_request(body: &str) -> String {
+    if let Ok(mut obj) = serde_json::from_str::<serde_json::Value>(body)
+        && let Some(map) = obj.as_object_mut()
+    {
+        if !map.contains_key("jsonrpc") {
+            map.insert("jsonrpc".to_string(), serde_json::json!("2.0"));
+        }
+        if !map.contains_key("id") {
+            map.insert("id".to_string(), serde_json::json!(0));
+        }
+        return serde_json::to_string(&obj).unwrap();
+    }
+    body.to_string()
+}
+
+async fn call_rpc_via_module(
+    methods: &Methods,
+    method: &str,
+    params: &serde_json::Value,
+) -> (Option<serde_json::Value>, Option<JsonRpcError>) {
+    let request = serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": method,
+        "params": params,
+        "id": 0
+    });
+    let request_str = serde_json::to_string(&request).unwrap();
+    match methods.raw_json_request(&request_str, 1).await {
+        Ok((response, _rx)) => {
+            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&response) {
+                if let Some(err) = parsed.get("error")
+                    && !err.is_null()
+                {
+                    let code = err.get("code").and_then(|c| c.as_i64()).unwrap_or(-32000) as i32;
+                    let message = err
+                        .get("message")
+                        .and_then(|m| m.as_str())
+                        .unwrap_or("Unknown error")
+                        .to_string();
+                    return (None, Some(JsonRpcError { code, message }));
+                }
+                (parsed.get("result").cloned(), None)
+            } else {
+                (None, Some(JsonRpcError {
+                    code: -32603,
+                    message: "Internal error".to_string(),
+                }))
+            }
+        }
+        Err(_) => (None, Some(JsonRpcError {
+            code: -32700,
+            message: "Parse error".to_string(),
+        })),
+    }
 }
 
 async fn handle_jsonprpc(
-    axum::extract::State(state): axum::extract::State<Arc<AppState>>,
+    axum::extract::State(rpc): axum::extract::State<RpcState>,
     axum::Extension(access): axum::Extension<AccessLevel>,
     axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
 ) -> String {
@@ -519,21 +578,23 @@ async fn handle_jsonprpc(
         .get("method")
         .cloned()
         .unwrap_or_else(|| "status".to_string());
-    let response = match dispatch_rpc(&method, &serde_json::json!([]), &state).await {
-        Ok(result) => JsonRpcResponse {
-            jsonrpc: "2.0".to_string(),
-            result: Some(result),
-            error: None,
-            id: serde_json::json!(0),
-        },
-        Err(err) => JsonRpcResponse {
+    let _ = access;
+    let (result, err) = call_rpc_via_module(&rpc.methods, &method, &serde_json::json!([])).await;
+    let response = if let Some(err) = err {
+        JsonRpcResponse {
             jsonrpc: "2.0".to_string(),
             result: None,
             error: Some(serde_json::to_value(JsonRpcErrorBody::from(err)).unwrap()),
             id: serde_json::json!(0),
-        },
+        }
+    } else {
+        JsonRpcResponse {
+            jsonrpc: "2.0".to_string(),
+            result,
+            error: None,
+            id: serde_json::json!(0),
+        }
     };
-    let _ = access;
     format!(
         "{}({});",
         callback,
@@ -542,7 +603,7 @@ async fn handle_jsonprpc(
 }
 
 async fn handle_xmlrpc(
-    axum::extract::State(state): axum::extract::State<Arc<AppState>>,
+    axum::extract::State(rpc): axum::extract::State<RpcState>,
     axum::Extension(access): axum::Extension<AccessLevel>,
     body: String,
 ) -> axum::response::Response<String> {
@@ -558,21 +619,20 @@ async fn handle_xmlrpc(
         }
     };
 
-    match dispatch_rpc(&method, &params, &state).await {
-        Ok(result) => {
-            let xml = xmlrpc::json_to_xmlrpc_response(&result);
-            axum::response::Response::builder()
-                .header("Content-Type", "text/xml")
-                .body(xml)
-                .unwrap()
-        }
-        Err(err) => {
-            let xml = xmlrpc::json_to_xmlrpc_fault(err.code, &err.message);
-            axum::response::Response::builder()
-                .header("Content-Type", "text/xml")
-                .body(xml)
-                .unwrap()
-        }
+    let (result, err) = call_rpc_via_module(&rpc.methods, &method, &params).await;
+    if let Some(err) = err {
+        let xml = xmlrpc::json_to_xmlrpc_fault(err.code, &err.message);
+        axum::response::Response::builder()
+            .header("Content-Type", "text/xml")
+            .body(xml)
+            .unwrap()
+    } else {
+        let result = result.unwrap_or(serde_json::json!(null));
+        let xml = xmlrpc::json_to_xmlrpc_response(&result);
+        axum::response::Response::builder()
+            .header("Content-Type", "text/xml")
+            .body(xml)
+            .unwrap()
     }
 }
 
@@ -681,7 +741,7 @@ fn parse_query_params(query: Option<&str>) -> serde_json::Value {
 }
 
 async fn handle_api_shortcut(
-    axum::extract::State(state): axum::extract::State<Arc<AppState>>,
+    axum::extract::State(rpc): axum::extract::State<RpcState>,
     axum::extract::Path(method): axum::extract::Path<String>,
     axum::Extension(access): axum::Extension<AccessLevel>,
     uri: axum::http::Uri,
@@ -701,20 +761,21 @@ async fn handle_api_shortcut(
     }
 
     let params = parse_query_params(uri.query());
-    let result = dispatch_rpc(&method, &params, &state).await;
-    match result {
-        Ok(value) => Ok(Json(JsonRpcResponse {
-            jsonrpc: "2.0".to_string(),
-            result: Some(value),
-            error: None,
-            id: serde_json::json!(0),
-        })),
-        Err(err) => Err(Json(JsonRpcResponse {
+    let (result, err) = call_rpc_via_module(&rpc.methods, &method, &params).await;
+    if let Some(err) = err {
+        Err(Json(JsonRpcResponse {
             jsonrpc: "2.0".to_string(),
             result: None,
             error: Some(serde_json::to_value(JsonRpcErrorBody::from(err)).unwrap()),
             id: serde_json::json!(0),
-        })),
+        }))
+    } else {
+        Ok(Json(JsonRpcResponse {
+            jsonrpc: "2.0".to_string(),
+            result,
+            error: None,
+            id: serde_json::json!(0),
+        }))
     }
 }
 
@@ -787,23 +848,31 @@ mod tests {
         assert_eq!(status.remaining_size_mb, 100);
     }
 
+    fn rpc_state() -> RpcState {
+        let state = Arc::new(AppState::default());
+        let methods: Methods = build_rpc_module(state).into();
+        RpcState {
+            methods: Arc::new(methods),
+        }
+    }
+
     #[tokio::test]
     async fn jsonrpc_returns_status() {
-        let state = Arc::new(AppState::default());
+        let rpc = rpc_state();
         let auth_state = AuthState {
             config: server_config(),
         };
         let app = Router::new()
             .route("/jsonrpc", post(handle_jsonrpc))
             .layer(middleware::from_fn_with_state(auth_state, auth_middleware))
-            .with_state(state);
+            .with_state(rpc);
 
-        let payload = JsonRpcRequest {
-            jsonrpc: Some("2.0".to_string()),
-            method: "status".to_string(),
-            params: serde_json::json!([]),
-            id: Some(serde_json::json!(1)),
-        };
+        let payload = serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "status",
+            "params": [],
+            "id": 1
+        });
         let body = serde_json::to_vec(&payload).unwrap();
 
         let request = Request::builder()
