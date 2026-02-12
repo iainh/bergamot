@@ -11,9 +11,14 @@ struct WriteRequest {
     reply: oneshot::Sender<Result<()>>,
 }
 
+struct WriterEntry {
+    tx: mpsc::Sender<WriteRequest>,
+    handle: tokio::task::JoinHandle<()>,
+}
+
 #[derive(Clone)]
 pub struct FileWriterPool {
-    writers: Arc<DashMap<PathBuf, mpsc::Sender<WriteRequest>>>,
+    writers: Arc<DashMap<PathBuf, WriterEntry>>,
 }
 
 impl Default for FileWriterPool {
@@ -47,8 +52,10 @@ impl FileWriterPool {
         file.set_len(size).await.context("pre-allocating file")?;
 
         let (tx, rx) = mpsc::channel::<WriteRequest>(64);
-        tokio::spawn(writer_task(file, rx, size));
-        self.writers.entry(path.to_path_buf()).or_insert(tx);
+        let handle = tokio::spawn(writer_task(file, rx, size));
+        self.writers
+            .entry(path.to_path_buf())
+            .or_insert(WriterEntry { tx, handle });
         Ok(())
     }
 
@@ -69,7 +76,7 @@ impl FileWriterPool {
 
     async fn get_or_create(&self, path: &Path) -> Result<mpsc::Sender<WriteRequest>> {
         if let Some(entry) = self.writers.get(path) {
-            return Ok(entry.value().clone());
+            return Ok(entry.value().tx.clone());
         }
 
         if let Some(parent) = path.parent() {
@@ -89,20 +96,35 @@ impl FileWriterPool {
 
         let (tx, rx) = mpsc::channel::<WriteRequest>(64);
         let initial_len = file.metadata().await.map(|m| m.len()).unwrap_or(0);
-        tokio::spawn(writer_task(file, rx, initial_len));
+        let handle = tokio::spawn(writer_task(file, rx, initial_len));
 
-        self.writers.entry(path.to_path_buf()).or_insert(tx.clone());
+        self.writers
+            .entry(path.to_path_buf())
+            .or_insert(WriterEntry {
+                tx: tx.clone(),
+                handle,
+            });
         Ok(tx)
     }
 
     pub async fn flush_all(&self) -> Result<()> {
-        let keys: Vec<PathBuf> = self.writers.iter().map(|e| e.key().clone()).collect();
-        for key in keys {
-            if let Some((_, tx)) = self.writers.remove(&key) {
-                drop(tx);
+        let entries: Vec<(PathBuf, WriterEntry)> = self
+            .writers
+            .iter()
+            .map(|e| e.key().clone())
+            .collect::<Vec<_>>()
+            .into_iter()
+            .filter_map(|key| self.writers.remove(&key))
+            .collect();
+
+        for (path, entry) in entries {
+            drop(entry.tx);
+            if let Err(err) = entry.handle.await
+                && err.is_panic()
+            {
+                tracing::error!(path = %path.display(), "writer task panicked: {err}");
             }
         }
-        tokio::task::yield_now().await;
         Ok(())
     }
 }
