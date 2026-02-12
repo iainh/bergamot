@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 
 use crc32fast::Hasher;
-use regex::Regex;
 
 use crate::error::{CrcLevel, YencError};
 use crate::model::{DecodedSegment, DecoderState};
@@ -221,8 +220,7 @@ fn parse_u32(field: &'static str, value: &str) -> Result<u32, YencError> {
 
 fn parse_hex_u32(field: &'static str, value: &str) -> Result<u32, YencError> {
     let value = value.trim();
-    let hex_re = Regex::new("(?i)^[0-9a-f]{8}$").expect("valid regex");
-    if !hex_re.is_match(value) {
+    if value.len() != 8 || !value.bytes().all(|b| b.is_ascii_hexdigit()) {
         return Err(YencError::InvalidHeaderValue {
             field,
             value: value.to_string(),
