@@ -2853,13 +2853,6 @@ input[type="date"] {
 	text-shadow: none;
 }
 
-.navbar .nav .active > a,
-.navbar .nav .active > a:hover {
-	outline: 0;
-	color: #000;
-	text-shadow: none;
-	background: linear-gradient(to bottom, rgb(255,255,255) 0%, rgb(238,238,238) 45%, rgb(231,231,231) 55%, rgb(255,255,255) 100%);
-}
 
 table {
 	border-collapse: collapse;
@@ -3613,7 +3606,7 @@ html[data-theme="dark"] .modal-footer {
 }
 
 html[data-theme="dark"] .nav > li > a:hover {
-	background-color: #005580;
+	background-color: transparent;
 }
 
 html[data-theme="dark"] .nav-list .divider {

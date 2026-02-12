@@ -218,7 +218,6 @@ input, select, textarea, button {
 }
 
 .nav > li > a:hover {
-	color: #ffffff;
 	text-decoration: none;
 	background-color: transparent;
 }
@@ -227,7 +226,9 @@ input, select, textarea, button {
 .navbar .nav .active > a:hover {
 	color: #ffffff;
 	text-decoration: none;
-	background-color: #222222;
+	background-color: transparent;
+	border-bottom: 3px solid #ffffff;
+	padding-bottom: 7px;
 }
 
 .navbar .btn-group .btn {
