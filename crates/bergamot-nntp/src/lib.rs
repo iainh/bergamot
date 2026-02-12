@@ -1,3 +1,12 @@
+//! NNTP (Network News Transfer Protocol) client implementation.
+//!
+//! Implements the subset of NNTP required for binary article downloading:
+//! - Connection and greeting ([RFC 3977 §5.1](https://datatracker.ietf.org/doc/html/rfc3977#section-5.1))
+//! - Authentication via AUTHINFO USER/PASS ([RFC 4643 §2.3](https://datatracker.ietf.org/doc/html/rfc4643#section-2.3))
+//! - GROUP, BODY, STAT commands ([RFC 3977 §6](https://datatracker.ietf.org/doc/html/rfc3977#section-6))
+//! - Multi-line response dot-unstuffing ([RFC 3977 §3.1.1](https://datatracker.ietf.org/doc/html/rfc3977#section-3.1.1))
+//! - STARTTLS upgrade ([RFC 4642](https://datatracker.ietf.org/doc/html/rfc4642))
+
 mod error;
 pub mod machine;
 mod model;

@@ -1,3 +1,8 @@
+//! NNTP connection handling and I/O layer.
+//!
+//! Wraps [`NntpMachine`] with async I/O to implement the NNTP session lifecycle
+//! defined in [RFC 3977 §5](https://datatracker.ietf.org/doc/html/rfc3977#section-5).
+
 use std::sync::Arc;
 
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
@@ -75,6 +80,10 @@ impl NntpConnection {
         Ok(conn)
     }
 
+    /// Connect to an NNTP server, handling TLS/STARTTLS negotiation.
+    ///
+    /// See [RFC 3977 §5.1](https://datatracker.ietf.org/doc/html/rfc3977#section-5.1) (initial connection)
+    /// and [RFC 4642](https://datatracker.ietf.org/doc/html/rfc4642) (STARTTLS).
     pub async fn connect(server: &NewsServer) -> Result<Self, NntpError> {
         let tcp = TcpStream::connect((server.host.as_str(), server.port)).await?;
 
@@ -105,24 +114,29 @@ impl NntpConnection {
         }
     }
 
+    /// Authenticate with AUTHINFO USER/PASS ([RFC 4643 §2.3](https://datatracker.ietf.org/doc/html/rfc4643#section-2.3)).
     pub async fn authenticate(&mut self, username: &str, password: &str) -> Result<(), NntpError> {
         self.machine.request_auth(username, password);
         self.drive_machine().await?;
         Ok(())
     }
 
+    /// Select a newsgroup ([RFC 3977 §6.1.1](https://datatracker.ietf.org/doc/html/rfc3977#section-6.1.1)).
     pub async fn join_group(&mut self, group: &str) -> Result<(), NntpError> {
         self.machine.request_group(group);
         self.drive_machine().await?;
         Ok(())
     }
 
+    /// Fetch article body ([RFC 3977 §6.2.3](https://datatracker.ietf.org/doc/html/rfc3977#section-6.2.3)).
+    /// Returns a streaming reader that performs dot-unstuffing ([RFC 3977 §3.1.1](https://datatracker.ietf.org/doc/html/rfc3977#section-3.1.1)).
     pub async fn fetch_body(&mut self, message_id: &str) -> Result<BodyReader<'_>, NntpError> {
         self.machine.request_body(message_id);
         self.drive_until_body_ready().await?;
         Ok(BodyReader::new(self))
     }
 
+    /// Check article existence with STAT ([RFC 3977 §6.2.4](https://datatracker.ietf.org/doc/html/rfc3977#section-6.2.4)).
     pub async fn stat(&mut self, message_id: &str) -> Result<bool, NntpError> {
         self.machine.request_stat(message_id);
         let event = self.drive_machine().await?;
@@ -132,6 +146,7 @@ impl NntpConnection {
         }
     }
 
+    /// Gracefully close the connection ([RFC 3977 §5.4](https://datatracker.ietf.org/doc/html/rfc3977#section-5.4)).
     pub async fn quit(&mut self) -> Result<(), NntpError> {
         self.machine.request_quit();
         let _ = self.drive_machine().await;

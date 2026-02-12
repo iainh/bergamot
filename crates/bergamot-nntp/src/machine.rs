@@ -1,3 +1,7 @@
+//! Pure state machine for the NNTP protocol ([RFC 3977](https://datatracker.ietf.org/doc/html/rfc3977)).
+//!
+//! Drives command/response exchanges without performing I/O directly.
+
 use std::collections::VecDeque;
 
 use crate::model::NntpResponse;
@@ -102,6 +106,7 @@ impl NntpMachine {
         self.current_group.as_deref()
     }
 
+    /// Initiate STARTTLS upgrade ([RFC 4642 §2.7](https://datatracker.ietf.org/doc/html/rfc4642#section-2.7)).
     pub fn request_starttls(&mut self) {
         self.outputs
             .push_back(Output::SendCommand("STARTTLS".to_string()));
@@ -109,6 +114,7 @@ impl NntpMachine {
         self.state = State::AwaitStartTlsResponse;
     }
 
+    /// Authenticate with AUTHINFO USER/PASS ([RFC 4643 §2.3](https://datatracker.ietf.org/doc/html/rfc4643#section-2.3)).
     pub fn request_auth(&mut self, user: &str, pass: &str) {
         self.pending_password = Some(pass.to_string());
         self.outputs
@@ -117,6 +123,8 @@ impl NntpMachine {
         self.state = State::AwaitAuthUser;
     }
 
+    /// Select a newsgroup with GROUP ([RFC 3977 §6.1.1](https://datatracker.ietf.org/doc/html/rfc3977#section-6.1.1)).
+    /// Skips the command if the group is already selected.
     pub fn request_group(&mut self, group: &str) {
         if self.current_group.as_deref() == Some(group) {
             self.outputs
@@ -130,6 +138,7 @@ impl NntpMachine {
         self.state = State::AwaitGroup;
     }
 
+    /// Check article existence with STAT ([RFC 3977 §6.2.4](https://datatracker.ietf.org/doc/html/rfc3977#section-6.2.4)).
     pub fn request_stat(&mut self, message_id: &str) {
         self.outputs
             .push_back(Output::SendCommand(format!("STAT <{message_id}>")));
@@ -137,6 +146,7 @@ impl NntpMachine {
         self.state = State::AwaitStat;
     }
 
+    /// Fetch article body with BODY ([RFC 3977 §6.2.3](https://datatracker.ietf.org/doc/html/rfc3977#section-6.2.3)).
     pub fn request_body(&mut self, message_id: &str) {
         self.pending_message_id = Some(message_id.to_string());
         self.outputs
@@ -145,6 +155,7 @@ impl NntpMachine {
         self.state = State::AwaitBodyResponse;
     }
 
+    /// Close the connection with QUIT ([RFC 3977 §5.4](https://datatracker.ietf.org/doc/html/rfc3977#section-5.4)).
     pub fn request_quit(&mut self) {
         self.outputs
             .push_back(Output::SendCommand("QUIT".to_string()));
@@ -344,6 +355,8 @@ impl NntpMachine {
                 self.state = State::Idle;
             }
 
+            // Dot-unstuffing per RFC 3977 §3.1.1
+            // <https://datatracker.ietf.org/doc/html/rfc3977#section-3.1.1>
             (State::ReadingBody, Input::BodyLine(data)) => {
                 let unstuffed = if data.starts_with(b"..") {
                     data[1..].to_vec()

@@ -35,6 +35,9 @@ pub enum IpVersion {
     IPv6Only,
 }
 
+/// Parsed NNTP response line.
+///
+/// Response codes are defined in [RFC 3977 §3.2](https://datatracker.ietf.org/doc/html/rfc3977#section-3.2).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NntpResponse {
     pub code: u16,
