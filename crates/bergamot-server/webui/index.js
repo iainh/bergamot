@@ -345,6 +345,8 @@ var Frontend = (new function($)
 		return false;
 	}
 
+	this.activeTab = function() { return activeTab; }
+
 	this.loadCompleted = function()
 	{
 		Downloads.redraw();
@@ -412,6 +414,7 @@ var Frontend = (new function($)
 			case 'History': History.show(); break;
 		}
 
+		Refresher.flushStale(activeTab);
 		FilterMenu.setTab(activeTab);
 	}
 
@@ -806,6 +809,8 @@ var Refresher = (new function($)
 	var refreshing = false;
 	var refreshNeeded = false;
 	var refreshErrors = 0;
+	var messagesStale = false;
+	var historyStale = false;
 
 	this.init = function()
 	{
@@ -849,12 +854,36 @@ var Refresher = (new function($)
 		$('#ErrorAlert').hide();
 		refreshStarted();
 
-		loadQueue = 4;
+		loadQueue = 2;
 		Status.update();
-		Statistics.update();
 		Downloads.update();
-		Messages.update();
-		History.update();
+
+		var tab = Frontend.activeTab();
+
+		if (tab === 'Messages' || firstLoad)
+		{
+			loadQueue++;
+			Messages.update();
+		}
+		else
+		{
+			messagesStale = true;
+		}
+
+		if (tab === 'History' || firstLoad)
+		{
+			loadQueue++;
+			History.update();
+		}
+		else
+		{
+			historyStale = true;
+		}
+
+		if (tab === 'Statistics' || firstLoad)
+		{
+			Statistics.update();
+		}
 
 		if (firstLoad)
 		{
@@ -924,6 +953,13 @@ var Refresher = (new function($)
 		refreshErrors = 0;
 		$('#RefreshError').hide();
 		scheduleNextRefresh();
+	}
+
+	this.flushStale = function(tab)
+	{
+		if (tab === 'Messages' && messagesStale) { messagesStale = false; Messages.update(); }
+		if (tab === 'History' && historyStale) { historyStale = false; History.update(); }
+		if (tab === 'Statistics') { Statistics.update(); }
 	}
 
 	this.isPaused = function()
