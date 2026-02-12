@@ -673,13 +673,6 @@ pub async fn run_with_config_path(
     tracing::info!("shutdown signal received");
 
     bergamot_scheduler::shutdown_services(scheduler_tx, scheduler_handles).await;
-    stats_handle.abort();
-    server_handle.abort();
-    worker_handle.abort();
-
-    if let Err(err) = writer_pool.flush_all().await {
-        tracing::warn!("flushing writer pool: {err}");
-    }
 
     if let Ok(snapshot) = queue_handle.get_queue_snapshot().await {
         let state = bergamot_scheduler::DiskStateFlush::snapshot_to_queue_state(&snapshot);
@@ -709,8 +702,33 @@ pub async fn run_with_config_path(
     let _ = coordinator_handle.await;
 
     drop(postproc_tx);
-    forward_handle.abort();
-    let _ = postproc_handle.await;
+
+    if let Err(err) = writer_pool.flush_all().await {
+        tracing::warn!("flushing writer pool: {err}");
+    }
+
+    server_handle.abort();
+
+    let shutdown_timeout = std::time::Duration::from_secs(10);
+    let handles: Vec<(&str, tokio::task::JoinHandle<()>)> = vec![
+        ("stats_updater", stats_handle),
+        ("download_worker", worker_handle),
+        ("forward_completions", forward_handle),
+        ("post_processor", postproc_handle),
+    ];
+
+    for (name, handle) in handles {
+        match tokio::time::timeout(shutdown_timeout, handle).await {
+            Ok(Ok(())) => tracing::debug!("{name} stopped cleanly"),
+            Ok(Err(err)) if err.is_panic() => {
+                tracing::error!("{name} panicked during shutdown: {err}")
+            }
+            Ok(Err(err)) => tracing::debug!("{name} cancelled: {err}"),
+            Err(elapsed) => {
+                tracing::warn!("{name} did not stop within {elapsed}, aborting");
+            }
+        }
+    }
 
     tracing::info!("shutdown complete");
     Ok(())
