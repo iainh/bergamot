@@ -15,14 +15,15 @@ pub trait StatsRecorder: Send + Sync {
     fn record_article_failure(&self, server_id: u32);
 }
 
-#[async_trait::async_trait]
 pub trait ConnectionFactory: Send + Sync {
-    async fn connect(&self, server: &NewsServer) -> Result<NntpConnection, NntpError>;
+    fn connect(
+        &self,
+        server: &NewsServer,
+    ) -> impl std::future::Future<Output = Result<NntpConnection, NntpError>> + Send;
 }
 
 pub struct RealConnectionFactory;
 
-#[async_trait::async_trait]
 impl ConnectionFactory for RealConnectionFactory {
     async fn connect(&self, server: &NewsServer) -> Result<NntpConnection, NntpError> {
         NntpConnection::connect(server).await
@@ -547,7 +548,6 @@ mod tests {
         }
     }
 
-    #[async_trait::async_trait]
     impl ConnectionFactory for FakeFactory {
         async fn connect(&self, server: &NewsServer) -> Result<NntpConnection, NntpError> {
             self.connect_count.fetch_add(1, Ordering::SeqCst);
@@ -642,7 +642,6 @@ mod tests {
             response_body: Vec<u8>,
         }
 
-        #[async_trait::async_trait]
         impl ConnectionFactory for FailFirstFactory {
             async fn connect(&self, server: &NewsServer) -> Result<NntpConnection, NntpError> {
                 if server.id == self.fail_server_id {
@@ -919,7 +918,6 @@ mod tests {
             response_body: Vec<u8>,
         }
 
-        #[async_trait::async_trait]
         impl ConnectionFactory for NotFoundThenSuccessFactory {
             async fn connect(&self, server: &NewsServer) -> Result<NntpConnection, NntpError> {
                 let (client, mut server_end) = duplex(4096);
@@ -986,7 +984,6 @@ mod tests {
 
         struct AllNotFoundFactory;
 
-        #[async_trait::async_trait]
         impl ConnectionFactory for AllNotFoundFactory {
             async fn connect(&self, server: &NewsServer) -> Result<NntpConnection, NntpError> {
                 let (client, mut server_end) = duplex(4096);
@@ -1046,7 +1043,6 @@ mod tests {
             response_body: Vec<u8>,
         }
 
-        #[async_trait::async_trait]
         impl ConnectionFactory for SlowNotFoundFactory {
             async fn connect(&self, server: &NewsServer) -> Result<NntpConnection, NntpError> {
                 let (client, mut server_end) = duplex(4096);
