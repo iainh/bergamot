@@ -807,4 +807,423 @@ mod tests {
         let out = drain_outputs(&mut m);
         assert_eq!(find_event(&out), Some(&Event::QuitAck));
     }
+
+    // --- RFC 3977 §5.1: Greeting edge cases ---
+
+    #[test]
+    fn greeting_400_service_unavailable() {
+        let mut m = NntpMachine::new();
+        drain_outputs(&mut m);
+        m.handle_input(Input::ResponseLine("400 Service unavailable"));
+        let out = drain_outputs(&mut m);
+        assert!(matches!(
+            find_event(&out),
+            Some(Event::Error(ProtoError::UnexpectedResponse(400, _)))
+        ));
+    }
+
+    #[test]
+    fn greeting_201_posting_prohibited() {
+        let mut m = NntpMachine::new();
+        drain_outputs(&mut m);
+        m.handle_input(Input::ResponseLine("201 Posting prohibited"));
+        let out = drain_outputs(&mut m);
+        assert_eq!(find_event(&out), Some(&Event::GreetingOk { code: 201 }));
+    }
+
+    #[test]
+    fn greeting_malformed_line() {
+        let mut m = NntpMachine::new();
+        drain_outputs(&mut m);
+        m.handle_input(Input::ResponseLine("garbage"));
+        let out = drain_outputs(&mut m);
+        assert!(matches!(
+            find_event(&out),
+            Some(Event::Error(ProtoError::ProtocolError(_)))
+        ));
+    }
+
+    // --- RFC 3977 §6.1.1: GROUP error responses ---
+
+    #[test]
+    fn group_411_no_such_group() {
+        let mut m = NntpMachine::new_after_greeting();
+        m.request_group("no.such.group");
+        drain_outputs(&mut m);
+        m.handle_input(Input::ResponseLine("411 No such group"));
+        let out = drain_outputs(&mut m);
+        assert!(matches!(
+            find_event(&out),
+            Some(Event::Error(ProtoError::UnexpectedResponse(411, _)))
+        ));
+        assert_eq!(m.current_group(), None);
+    }
+
+    #[test]
+    fn group_error_then_retry_succeeds() {
+        let mut m = NntpMachine::new_after_greeting();
+        m.request_group("no.such.group");
+        drain_outputs(&mut m);
+        m.handle_input(Input::ResponseLine("411 No such group"));
+        drain_outputs(&mut m);
+
+        m.request_group("alt.binaries.test");
+        let out = drain_outputs(&mut m);
+        assert!(out.contains(&Output::SendCommand("GROUP alt.binaries.test".to_string())));
+
+        m.handle_input(Input::ResponseLine("211 100 1 100 alt.binaries.test"));
+        let out = drain_outputs(&mut m);
+        assert_eq!(
+            find_event(&out),
+            Some(&Event::GroupJoined {
+                group: "alt.binaries.test".to_string()
+            })
+        );
+        assert_eq!(m.current_group(), Some("alt.binaries.test"));
+    }
+
+    // --- RFC 3977 §6.2.4: STAT additional error codes ---
+
+    #[test]
+    fn stat_412_no_group_selected() {
+        let mut m = NntpMachine::new_after_greeting();
+        m.request_stat("x@y");
+        drain_outputs(&mut m);
+        m.handle_input(Input::ResponseLine("412 No newsgroup selected"));
+        let out = drain_outputs(&mut m);
+        assert!(matches!(
+            find_event(&out),
+            Some(Event::Error(ProtoError::UnexpectedResponse(412, _)))
+        ));
+    }
+
+    #[test]
+    fn stat_502_permission_denied() {
+        let mut m = NntpMachine::new_after_greeting();
+        m.request_stat("x@y");
+        drain_outputs(&mut m);
+        m.handle_input(Input::ResponseLine("502 Permission denied"));
+        let out = drain_outputs(&mut m);
+        assert!(matches!(
+            find_event(&out),
+            Some(Event::Error(ProtoError::UnexpectedResponse(502, _)))
+        ));
+    }
+
+    // --- RFC 3977 §6.2.3: BODY additional error codes ---
+
+    #[test]
+    fn body_412_no_group_selected() {
+        let mut m = NntpMachine::new_after_greeting();
+        m.request_body("x@y");
+        drain_outputs(&mut m);
+        m.handle_input(Input::ResponseLine("412 No newsgroup selected"));
+        let out = drain_outputs(&mut m);
+        assert!(matches!(
+            find_event(&out),
+            Some(Event::Error(ProtoError::UnexpectedResponse(412, _)))
+        ));
+    }
+
+    #[test]
+    fn body_420_invalid_article_number() {
+        let mut m = NntpMachine::new_after_greeting();
+        m.request_body("x@y");
+        drain_outputs(&mut m);
+        m.handle_input(Input::ResponseLine("420 Current article number is invalid"));
+        let out = drain_outputs(&mut m);
+        assert!(matches!(
+            find_event(&out),
+            Some(Event::Error(ProtoError::UnexpectedResponse(420, _)))
+        ));
+    }
+
+    #[test]
+    fn body_502_permission_denied() {
+        let mut m = NntpMachine::new_after_greeting();
+        m.request_body("x@y");
+        drain_outputs(&mut m);
+        m.handle_input(Input::ResponseLine("502 Permission denied"));
+        let out = drain_outputs(&mut m);
+        assert!(matches!(
+            find_event(&out),
+            Some(Event::Error(ProtoError::UnexpectedResponse(502, _)))
+        ));
+    }
+
+    // --- RFC 3977 §3.1.1: Dot-unstuffing edge cases ---
+
+    #[test]
+    fn body_empty() {
+        let mut m = NntpMachine::new_after_greeting();
+        m.request_body("test@example");
+        drain_outputs(&mut m);
+        m.handle_input(Input::ResponseLine("222 body follows"));
+        drain_outputs(&mut m);
+
+        m.handle_input(Input::BodyEnd);
+        let out = drain_outputs(&mut m);
+        assert_eq!(find_event(&out), Some(&Event::BodyEnd));
+        let events = find_events(&out);
+        assert!(
+            !events.iter().any(|e| matches!(e, Event::BodyChunk(_))),
+            "empty body should produce no BodyChunk events"
+        );
+    }
+
+    #[test]
+    fn body_unstuff_double_dot_to_single() {
+        let mut m = NntpMachine::new_after_greeting();
+        m.request_body("test@example");
+        drain_outputs(&mut m);
+        m.handle_input(Input::ResponseLine("222 body follows"));
+        drain_outputs(&mut m);
+
+        m.handle_input(Input::BodyLine(b".."));
+        let out = drain_outputs(&mut m);
+        let events = find_events(&out);
+        assert_eq!(events[0], &Event::BodyChunk(b".".to_vec()));
+    }
+
+    #[test]
+    fn body_unstuff_triple_dot_to_double() {
+        let mut m = NntpMachine::new_after_greeting();
+        m.request_body("test@example");
+        drain_outputs(&mut m);
+        m.handle_input(Input::ResponseLine("222 body follows"));
+        drain_outputs(&mut m);
+
+        m.handle_input(Input::BodyLine(b"..."));
+        let out = drain_outputs(&mut m);
+        let events = find_events(&out);
+        assert_eq!(events[0], &Event::BodyChunk(b"..".to_vec()));
+    }
+
+    #[test]
+    fn body_unstuff_quad_dot_to_triple() {
+        let mut m = NntpMachine::new_after_greeting();
+        m.request_body("test@example");
+        drain_outputs(&mut m);
+        m.handle_input(Input::ResponseLine("222 body follows"));
+        drain_outputs(&mut m);
+
+        m.handle_input(Input::BodyLine(b"...."));
+        let out = drain_outputs(&mut m);
+        let events = find_events(&out);
+        assert_eq!(events[0], &Event::BodyChunk(b"...".to_vec()));
+    }
+
+    #[test]
+    fn body_empty_line_preserved() {
+        let mut m = NntpMachine::new_after_greeting();
+        m.request_body("test@example");
+        drain_outputs(&mut m);
+        m.handle_input(Input::ResponseLine("222 body follows"));
+        drain_outputs(&mut m);
+
+        m.handle_input(Input::BodyLine(b""));
+        let out = drain_outputs(&mut m);
+        let events = find_events(&out);
+        assert_eq!(events[0], &Event::BodyChunk(Vec::new()));
+    }
+
+    #[test]
+    fn body_whitespace_line_unchanged() {
+        let mut m = NntpMachine::new_after_greeting();
+        m.request_body("test@example");
+        drain_outputs(&mut m);
+        m.handle_input(Input::ResponseLine("222 body follows"));
+        drain_outputs(&mut m);
+
+        m.handle_input(Input::BodyLine(b"   "));
+        let out = drain_outputs(&mut m);
+        let events = find_events(&out);
+        assert_eq!(events[0], &Event::BodyChunk(b"   ".to_vec()));
+    }
+
+    #[test]
+    fn body_line_not_starting_with_dot_unchanged() {
+        let mut m = NntpMachine::new_after_greeting();
+        m.request_body("test@example");
+        drain_outputs(&mut m);
+        m.handle_input(Input::ResponseLine("222 body follows"));
+        drain_outputs(&mut m);
+
+        m.handle_input(Input::BodyLine(b"hello.world"));
+        let out = drain_outputs(&mut m);
+        let events = find_events(&out);
+        assert_eq!(events[0], &Event::BodyChunk(b"hello.world".to_vec()));
+    }
+
+    #[test]
+    fn body_dot_stuffed_content_mixed_with_regular() {
+        let mut m = NntpMachine::new_after_greeting();
+        m.request_body("test@example");
+        drain_outputs(&mut m);
+        m.handle_input(Input::ResponseLine("222 body follows"));
+        drain_outputs(&mut m);
+
+        let lines: &[&[u8]] = &[b"normal line", b"..stuffed", b"another normal", b"...double"];
+        let expected: &[&[u8]] = &[b"normal line", b".stuffed", b"another normal", b"..double"];
+
+        for (line, exp) in lines.iter().zip(expected.iter()) {
+            m.handle_input(Input::BodyLine(line));
+            let out = drain_outputs(&mut m);
+            let events = find_events(&out);
+            assert_eq!(events[0], &Event::BodyChunk(exp.to_vec()));
+        }
+
+        m.handle_input(Input::BodyEnd);
+        let out = drain_outputs(&mut m);
+        assert_eq!(find_event(&out), Some(&Event::BodyEnd));
+    }
+
+    // --- RFC 4643 §2.3: AUTHINFO edge cases ---
+
+    #[test]
+    fn auth_user_481_rejected() {
+        let mut m = NntpMachine::new_after_greeting();
+        m.request_auth("user", "pass");
+        drain_outputs(&mut m);
+        m.handle_input(Input::ResponseLine("481 Authentication failed"));
+        let out = drain_outputs(&mut m);
+        assert!(matches!(
+            find_event(&out),
+            Some(Event::Error(ProtoError::AuthFailed(_)))
+        ));
+    }
+
+    #[test]
+    fn auth_pass_481_rejected() {
+        let mut m = NntpMachine::new_after_greeting();
+        m.request_auth("user", "wrong");
+        drain_outputs(&mut m);
+        m.handle_input(Input::ResponseLine("381 Password required"));
+        drain_outputs(&mut m);
+        m.handle_input(Input::ResponseLine("481 Authentication failed"));
+        let out = drain_outputs(&mut m);
+        assert!(matches!(
+            find_event(&out),
+            Some(Event::Error(ProtoError::AuthFailed(_)))
+        ));
+    }
+
+    #[test]
+    fn auth_user_281_no_password_needed() {
+        let mut m = NntpMachine::new_after_greeting();
+        m.request_auth("user", "pass");
+        drain_outputs(&mut m);
+        m.handle_input(Input::ResponseLine("281 Authentication accepted"));
+        let out = drain_outputs(&mut m);
+        assert_eq!(find_event(&out), Some(&Event::Authenticated));
+        assert!(m.is_authenticated());
+    }
+
+    #[test]
+    fn auth_user_502_unavailable() {
+        let mut m = NntpMachine::new_after_greeting();
+        m.request_auth("user", "pass");
+        drain_outputs(&mut m);
+        m.handle_input(Input::ResponseLine("502 Command unavailable"));
+        let out = drain_outputs(&mut m);
+        assert!(matches!(
+            find_event(&out),
+            Some(Event::Error(ProtoError::AuthFailed(_)))
+        ));
+    }
+
+    // --- RFC 4642: STARTTLS error responses ---
+
+    #[test]
+    fn starttls_580_cannot_initiate() {
+        let mut m = NntpMachine::new_after_greeting();
+        m.request_starttls();
+        drain_outputs(&mut m);
+        m.handle_input(Input::ResponseLine("580 Can not initiate TLS negotiation"));
+        let out = drain_outputs(&mut m);
+        assert!(matches!(
+            find_event(&out),
+            Some(Event::Error(ProtoError::UnexpectedResponse(580, _)))
+        ));
+    }
+
+    #[test]
+    fn starttls_502_already_active() {
+        let mut m = NntpMachine::new_after_greeting();
+        m.request_starttls();
+        drain_outputs(&mut m);
+        m.handle_input(Input::ResponseLine("502 STARTTLS not allowed with active TLS layer"));
+        let out = drain_outputs(&mut m);
+        assert!(matches!(
+            find_event(&out),
+            Some(Event::Error(ProtoError::UnexpectedResponse(502, _)))
+        ));
+    }
+
+    #[test]
+    fn starttls_bad_post_upgrade_greeting() {
+        let mut m = NntpMachine::new_after_greeting();
+        m.request_starttls();
+        drain_outputs(&mut m);
+        m.handle_input(Input::ResponseLine("382 Begin TLS"));
+        drain_outputs(&mut m);
+        m.handle_input(Input::ResponseLine("400 Service unavailable"));
+        let out = drain_outputs(&mut m);
+        assert!(matches!(
+            find_event(&out),
+            Some(Event::Error(ProtoError::UnexpectedResponse(400, _)))
+        ));
+    }
+
+    // --- Idle state: unexpected input ---
+
+    #[test]
+    fn unsolicited_response_while_idle() {
+        let mut m = NntpMachine::new_after_greeting();
+        m.handle_input(Input::ResponseLine("200 Surprise"));
+        let out = drain_outputs(&mut m);
+        assert!(matches!(
+            find_event(&out),
+            Some(Event::Error(ProtoError::ProtocolError(_)))
+        ));
+    }
+
+    // --- Recovery: commands work after error responses ---
+
+    #[test]
+    fn stat_after_body_error_works() {
+        let mut m = NntpMachine::new_after_greeting();
+        m.request_body("missing@example");
+        drain_outputs(&mut m);
+        m.handle_input(Input::ResponseLine("430 No Such Article"));
+        drain_outputs(&mut m);
+
+        m.request_stat("other@example");
+        drain_outputs(&mut m);
+        m.handle_input(Input::ResponseLine("223 0 <other@example>"));
+        let out = drain_outputs(&mut m);
+        assert_eq!(
+            find_event(&out),
+            Some(&Event::StatResult { exists: true })
+        );
+    }
+
+    #[test]
+    fn body_after_auth_error_works() {
+        let mut m = NntpMachine::new_after_greeting();
+        m.request_body("test@example");
+        drain_outputs(&mut m);
+        m.handle_input(Input::ResponseLine("480 Auth required"));
+        drain_outputs(&mut m);
+
+        m.request_body("test@example");
+        drain_outputs(&mut m);
+        m.handle_input(Input::ResponseLine("222 body follows"));
+        drain_outputs(&mut m);
+        m.handle_input(Input::BodyLine(b"data"));
+        drain_outputs(&mut m);
+        m.handle_input(Input::BodyEnd);
+        let out = drain_outputs(&mut m);
+        assert_eq!(find_event(&out), Some(&Event::BodyEnd));
+    }
 }

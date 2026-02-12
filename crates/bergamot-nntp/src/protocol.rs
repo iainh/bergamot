@@ -467,4 +467,137 @@ mod tests {
             other => panic!("unexpected error: {other:?}"),
         }
     }
+
+    #[tokio::test]
+    async fn body_reader_empty_body() {
+        let data = b".\r\n".to_vec();
+        let (client, mut server) = tokio::io::duplex(64);
+
+        tokio::spawn(async move {
+            server.write_all(&data).await.unwrap();
+        });
+
+        let reader = BufReader::new(Box::new(client) as Box<dyn NntpIo>);
+        let stream = NntpStream::Plain(reader);
+        let machine = NntpMachine::new_after_greeting();
+
+        let mut conn = NntpConnection {
+            server_id: 0,
+            stream,
+            machine,
+        };
+        conn.machine.request_body("test@example");
+
+        while let Some(output) = conn.machine.poll_output() {
+            match output {
+                Output::SendCommand(_) => {}
+                Output::NeedResponseLine => break,
+                _ => {}
+            }
+        }
+        conn.machine
+            .handle_input(Input::ResponseLine("222 body follows"));
+        while let Some(output) = conn.machine.poll_output() {
+            match output {
+                Output::NeedBodyLine => break,
+                Output::Event(_) => {}
+                _ => {}
+            }
+        }
+
+        let mut body = BodyReader::new(&mut conn);
+        assert_eq!(body.read_line().await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn body_reader_eof_mid_body() {
+        let data = b"partial line\r\n".to_vec();
+        let (client, mut server) = tokio::io::duplex(64);
+
+        tokio::spawn(async move {
+            server.write_all(&data).await.unwrap();
+            drop(server);
+        });
+
+        let reader = BufReader::new(Box::new(client) as Box<dyn NntpIo>);
+        let stream = NntpStream::Plain(reader);
+        let machine = NntpMachine::new_after_greeting();
+
+        let mut conn = NntpConnection {
+            server_id: 0,
+            stream,
+            machine,
+        };
+        conn.machine.request_body("test@example");
+
+        while let Some(output) = conn.machine.poll_output() {
+            match output {
+                Output::SendCommand(_) => {}
+                Output::NeedResponseLine => break,
+                _ => {}
+            }
+        }
+        conn.machine
+            .handle_input(Input::ResponseLine("222 body follows"));
+        while let Some(output) = conn.machine.poll_output() {
+            match output {
+                Output::NeedBodyLine => break,
+                Output::Event(_) => {}
+                _ => {}
+            }
+        }
+
+        let mut body = BodyReader::new(&mut conn);
+        let first = body.read_line().await.unwrap();
+        assert_eq!(first, Some(b"partial line".to_vec()));
+
+        let err = body.read_line().await;
+        assert!(err.is_err(), "EOF mid-body should produce an error");
+    }
+
+    #[tokio::test]
+    async fn body_reader_dot_stuffed_lines() {
+        let data = b"..single dot\r\n...two dots\r\n..\r\nnormal\r\n.\r\n".to_vec();
+        let (client, mut server) = tokio::io::duplex(256);
+
+        tokio::spawn(async move {
+            server.write_all(&data).await.unwrap();
+        });
+
+        let reader = BufReader::new(Box::new(client) as Box<dyn NntpIo>);
+        let stream = NntpStream::Plain(reader);
+        let machine = NntpMachine::new_after_greeting();
+
+        let mut conn = NntpConnection {
+            server_id: 0,
+            stream,
+            machine,
+        };
+        conn.machine.request_body("test@example");
+
+        while let Some(output) = conn.machine.poll_output() {
+            match output {
+                Output::SendCommand(_) => {}
+                Output::NeedResponseLine => break,
+                _ => {}
+            }
+        }
+        conn.machine
+            .handle_input(Input::ResponseLine("222 body follows"));
+        while let Some(output) = conn.machine.poll_output() {
+            match output {
+                Output::NeedBodyLine => break,
+                Output::Event(_) => {}
+                _ => {}
+            }
+        }
+
+        let mut body = BodyReader::new(&mut conn);
+
+        assert_eq!(body.read_line().await.unwrap(), Some(b".single dot".to_vec()));
+        assert_eq!(body.read_line().await.unwrap(), Some(b"..two dots".to_vec()));
+        assert_eq!(body.read_line().await.unwrap(), Some(b".".to_vec()));
+        assert_eq!(body.read_line().await.unwrap(), Some(b"normal".to_vec()));
+        assert_eq!(body.read_line().await.unwrap(), None);
+    }
 }
