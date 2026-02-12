@@ -176,6 +176,7 @@ pub async fn download_worker(
     tracing::debug!("download worker shutting down");
 }
 
+#[tracing::instrument(skip(fetcher, cache, writer_pool), fields(msg = %assignment.message_id, nzb_id = assignment.article_id.nzb_id))]
 async fn fetch_and_decode(
     fetcher: &std::sync::Arc<dyn ArticleFetcher>,
     assignment: &ArticleAssignment,

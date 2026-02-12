@@ -9,6 +9,7 @@ use rust_embed::Embed;
 use tokio::net::TcpListener;
 use tower_http::compression::CompressionLayer;
 use tower_http::cors::CorsLayer;
+use tower_http::trace::TraceLayer;
 
 use jsonrpsee::Methods;
 
@@ -449,6 +450,7 @@ impl WebServer {
         });
 
         app.fallback_service(fallback)
+            .layer(TraceLayer::new_for_http())
             .layer(CompressionLayer::new().gzip(true))
             .layer(CorsLayer::permissive())
     }
