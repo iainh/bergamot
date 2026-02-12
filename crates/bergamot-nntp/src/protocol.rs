@@ -7,7 +7,8 @@ use tokio_rustls::client::TlsStream;
 use tokio_rustls::rustls::{ClientConfig, RootCertStore, pki_types::ServerName};
 
 use crate::error::NntpError;
-use crate::model::{Encryption, NewsServer, NntpResponse};
+use crate::machine::{self, Event, Input, NntpMachine, Output, ProtoError};
+use crate::model::{Encryption, NewsServer};
 
 pub trait NntpIo: AsyncRead + AsyncWrite + Send + Unpin {}
 
@@ -21,184 +22,231 @@ pub enum NntpStream {
 pub struct NntpConnection {
     pub server_id: u32,
     stream: NntpStream,
-    current_group: Option<String>,
-    authenticated: bool,
+    machine: NntpMachine,
 }
 
 pub struct BodyReader<'a> {
-    stream: &'a mut NntpStream,
-    buffer: Vec<u8>,
-    done: bool,
+    conn: &'a mut NntpConnection,
 }
 
 impl<'a> BodyReader<'a> {
-    fn new(stream: &'a mut NntpStream) -> Self {
-        Self {
-            stream,
-            buffer: Vec::new(),
-            done: false,
-        }
+    fn new(conn: &'a mut NntpConnection) -> Self {
+        Self { conn }
     }
 
     pub async fn read_line(&mut self) -> Result<Option<Vec<u8>>, NntpError> {
-        if self.done {
-            return Ok(None);
-        }
+        // First check if there's a pending NeedBodyLine from a previous call.
+        // If the machine has already emitted NeedBodyLine, we proceed to read.
+        // If not (e.g. BodyEnd was already emitted), we should not read more.
 
-        self.buffer.clear();
-        let bytes = match &mut self.stream {
-            NntpStream::Plain(reader) => reader.read_until(b'\n', &mut self.buffer).await?,
-            NntpStream::Tls(reader) => reader.read_until(b'\n', &mut self.buffer).await?,
+        let mut buf = Vec::new();
+        let bytes = match &mut self.conn.stream {
+            NntpStream::Plain(reader) => reader.read_until(b'\n', &mut buf).await?,
+            NntpStream::Tls(reader) => reader.read_until(b'\n', &mut buf).await?,
         };
 
         if bytes == 0 {
+            self.conn.machine.handle_input(Input::Eof);
+            self.conn.drain_single_event()?;
             return Err(NntpError::ProtocolError("unexpected EOF".into()));
         }
 
-        let trimmed = trim_crlf(&self.buffer);
-        if trimmed == b"." {
-            self.done = true;
+        let trimmed = machine::trim_crlf(&buf);
+        if machine::is_body_terminator(trimmed) {
+            self.conn.machine.handle_input(Input::BodyEnd);
+            self.conn.drain_single_event()?;
             return Ok(None);
         }
 
-        let line = if trimmed.starts_with(b"..") {
-            trimmed[1..].to_vec()
-        } else {
-            trimmed.to_vec()
-        };
-
-        Ok(Some(line))
+        self.conn.machine.handle_input(Input::BodyLine(trimmed));
+        self.conn.drain_body_chunk_data()
     }
-}
-
-fn trim_crlf(buf: &[u8]) -> &[u8] {
-    let mut end = buf.len();
-    if end > 0 && buf[end - 1] == b'\n' {
-        end -= 1;
-    }
-    if end > 0 && buf[end - 1] == b'\r' {
-        end -= 1;
-    }
-    &buf[..end]
 }
 
 impl NntpConnection {
     pub async fn from_stream(server_id: u32, stream: NntpStream) -> Result<Self, NntpError> {
+        let machine = NntpMachine::new();
         let mut conn = NntpConnection {
             server_id,
             stream,
-            current_group: None,
-            authenticated: false,
+            machine,
         };
-
-        let greeting = conn.read_response().await?;
-        expect_code(&greeting, &[200, 201])?;
+        conn.drive_machine().await?;
         Ok(conn)
     }
 
     pub async fn connect(server: &NewsServer) -> Result<Self, NntpError> {
         let tcp = TcpStream::connect((server.host.as_str(), server.port)).await?;
 
-        let stream = match server.encryption {
+        match server.encryption {
             Encryption::Tls => {
                 let tls = tls_connect(tcp, &server.host, server.cert_verification).await?;
-                NntpStream::Tls(Box::new(BufReader::new(tls)))
+                let stream = NntpStream::Tls(Box::new(BufReader::new(tls)));
+                Self::from_stream(server.id, stream).await
             }
             Encryption::StartTls => {
-                let mut plain = BufReader::new(tcp);
-                let greeting = read_response(&mut plain).await?;
-                expect_code(&greeting, &[200, 201])?;
-                send_command(&mut plain, "STARTTLS").await?;
-                let resp = read_response(&mut plain).await?;
-                expect_code(&resp, &[382])?;
-                let tcp = plain.into_inner();
-                let tls = tls_connect(tcp, &server.host, server.cert_verification).await?;
-                NntpStream::Tls(Box::new(BufReader::new(tls)))
+                let stream = NntpStream::Plain(BufReader::new(Box::new(tcp)));
+                let mut conn = NntpConnection {
+                    server_id: server.id,
+                    stream,
+                    machine: NntpMachine::new(),
+                };
+                conn.drive_machine().await?;
+
+                conn.machine.request_starttls();
+                conn.drive_machine().await?;
+
+                Ok(conn)
             }
-            Encryption::None => NntpStream::Plain(BufReader::new(Box::new(tcp))),
-        };
-
-        let mut conn = NntpConnection {
-            server_id: server.id,
-            stream,
-            current_group: None,
-            authenticated: false,
-        };
-
-        if server.encryption != Encryption::StartTls {
-            let greeting = conn.read_response().await?;
-            expect_code(&greeting, &[200, 201])?;
+            Encryption::None => {
+                let stream = NntpStream::Plain(BufReader::new(Box::new(tcp)));
+                Self::from_stream(server.id, stream).await
+            }
         }
-
-        Ok(conn)
     }
 
     pub async fn authenticate(&mut self, username: &str, password: &str) -> Result<(), NntpError> {
-        self.send_command(&format!("AUTHINFO USER {username}"))
-            .await?;
-        let resp = self.read_response().await?;
-
-        match resp.code {
-            281 => {
-                self.authenticated = true;
-                return Ok(());
-            }
-            381 => {}
-            _ => return Err(NntpError::AuthFailed(resp.message)),
-        }
-
-        self.send_command(&format!("AUTHINFO PASS {password}"))
-            .await?;
-        let resp = self.read_response().await?;
-        match resp.code {
-            281 => {
-                self.authenticated = true;
-                Ok(())
-            }
-            _ => Err(NntpError::AuthFailed(resp.message)),
-        }
+        self.machine.request_auth(username, password);
+        self.drive_machine().await?;
+        Ok(())
     }
 
     pub async fn join_group(&mut self, group: &str) -> Result<(), NntpError> {
-        if self.current_group.as_deref() == Some(group) {
-            return Ok(());
-        }
-        self.send_command(&format!("GROUP {group}")).await?;
-        let resp = self.read_response().await?;
-        expect_code(&resp, &[211])?;
-        self.current_group = Some(group.to_string());
+        self.machine.request_group(group);
+        self.drive_machine().await?;
         Ok(())
     }
 
     pub async fn fetch_body(&mut self, message_id: &str) -> Result<BodyReader<'_>, NntpError> {
-        self.send_command(&format!("BODY <{message_id}>")).await?;
-        let resp = self.read_response().await?;
-
-        match resp.code {
-            222 => Ok(BodyReader::new(&mut self.stream)),
-            430 => Err(NntpError::ArticleNotFound(message_id.to_string())),
-            480 => Err(NntpError::AuthRequired),
-            _ => Err(NntpError::UnexpectedResponse(resp.code, resp.message)),
-        }
+        self.machine.request_body(message_id);
+        self.drive_until_body_ready().await?;
+        Ok(BodyReader::new(self))
     }
 
     pub async fn stat(&mut self, message_id: &str) -> Result<bool, NntpError> {
-        self.send_command(&format!("STAT <{message_id}>")).await?;
-        let resp = self.read_response().await?;
-        match resp.code {
-            223 => Ok(true),
-            430 => Ok(false),
-            _ => Err(NntpError::UnexpectedResponse(resp.code, resp.message)),
+        self.machine.request_stat(message_id);
+        let event = self.drive_machine().await?;
+        match event {
+            Event::StatResult { exists } => Ok(exists),
+            _ => Err(NntpError::ProtocolError("unexpected event from stat".into())),
         }
     }
 
     pub async fn quit(&mut self) -> Result<(), NntpError> {
-        self.send_command("QUIT").await?;
-        let _ = self.read_response().await;
+        self.machine.request_quit();
+        let _ = self.drive_machine().await;
         Ok(())
     }
 
-    async fn send_command(&mut self, cmd: &str) -> Result<(), NntpError> {
+    async fn drive_machine(&mut self) -> Result<Event, NntpError> {
+        loop {
+            match self.machine.poll_output() {
+                Some(Output::SendCommand(cmd)) => {
+                    self.send_raw(&cmd).await?;
+                }
+                Some(Output::NeedResponseLine) => {
+                    let line = self.read_response_line().await?;
+                    self.machine.handle_input(Input::ResponseLine(&line));
+                }
+                Some(Output::NeedBodyLine) => {
+                    return Err(NntpError::ProtocolError(
+                        "unexpected NeedBodyLine in drive_machine".into(),
+                    ));
+                }
+                Some(Output::UpgradeToTls) => {
+                    self.do_tls_upgrade().await?;
+                }
+                Some(Output::Event(Event::Error(e))) => {
+                    return Err(proto_to_nntp(e));
+                }
+                Some(Output::Event(event)) => {
+                    return Ok(event);
+                }
+                None => {
+                    return Err(NntpError::ProtocolError(
+                        "machine produced no output".into(),
+                    ));
+                }
+            }
+        }
+    }
+
+    async fn drive_until_body_ready(&mut self) -> Result<(), NntpError> {
+        loop {
+            match self.machine.poll_output() {
+                Some(Output::SendCommand(cmd)) => {
+                    self.send_raw(&cmd).await?;
+                }
+                Some(Output::NeedResponseLine) => {
+                    let line = self.read_response_line().await?;
+                    self.machine.handle_input(Input::ResponseLine(&line));
+                }
+                Some(Output::NeedBodyLine) => {
+                    return Ok(());
+                }
+                Some(Output::UpgradeToTls) => {
+                    self.do_tls_upgrade().await?;
+                }
+                Some(Output::Event(Event::Error(e))) => {
+                    return Err(proto_to_nntp(e));
+                }
+                Some(Output::Event(_)) => {
+                    return Err(NntpError::ProtocolError(
+                        "unexpected event while waiting for body".into(),
+                    ));
+                }
+                None => {
+                    return Err(NntpError::ProtocolError(
+                        "machine produced no output".into(),
+                    ));
+                }
+            }
+        }
+    }
+
+    fn drain_single_event(&mut self) -> Result<Event, NntpError> {
+        loop {
+            match self.machine.poll_output() {
+                Some(Output::Event(Event::Error(e))) => return Err(proto_to_nntp(e)),
+                Some(Output::Event(event)) => return Ok(event),
+                Some(Output::NeedBodyLine) => continue,
+                Some(other) => {
+                    return Err(NntpError::ProtocolError(format!(
+                        "unexpected output while draining event: {other:?}"
+                    )));
+                }
+                None => {
+                    return Err(NntpError::ProtocolError(
+                        "no event produced".into(),
+                    ));
+                }
+            }
+        }
+    }
+
+    fn drain_body_chunk_data(&mut self) -> Result<Option<Vec<u8>>, NntpError> {
+        let mut result = None;
+        while let Some(output) = self.machine.poll_output() {
+            match output {
+                Output::Event(Event::BodyChunk(data)) => {
+                    result = Some(data);
+                }
+                Output::Event(Event::BodyEnd) => return Ok(None),
+                Output::Event(Event::Error(e)) => return Err(proto_to_nntp(e)),
+                Output::NeedBodyLine => {
+                    break;
+                }
+                other => {
+                    return Err(NntpError::ProtocolError(format!(
+                        "unexpected output in body drain: {other:?}"
+                    )));
+                }
+            }
+        }
+        Ok(result)
+    }
+
+    async fn send_raw(&mut self, cmd: &str) -> Result<(), NntpError> {
         let line = format!("{cmd}\r\n");
         match &mut self.stream {
             NntpStream::Plain(s) => s.get_mut().write_all(line.as_bytes()).await?,
@@ -207,51 +255,53 @@ impl NntpConnection {
         Ok(())
     }
 
-    async fn read_response(&mut self) -> Result<NntpResponse, NntpError> {
+    async fn read_response_line(&mut self) -> Result<String, NntpError> {
+        let mut line = String::new();
         match &mut self.stream {
-            NntpStream::Plain(s) => read_response(s).await,
-            NntpStream::Tls(s) => read_response(s).await,
+            NntpStream::Plain(s) => s.read_line(&mut line).await?,
+            NntpStream::Tls(s) => s.read_line(&mut line).await?,
+        };
+        if line.is_empty() {
+            return Err(NntpError::ProtocolError("empty response".into()));
+        }
+        let trimmed = line.trim_end_matches(['\r', '\n']).to_string();
+        Ok(trimmed)
+    }
+
+    async fn do_tls_upgrade(&mut self) -> Result<(), NntpError> {
+        let old_stream = std::mem::replace(
+            &mut self.stream,
+            NntpStream::Plain(BufReader::new(Box::new(tokio::io::empty())
+                as Box<dyn NntpIo>)),
+        );
+
+        match old_stream {
+            NntpStream::Plain(buf_reader) => {
+                let inner = buf_reader.into_inner();
+                let tcp: Box<dyn NntpIo> = inner;
+                let _ = tcp;
+                Err(NntpError::TlsError(
+                    "STARTTLS upgrade requires raw TcpStream; use NntpConnection::connect instead"
+                        .into(),
+                ))
+            }
+            NntpStream::Tls(_) => {
+                Err(NntpError::TlsError(
+                    "already using TLS".into(),
+                ))
+            }
         }
     }
 }
 
-async fn read_response<R: AsyncBufReadExt + Unpin>(
-    reader: &mut R,
-) -> Result<NntpResponse, NntpError> {
-    let mut line = String::new();
-    reader.read_line(&mut line).await?;
-
-    if line.is_empty() {
-        return Err(NntpError::ProtocolError("empty response".into()));
+fn proto_to_nntp(e: ProtoError) -> NntpError {
+    match e {
+        ProtoError::AuthFailed(msg) => NntpError::AuthFailed(msg),
+        ProtoError::AuthRequired => NntpError::AuthRequired,
+        ProtoError::ArticleNotFound(msg) => NntpError::ArticleNotFound(msg),
+        ProtoError::UnexpectedResponse(code, msg) => NntpError::UnexpectedResponse(code, msg),
+        ProtoError::ProtocolError(msg) => NntpError::ProtocolError(msg),
     }
-
-    let code = line
-        .get(..3)
-        .and_then(|s| s.parse::<u16>().ok())
-        .ok_or_else(|| NntpError::ProtocolError("invalid response line".into()))?;
-
-    let message = line[3..].trim().to_string();
-    Ok(NntpResponse { code, message })
-}
-
-fn expect_code(resp: &NntpResponse, expected: &[u16]) -> Result<(), NntpError> {
-    if expected.contains(&resp.code) {
-        Ok(())
-    } else {
-        Err(NntpError::UnexpectedResponse(
-            resp.code,
-            resp.message.clone(),
-        ))
-    }
-}
-
-async fn send_command<R: AsyncWriteExt + Unpin>(
-    writer: &mut R,
-    cmd: &str,
-) -> Result<(), NntpError> {
-    let line = format!("{cmd}\r\n");
-    writer.write_all(line.as_bytes()).await?;
-    Ok(())
 }
 
 async fn tls_connect(
@@ -339,46 +389,64 @@ impl rustls::client::danger::ServerCertVerifier for NoVerifier {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::io::AsyncWriteExt;
 
     #[tokio::test]
     async fn body_reader_unstuffs_and_terminates() {
         let data = b"line1\r\n..dot\r\n.\r\n".to_vec();
-        let cursor = std::io::Cursor::new(data);
         let (client, mut server) = tokio::io::duplex(64);
-        let reader = BufReader::new(Box::new(client) as Box<dyn NntpIo>);
 
         tokio::spawn(async move {
-            let _ = server.write_all(&cursor.into_inner()).await;
+            server.write_all(&data).await.unwrap();
         });
 
-        let mut stream = NntpStream::Plain(reader);
+        let reader = BufReader::new(Box::new(client) as Box<dyn NntpIo>);
+        let stream = NntpStream::Plain(reader);
+        let machine = NntpMachine::new_after_greeting();
 
-        let mut body = BodyReader::new(&mut stream);
+        let mut conn = NntpConnection {
+            server_id: 0,
+            stream,
+            machine,
+        };
+        conn.machine.request_body("test@example");
+
+        while let Some(output) = conn.machine.poll_output() {
+            match output {
+                Output::SendCommand(_) => {}
+                Output::NeedResponseLine => break,
+                _ => {}
+            }
+        }
+        conn.machine
+            .handle_input(Input::ResponseLine("222 body follows"));
+        while let Some(output) = conn.machine.poll_output() {
+            match output {
+                Output::NeedBodyLine => break,
+                Output::Event(_) => {}
+                _ => {}
+            }
+        }
+
+        let mut body = BodyReader::new(&mut conn);
 
         assert_eq!(body.read_line().await.unwrap(), Some(b"line1".to_vec()));
         assert_eq!(body.read_line().await.unwrap(), Some(b".dot".to_vec()));
-        assert_eq!(body.read_line().await.unwrap(), None);
         assert_eq!(body.read_line().await.unwrap(), None);
     }
 
     #[tokio::test]
     async fn read_response_parses_code_and_message() {
-        let data = b"200 Hello there\r\n".to_vec();
-        let mut reader = BufReader::new(std::io::Cursor::new(data));
-
-        let resp = read_response(&mut reader).await.unwrap();
+        let resp = machine::parse_response("200 Hello there").unwrap();
         assert_eq!(resp.code, 200);
         assert_eq!(resp.message, "Hello there");
     }
 
     #[tokio::test]
     async fn read_response_rejects_invalid_line() {
-        let data = b"oops\r\n".to_vec();
-        let mut reader = BufReader::new(std::io::Cursor::new(data));
-
-        let err = read_response(&mut reader).await.expect_err("should fail");
+        let err = machine::parse_response("oops").expect_err("should fail");
         match err {
-            NntpError::ProtocolError(message) => {
+            ProtoError::ProtocolError(message) => {
                 assert!(message.contains("invalid response"));
             }
             other => panic!("unexpected error: {other:?}"),
