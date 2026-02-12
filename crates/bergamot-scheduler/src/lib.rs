@@ -24,14 +24,15 @@ pub async fn run_service(mut service: Box<dyn Service>, mut shutdown: broadcast:
 
     loop {
         tokio::select! {
+            biased;
+            _ = shutdown.recv() => {
+                tracing::info!("shutting down service: {name}");
+                break;
+            }
             _ = interval.tick() => {
                 if let Err(err) = service.tick().await {
                     tracing::error!("service {name} error: {err}");
                 }
-            }
-            _ = shutdown.recv() => {
-                tracing::info!("shutting down service: {name}");
-                break;
             }
         }
     }
