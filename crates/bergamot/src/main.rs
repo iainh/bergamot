@@ -87,37 +87,35 @@ fn main() -> Result<()> {
         .install_default()
         .expect("failed to install rustls crypto provider");
 
-    rt.block_on(async {
-        let _pidfile = cli
-            .pidfile
-            .as_deref()
-            .map(daemon::PidFile::create)
-            .transpose()?;
+    let _pidfile = cli
+        .pidfile
+        .as_deref()
+        .map(daemon::PidFile::create)
+        .transpose()?;
 
-        let config_path = match cli.config {
-            Some(path) => path,
-            None => app::default_config_path()
-                .context("no config file found; use --config to specify one")?,
-        };
+    let config_path = match cli.config {
+        Some(path) => path,
+        None => app::default_config_path()
+            .context("no config file found; use --config to specify one")?,
+    };
 
-        let config = app::load_config(&config_path)?;
-        let log_buffer = app::init_tracing(&cli.log_level);
+    let config = app::load_config(&config_path)?;
+    let log_buffer = app::init_tracing(&cli.log_level);
 
-        tracing::info!("bergamot starting");
-        let stats_tracker = bergamot_scheduler::StatsTracker::from_config(&config);
-        let shared_stats =
-            std::sync::Arc::new(bergamot_scheduler::SharedStatsTracker::new(stats_tracker));
-        let fetcher = build_fetcher(
-            &config,
-            Some(shared_stats.clone() as Arc<dyn bergamot_nntp::StatsRecorder>),
-        );
-        app::run_with_config_path(
-            config,
-            fetcher,
-            Some(config_path),
-            Some(log_buffer),
-            Some(shared_stats.clone()),
-        )
-        .await
-    })
+    tracing::info!("bergamot starting");
+    let stats_tracker = bergamot_scheduler::StatsTracker::from_config(&config);
+    let shared_stats =
+        std::sync::Arc::new(bergamot_scheduler::SharedStatsTracker::new(stats_tracker));
+    let fetcher = build_fetcher(
+        &config,
+        Some(shared_stats.clone() as Arc<dyn bergamot_nntp::StatsRecorder>),
+    );
+
+    rt.block_on(app::run_with_config_path(
+        config,
+        fetcher,
+        Some(config_path),
+        Some(log_buffer),
+        Some(shared_stats.clone()),
+    ))
 }
