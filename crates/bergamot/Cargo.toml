@@ -28,6 +28,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 dirs = "5.0"
 dashmap = "6.1.0"
+tokio-util = { version = "0.7.18", features = ["rt"] }
 
 [dev-dependencies]
 chrono = "0.4"

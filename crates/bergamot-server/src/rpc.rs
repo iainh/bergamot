@@ -1360,7 +1360,7 @@ mod tests {
 
     #[tokio::test]
     async fn dispatch_shutdown_triggers_shutdown() {
-        let (shutdown_handle, rx) = crate::shutdown::ShutdownHandle::new();
+        let (shutdown_handle, token) = crate::shutdown::ShutdownHandle::new();
         let (mut coordinator, handle, _rx, _rate_rx) = QueueCoordinator::new(
             2,
             1,
@@ -1374,7 +1374,7 @@ mod tests {
 
         let result = rpc_shutdown(&state).await.expect("shutdown");
         assert_eq!(result, serde_json::json!(true));
-        assert!(*rx.borrow());
+        assert!(token.is_cancelled());
     }
 
     #[tokio::test]

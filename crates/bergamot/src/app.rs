@@ -613,7 +613,7 @@ pub async fn run_with_config_path(
         None
     };
 
-    let (shutdown_handle, mut shutdown_rx) = ShutdownHandle::new();
+    let (shutdown_handle, shutdown_token) = ShutdownHandle::new();
     let config_arc = std::sync::Arc::new(std::sync::RwLock::new(config));
     let mut app_state_builder = AppState::default()
         .with_queue(queue_handle.clone())
@@ -662,17 +662,12 @@ pub async fn run_with_config_path(
     });
 
     tokio::select! {
+        biased;
+        _ = shutdown_token.cancelled() => {
+            tracing::info!("RPC shutdown received");
+        }
         _ = tokio::signal::ctrl_c() => {
             tracing::info!("ctrl-c received");
-        }
-        _ = async {
-            while shutdown_rx.changed().await.is_ok() {
-                if *shutdown_rx.borrow() {
-                    break;
-                }
-            }
-        } => {
-            tracing::info!("RPC shutdown received");
         }
     }
     tracing::info!("shutdown signal received");
