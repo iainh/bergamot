@@ -142,7 +142,7 @@ impl<E: Par2Engine, U: Unpacker> PostProcessor<E, U> {
         let nzb_id = req.nzb_id as u32;
         let mut ctx = PostProcessContext::new(req);
         let pp_start = Instant::now();
-        tracing::info!(nzb = %ctx.request.nzb_name, "post-processing started");
+        tracing::info!(nzb = %ctx.request.nzb_name, "starting post-processing");
 
         if let Some(reporter) = &self.reporter {
             reporter
@@ -158,7 +158,7 @@ impl<E: Par2Engine, U: Unpacker> PostProcessor<E, U> {
                 .await;
         }
         let par_start = Instant::now();
-        tracing::info!(nzb = %ctx.request.nzb_name, "par2 verify starting");
+        tracing::info!(nzb = %ctx.request.nzb_name, "verifying file integrity (par2)");
         let progress = Arc::new(AtomicU32::new(0));
         let verify_result = {
             let reporter = self.reporter.clone();
@@ -170,7 +170,7 @@ impl<E: Par2Engine, U: Unpacker> PostProcessor<E, U> {
         };
         match verify_result {
             Ok(result) => {
-                tracing::info!(nzb = %ctx.request.nzb_name, result = ?result, "par2 verify finished");
+                tracing::info!(nzb = %ctx.request.nzb_name, result = ?result, "file integrity check complete");
                 ctx.par_result = Some(result);
             }
             Err(err) => {
@@ -188,7 +188,7 @@ impl<E: Par2Engine, U: Unpacker> PostProcessor<E, U> {
                     .await;
             }
             let repair_start = Instant::now();
-            tracing::info!(nzb = %ctx.request.nzb_name, "par2 repair starting");
+            tracing::info!(nzb = %ctx.request.nzb_name, "repairing damaged files (par2)");
             let progress = Arc::new(AtomicU32::new(0));
             let repair_result = {
                 let reporter = self.reporter.clone();
@@ -200,7 +200,7 @@ impl<E: Par2Engine, U: Unpacker> PostProcessor<E, U> {
             };
             match repair_result {
                 Ok(result) => {
-                    tracing::info!(nzb = %ctx.request.nzb_name, result = ?result, "par2 repair finished");
+                    tracing::info!(nzb = %ctx.request.nzb_name, result = ?result, "file repair complete");
                     ctx.par_result = Some(result);
                 }
                 Err(err) => {
@@ -292,7 +292,7 @@ impl<E: Par2Engine, U: Unpacker> PostProcessor<E, U> {
             par_ms = par_elapsed.as_millis() as u64,
             repair_ms = repair_elapsed.as_millis() as u64,
             unpack_ms = unpack_elapsed.as_millis() as u64,
-            "post-processing timings"
+            "post-processing complete"
         );
         let timings = PostTimings {
             total_sec: total_elapsed.as_secs(),
@@ -319,7 +319,7 @@ impl<E: Par2Engine, U: Unpacker> PostProcessor<E, U> {
         let par2_file = match find_par2_file(&ctx.request.working_dir, &ctx.request.nzb_name) {
             Some(path) => path,
             None => {
-                tracing::info!(nzb = %ctx.request.nzb_name, "no par2 file found, skipping verification");
+                tracing::info!(nzb = %ctx.request.nzb_name, "no repair data found, skipping integrity check");
                 return Ok(Par2Result::AllFilesOk);
             }
         };
@@ -349,10 +349,10 @@ impl<E: Par2Engine, U: Unpacker> PostProcessor<E, U> {
     async fn unpack(&self, ctx: &PostProcessContext) -> Result<(), PostProcessError> {
         let archives = detect_archives(&ctx.request.working_dir);
         if archives.is_empty() {
-            tracing::info!(nzb = %ctx.request.nzb_name, "no archives found, skipping unpack");
+            tracing::info!(nzb = %ctx.request.nzb_name, "no archives to extract");
             return Ok(());
         }
-        tracing::info!(nzb = %ctx.request.nzb_name, count = archives.len(), "unpacking archives");
+        tracing::info!(nzb = %ctx.request.nzb_name, count = archives.len(), "extracting archives");
         for (_, archive_path) in &archives {
             let result = self
                 .unpacker

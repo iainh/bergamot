@@ -186,7 +186,7 @@ fn native_verify(
     );
 
     if result.all_ok() {
-        tracing::info!(dir = %working_dir.display(), "par2 verify: all files OK");
+        tracing::info!(dir = %working_dir.display(), "all files intact");
         Ok(Par2Result::AllFilesOk)
     } else {
         let needed = result.blocks_needed();
@@ -195,7 +195,7 @@ fn native_verify(
             dir = %working_dir.display(),
             blocks_needed = needed,
             blocks_available = available,
-            "par2 verify: repair needed"
+            "file damage detected, repair needed"
         );
         Ok(Par2Result::RepairNeeded {
             blocks_needed: needed,
@@ -226,7 +226,7 @@ fn native_repair(
     );
 
     if verify.all_ok() {
-        tracing::info!(dir = %working_dir.display(), "par2 repair: all files already OK");
+        tracing::info!(dir = %working_dir.display(), "repair skipped, all files intact");
         return Ok(Par2Result::AllFilesOk);
     }
 
@@ -234,7 +234,7 @@ fn native_repair(
         dir = %working_dir.display(),
         blocks_needed = verify.blocks_needed(),
         recovery_slices = rs.recovery_slices.len(),
-        "par2 repair: starting"
+        "starting file repair"
     );
 
     match bergamot_par2::repair_recovery_set_with_progress(
@@ -254,7 +254,7 @@ fn native_repair(
                 tracing::info!(
                     dir = %working_dir.display(),
                     repaired_slices = report.repaired_slices,
-                    "par2 repair: complete, all files now OK"
+                    "file repair successful"
                 );
                 Ok(Par2Result::RepairComplete)
             } else {

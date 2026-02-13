@@ -329,7 +329,7 @@ impl<R: ProcessRunner + 'static> ExtensionExecutor for PostProcessExtensionExecu
                     tracing::info!(
                         extension = %ext.metadata.name,
                         exit_code = result.exit_code,
-                        "extension finished"
+                        "post-processing extension completed"
                     );
                 }
                 Err(err) => {
@@ -439,7 +439,7 @@ fn build_extension_executor(config: &Config) -> Option<Arc<dyn ExtensionExecutor
     tracing::info!(
         count = extensions.len(),
         dir = %script_dir.display(),
-        "discovered post-processing extensions"
+        "loaded post-processing extensions"
     );
     let manager = ExtensionManager::new(vec![script_dir.clone()]);
     let runner = Arc::new(ExtensionRunner::new(
@@ -542,7 +542,7 @@ pub async fn run_with_config_path(
             let count = queue.queue.len();
             restored_paused = paused;
             coordinator.seed_state(queue, paused, rate);
-            tracing::info!("restored {count} NZBs from disk state");
+            tracing::info!("restored {count} downloads from saved state");
         }
         Ok(None) => {}
         Err(err) => {
@@ -607,7 +607,7 @@ pub async fn run_with_config_path(
         let (feed_tx, feed_rx) = tokio::sync::mpsc::channel(16);
         let handle = bergamot_feed::FeedHandle::new(feed_tx);
         tokio::spawn(feed_coordinator.run_actor(feed_rx));
-        tracing::info!("feed coordinator started");
+        tracing::info!("RSS feed monitoring started");
         Some(handle)
     } else {
         None
@@ -664,13 +664,12 @@ pub async fn run_with_config_path(
     tokio::select! {
         biased;
         _ = shutdown_token.cancelled() => {
-            tracing::info!("RPC shutdown received");
+            tracing::info!("shutdown requested via API");
         }
         _ = tokio::signal::ctrl_c() => {
-            tracing::info!("ctrl-c received");
+            tracing::info!("shutdown requested (Ctrl+C)");
         }
     }
-    tracing::info!("shutdown signal received");
 
     bergamot_scheduler::shutdown_services(scheduler_tx, scheduler_handles).await;
 
@@ -695,7 +694,7 @@ pub async fn run_with_config_path(
             Ok::<(), anyhow::Error>(())
         })
         .await;
-        tracing::info!("final disk state flush complete");
+        tracing::info!("saved download state to disk");
     }
 
     let _ = queue_handle.shutdown().await;
@@ -730,7 +729,7 @@ pub async fn run_with_config_path(
         }
     }
 
-    tracing::info!("shutdown complete");
+    tracing::info!("bergamot stopped");
     Ok(())
 }
 

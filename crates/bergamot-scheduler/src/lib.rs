@@ -17,7 +17,7 @@ pub trait Service: Send + Sync + 'static {
 
 pub async fn run_service(mut service: Box<dyn Service>, mut shutdown: broadcast::Receiver<()>) {
     let name = service.name().to_string();
-    tracing::info!("starting service: {name}");
+    tracing::info!("starting {name} service");
 
     let mut interval = tokio::time::interval(service.interval());
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -26,7 +26,7 @@ pub async fn run_service(mut service: Box<dyn Service>, mut shutdown: broadcast:
         tokio::select! {
             biased;
             _ = shutdown.recv() => {
-                tracing::info!("shutting down service: {name}");
+                tracing::info!("stopping {name} service");
                 break;
             }
             _ = interval.tick() => {
@@ -69,7 +69,7 @@ pub async fn shutdown_services(
     for handle in handles {
         let _ = handle.await;
     }
-    tracing::info!("all services stopped");
+    tracing::info!("all background services stopped");
 }
 
 fn build_services(config: &Config, deps: ServiceDeps) -> anyhow::Result<Vec<Box<dyn Service>>> {
@@ -206,7 +206,7 @@ impl Scheduler {
         for task in &mut self.tasks {
             if task.should_execute(now) {
                 tracing::info!(
-                    "executing scheduled task {}: {:?} {}",
+                    "running scheduled task {}: {:?} {}",
                     task.id,
                     task.command,
                     task.param
@@ -278,7 +278,7 @@ impl CommandExecutor {
                 let server_id: u32 = param.parse().context("activate server id")?;
                 if let Some(pool) = &self.deps.server_pool {
                     if pool.activate_server(server_id).await {
-                        tracing::info!("activated server {server_id}");
+                        tracing::info!("news server {server_id} activated");
                     } else {
                         tracing::warn!("server {server_id} not found");
                     }
@@ -288,7 +288,7 @@ impl CommandExecutor {
                 let server_id: u32 = param.parse().context("deactivate server id")?;
                 if let Some(pool) = &self.deps.server_pool {
                     if pool.deactivate_server(server_id).await {
-                        tracing::info!("deactivated server {server_id}");
+                        tracing::info!("news server {server_id} deactivated");
                     } else {
                         tracing::warn!("server {server_id} not found");
                     }
@@ -324,7 +324,7 @@ impl CommandExecutor {
                 if let Some(feed_handle) = &self.deps.feed_handle {
                     match feed_handle.process_feed(feed_id).await {
                         Ok(items) => {
-                            tracing::info!("feed {feed_id}: fetched {} items", items.len());
+                            tracing::info!("feed {feed_id}: received {} new items", items.len());
                         }
                         Err(err) => {
                             tracing::warn!("feed {feed_id} fetch error: {err}");
@@ -335,7 +335,7 @@ impl CommandExecutor {
                 }
             }
             SchedulerCommand::Extensions => {
-                tracing::info!("extensions command: {param}");
+                tracing::info!("running extension command: {param}");
             }
         }
         Ok(())
@@ -407,7 +407,7 @@ impl NzbDirScanner {
                     bergamot_core::models::Priority::Normal,
                 )
                 .await?;
-            tracing::info!("added NZB {} as id {}", path.display(), id);
+            tracing::info!("queued download: {} (id {})", path.display(), id);
 
             if let Some(disk) = &self.disk
                 && let Err(err) = disk.save_nzb_file(id, &nzb_bytes)
@@ -445,7 +445,7 @@ impl Service for NzbDirScanner {
                 let age = modified.elapsed().unwrap_or_default();
 
                 if age >= self.file_age {
-                    tracing::info!("processing NZB: {}", path.display());
+                    tracing::info!("found new NZB file: {}", path.display());
                     self.process_nzb(&path).await?;
                 }
             }

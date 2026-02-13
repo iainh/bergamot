@@ -755,11 +755,11 @@ impl QueueCoordinator {
                 }
             }
             QueueCommand::PauseAll => {
-                tracing::info!("pausing all downloads");
+                tracing::info!("downloads paused");
                 self.paused = true;
             }
             QueueCommand::ResumeAll => {
-                tracing::info!("resuming all downloads");
+                tracing::info!("downloads resumed");
                 self.paused = false;
                 for nzb in &mut self.queue.queue {
                     nzb.paused = false;
@@ -1034,7 +1034,7 @@ impl QueueCoordinator {
             if is_par_file(&file.filename) {
                 nzb.remaining_par_count = nzb.remaining_par_count.saturating_sub(1);
             }
-            tracing::info!("file {} completed for NZB {}", file.filename, nzb.name);
+            tracing::info!("file download complete: {} ({})", file.filename, nzb.name);
         }
     }
 
@@ -1054,7 +1054,7 @@ impl QueueCoordinator {
 
         if let Some(nzb) = self.queue.queue.iter_mut().find(|n| n.id == nzb_id) {
             tracing::info!(
-                "NZB {} completed download, starting post-processing",
+                "download complete, queuing post-processing: {}",
                 nzb.name
             );
 
@@ -1105,7 +1105,7 @@ impl QueueCoordinator {
                 nzb.download_sec = start.elapsed().map(|d| d.as_secs()).unwrap_or(0);
             }
             tracing::info!(
-                "NZB {} completed (no post-processor), moved to history",
+                "download complete: {} (no post-processing configured)",
                 nzb.name
             );
             self.add_to_history(nzb, HistoryKind::Nzb);
@@ -1190,7 +1190,7 @@ impl QueueCoordinator {
             for file in &mut nzb.files {
                 if file.paused && is_par_file(&file.filename) {
                     file.paused = false;
-                    tracing::info!("unpaused par file {} for NZB {}", file.filename, nzb.name);
+                    tracing::info!("resuming repair file: {} ({})", file.filename, nzb.name);
                 }
             }
         }
@@ -1594,7 +1594,7 @@ impl QueueCoordinator {
             .map_err(|e| QueueError::NzbParse(format!("{e}")))?;
 
         for nzb_file in &parsed.files {
-            tracing::info!(
+            tracing::debug!(
                 subject = %nzb_file.subject,
                 filename = ?nzb_file.filename,
                 par_status = ?nzb_file.par_status,
@@ -1609,7 +1609,7 @@ impl QueueCoordinator {
             path = %path.display(),
             file_count = parsed.files.len(),
             has_pars,
-            "NZB par detection summary"
+            "parsed NZB"
         );
 
         let id = self.queue.next_nzb_id;
@@ -1625,7 +1625,7 @@ impl QueueCoordinator {
             self.check_duplicate(&dup_key, bergamot_core::models::DupMode::Score)
         {
             tracing::info!(
-                "duplicate NZB detected: {} matches existing id {}",
+                "skipping duplicate download: {} (matches id {})",
                 name,
                 existing_id
             );
@@ -1780,7 +1780,7 @@ impl QueueCoordinator {
         self.paused = paused;
         self.download_rate = rate;
         let _ = self.rate_watch_tx.send(rate);
-        tracing::info!(nzb_count, paused, rate, "restored queue state from disk");
+        tracing::info!(nzb_count, paused, rate, "restored download queue");
     }
 
     fn update_post_status(
