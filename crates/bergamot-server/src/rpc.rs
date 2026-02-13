@@ -471,10 +471,15 @@ pub(crate) async fn rpc_listfiles(
 ) -> Result<serde_json::Value, JsonRpcError> {
     let queue = require_queue(state)?;
     let arr = params.as_array();
-    let nzb_id = arr
-        .and_then(|a| a.first())
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0) as u32;
+    let nzb_id = if let Some(a) = arr {
+        if a.len() >= 3 {
+            a.get(2).and_then(|v| v.as_u64()).unwrap_or(0) as u32
+        } else {
+            a.first().and_then(|v| v.as_u64()).unwrap_or(0) as u32
+        }
+    } else {
+        0
+    };
 
     let files = queue.get_file_list(nzb_id).await.map_err(rpc_error)?;
     let entries: Vec<serde_json::Value> = files
@@ -483,7 +488,12 @@ pub(crate) async fn rpc_listfiles(
             serde_json::json!({
                 "ID": f.id,
                 "NZBID": f.nzb_id,
+                "NZBFilename": "",
+                "NZBName": "",
+                "NZBNicename": "",
                 "Filename": f.filename,
+                "FilenameConfirmed": true,
+                "DestDir": "",
                 "Subject": f.subject,
                 "FileSizeLo": (f.size & 0xFFFF_FFFF) as u32,
                 "FileSizeHi": (f.size >> 32) as u32,
