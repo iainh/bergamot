@@ -192,22 +192,22 @@ pub struct NntpConnection {
 
 pub struct BodyReader<'a> {
     conn: &'a mut NntpConnection,
+    read_buf: Vec<u8>,
 }
 
 impl<'a> BodyReader<'a> {
     fn new(conn: &'a mut NntpConnection) -> Self {
-        Self { conn }
+        Self {
+            conn,
+            read_buf: Vec::with_capacity(8192),
+        }
     }
 
     pub async fn read_line(&mut self) -> Result<Option<Vec<u8>>, NntpError> {
-        // First check if there's a pending NeedBodyLine from a previous call.
-        // If the machine has already emitted NeedBodyLine, we proceed to read.
-        // If not (e.g. BodyEnd was already emitted), we should not read more.
-
-        let mut buf = Vec::new();
+        self.read_buf.clear();
         let bytes = match &mut self.conn.stream {
-            NntpStream::Plain(reader) => reader.read_until(b'\n', &mut buf).await?,
-            NntpStream::Tls(reader) => reader.read_until(b'\n', &mut buf).await?,
+            NntpStream::Plain(reader) => reader.read_until(b'\n', &mut self.read_buf).await?,
+            NntpStream::Tls(reader) => reader.read_until(b'\n', &mut self.read_buf).await?,
         };
 
         if bytes == 0 {
@@ -216,7 +216,7 @@ impl<'a> BodyReader<'a> {
             return Err(NntpError::ProtocolError("unexpected EOF".into()));
         }
 
-        let trimmed = machine::trim_crlf(&buf);
+        let trimmed = machine::trim_crlf(&self.read_buf);
         if machine::is_body_terminator(trimmed) {
             self.conn.machine.handle_input(Input::BodyEnd);
             self.conn.drain_single_event()?;
