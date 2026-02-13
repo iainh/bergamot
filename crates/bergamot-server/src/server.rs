@@ -378,6 +378,7 @@ pub fn spawn_stats_updater(
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(1));
         let mut prev_downloaded: u64 = 0;
+        let mut quota_paused = false;
         loop {
             interval.tick().await;
             match queue.get_status().await {
@@ -394,6 +395,34 @@ pub fn spawn_stats_updater(
                     state
                         .speed_limit_ref()
                         .store(status.download_rate, Ordering::Relaxed);
+
+                    let (monthly_quota, daily_quota) = state
+                        .config()
+                        .and_then(|c| c.read().ok())
+                        .map(|cfg| (cfg.monthly_quota, cfg.daily_quota))
+                        .unwrap_or((0, 0));
+
+                    if monthly_quota > 0 || daily_quota > 0 {
+                        let reached = state
+                            .stats_tracker()
+                            .is_some_and(|t| t.check_quota_reached(monthly_quota, daily_quota));
+
+                        if reached && !quota_paused {
+                            tracing::info!("download quota reached, pausing downloads");
+                            state
+                                .download_paused()
+                                .store(true, std::sync::atomic::Ordering::Relaxed);
+                            let _ = queue.pause_all().await;
+                            quota_paused = true;
+                        } else if !reached && quota_paused {
+                            tracing::info!("download quota reset, resuming downloads");
+                            state
+                                .download_paused()
+                                .store(false, std::sync::atomic::Ordering::Relaxed);
+                            let _ = queue.resume_all().await;
+                            quota_paused = false;
+                        }
+                    }
                 }
                 Err(_) => break,
             }
