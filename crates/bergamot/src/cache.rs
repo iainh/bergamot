@@ -25,7 +25,7 @@ pub struct BoundedCache {
     max_bytes: usize,
     entries: DashMap<String, Arc<Vec<u8>>>,
     eviction: Mutex<VecDeque<String>>,
-    current_bytes: AtomicUsize,
+    current_bytes: Arc<AtomicUsize>,
 }
 
 impl BoundedCache {
@@ -34,8 +34,12 @@ impl BoundedCache {
             max_bytes,
             entries: DashMap::new(),
             eviction: Mutex::new(VecDeque::new()),
-            current_bytes: AtomicUsize::new(0),
+            current_bytes: Arc::new(AtomicUsize::new(0)),
         }
+    }
+
+    pub fn current_bytes_ref(&self) -> &Arc<AtomicUsize> {
+        &self.current_bytes
     }
 }
 

@@ -50,6 +50,7 @@ pub struct AppState {
     scan_trigger: Option<tokio::sync::mpsc::Sender<()>>,
     feed_handle: Option<bergamot_feed::FeedHandle>,
     stats_tracker: Option<std::sync::Arc<bergamot_scheduler::SharedStatsTracker>>,
+    article_cache_bytes: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 impl Default for AppState {
@@ -74,6 +75,7 @@ impl Default for AppState {
             scan_trigger: None,
             feed_handle: None,
             stats_tracker: None,
+            article_cache_bytes: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         }
     }
 }
@@ -173,6 +175,18 @@ impl AppState {
         self.stats_tracker.as_ref()
     }
 
+    pub fn with_article_cache_bytes(
+        mut self,
+        counter: Arc<std::sync::atomic::AtomicUsize>,
+    ) -> Self {
+        self.article_cache_bytes = counter;
+        self
+    }
+
+    pub fn article_cache_bytes(&self) -> &Arc<std::sync::atomic::AtomicUsize> {
+        &self.article_cache_bytes
+    }
+
     pub fn version(&self) -> &str {
         &self.version
     }
@@ -221,6 +235,17 @@ impl AppState {
         let rate_fields = crate::status::SizeFields::from(download_rate);
         let download_limit = self.speed_limit.load(Ordering::Relaxed);
         let download_paused = self.download_paused.load(Ordering::Relaxed);
+        let uptime_secs = self.start_time.elapsed().as_secs();
+        let average_download_rate = if uptime_secs > 0 {
+            downloaded / uptime_secs
+        } else {
+            0
+        };
+        let avg_rate_fields = crate::status::SizeFields::from(average_download_rate);
+        let article_cache = self
+            .article_cache_bytes
+            .load(std::sync::atomic::Ordering::Relaxed) as u64;
+        let cache_fields = crate::status::SizeFields::from(article_cache);
         let post_paused = self.postproc_paused.load(Ordering::Relaxed);
         let scan_paused = self.scan_paused.load(Ordering::Relaxed);
 
@@ -283,22 +308,22 @@ impl AppState {
             day_size_lo: day_fields.lo,
             day_size_hi: day_fields.hi,
             day_size_mb: day_fields.mb,
-            article_cache_lo: 0,
-            article_cache_hi: 0,
-            article_cache_mb: 0,
+            article_cache_lo: cache_fields.lo,
+            article_cache_hi: cache_fields.hi,
+            article_cache_mb: cache_fields.mb,
             download_rate,
             download_rate_lo: rate_fields.lo,
             download_rate_hi: rate_fields.hi,
-            average_download_rate: 0,
-            average_download_rate_lo: 0,
-            average_download_rate_hi: 0,
+            average_download_rate,
+            average_download_rate_lo: avg_rate_fields.lo,
+            average_download_rate_hi: avg_rate_fields.hi,
             download_limit,
             thread_count: 0,
             post_job_count: 0,
             par_job_count: 0,
             url_count: 0,
             queue_script_count: 0,
-            up_time_sec: self.start_time.elapsed().as_secs(),
+            up_time_sec: uptime_secs,
             download_time_sec: 0,
             server_time: chrono::Utc::now().timestamp(),
             resume_time: self.resume_at.load(Ordering::Relaxed) as i64,

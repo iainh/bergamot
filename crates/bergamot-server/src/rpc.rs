@@ -469,14 +469,8 @@ pub(crate) async fn rpc_listfiles(
     Ok(serde_json::json!(entries))
 }
 
-pub(crate) fn rpc_postqueue(state: &AppState) -> Result<serde_json::Value, JsonRpcError> {
-    let paused = state
-        .postproc_paused()
-        .load(std::sync::atomic::Ordering::Relaxed);
-    Ok(serde_json::json!({
-        "Paused": paused,
-        "Jobs": [],
-    }))
+pub(crate) fn rpc_postqueue(_state: &AppState) -> Result<serde_json::Value, JsonRpcError> {
+    Ok(serde_json::json!([]))
 }
 
 pub(crate) fn rpc_pausepost(state: &AppState) -> Result<serde_json::Value, JsonRpcError> {
@@ -1491,10 +1485,11 @@ mod tests {
     }
 
     #[test]
-    fn dispatch_postqueue_returns_paused_status() {
+    fn dispatch_postqueue_returns_empty_array() {
         let state = AppState::default();
         let result = rpc_postqueue(&state).expect("postqueue");
-        assert_eq!(result["Paused"], false);
+        assert!(result.is_array(), "postqueue should return an array");
+        assert_eq!(result.as_array().unwrap().len(), 0);
     }
 
     fn state_with_log() -> AppState {
@@ -1641,9 +1636,6 @@ mod tests {
                 .postproc_paused()
                 .load(std::sync::atomic::Ordering::Relaxed)
         );
-
-        let pq = rpc_postqueue(&state).expect("postqueue");
-        assert_eq!(pq["Paused"], true);
     }
 
     #[test]

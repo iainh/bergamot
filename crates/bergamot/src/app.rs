@@ -486,12 +486,18 @@ pub async fn run_with_config_path(
     let web_config = Arc::new(web_server_config(&config));
     let inter_dir = config.inter_dir.clone();
 
-    let cache: Arc<dyn crate::cache::ArticleCache> = if config.article_cache > 0 {
-        Arc::new(crate::cache::BoundedCache::new(
-            config.article_cache as usize * 1024 * 1024,
-        ))
+    let (cache, cache_bytes_ref): (
+        Arc<dyn crate::cache::ArticleCache>,
+        Arc<std::sync::atomic::AtomicUsize>,
+    ) = if config.article_cache > 0 {
+        let bounded = crate::cache::BoundedCache::new(config.article_cache as usize * 1024 * 1024);
+        let bytes_ref = bounded.current_bytes_ref().clone();
+        (Arc::new(bounded), bytes_ref)
     } else {
-        Arc::new(crate::cache::NoopCache)
+        (
+            Arc::new(crate::cache::NoopCache),
+            Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        )
     };
     let writer_pool = Arc::new(crate::writer::FileWriterPool::new());
 
@@ -620,7 +626,8 @@ pub async fn run_with_config_path(
     let mut app_state_builder = AppState::default()
         .with_queue(queue_handle.clone())
         .with_shutdown(shutdown_handle)
-        .with_disk(disk.clone());
+        .with_disk(disk.clone())
+        .with_article_cache_bytes(cache_bytes_ref);
     app_state_builder
         .download_paused()
         .store(restored_paused, std::sync::atomic::Ordering::Relaxed);
