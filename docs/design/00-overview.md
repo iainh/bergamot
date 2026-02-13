@@ -84,24 +84,24 @@ guarantees.
 
 ## Document Index
 
-| #  | File                          | Topic                                         |
-|----|-------------------------------|-----------------------------------------------|
-| 00 | `00-overview.md`              | Architecture overview (this document)          |
-| 01 | `01-core-data-structures.md`  | Core data structures & ownership model         |
-| 02 | `02-nzb-parsing.md`           | NZB file parsing                               |
-| 03 | `03-nntp-engine.md`           | NNTP connection engine & article downloading   |
-| 04 | `04-yenc-decoding.md`         | yEnc decoding & CRC verification               |
-| 05 | `05-queue-coordinator.md`     | Queue coordinator & download orchestration     |
-| 06 | `06-post-processing.md`       | Post-processing: PAR2, unpack, scripts         |
-| 07 | `07-web-server-api.md`        | Web server, JSON-RPC / XML-RPC API             |
-| 08 | `08-configuration.md`         | Configuration system                           |
-| 09 | `09-scheduler-services.md`    | Scheduler & background services                |
-| 10 | `10-feed-system.md`           | RSS / Atom feed system                         |
-| 11 | `11-extension-system.md`      | Extension / script system                      |
-| 12 | `12-disk-state.md`            | Disk state persistence & recovery              |
-| 13 | `13-logging-history.md`       | Logging, message buffer, history tracking      |
-| 14 | `14-rust-architecture.md`     | Rust crate structure & cross-cutting concerns  |
-| 15 | `15-download-flow.md`         | End-to-end download flow walkthrough           |
+| #  | File                                          | Topic                                         |
+|----|-----------------------------------------------|-----------------------------------------------|
+| 00 | `design/00-overview.md`                       | Architecture overview (this document)          |
+| 01 | `design/01-core-data-structures.md`           | Core data structures & ownership model         |
+| 02 | `implementation/02-nzb-parsing.md`            | NZB file parsing                               |
+| 03 | `implementation/03-nntp-engine.md`            | NNTP connection engine & article downloading   |
+| 04 | `implementation/04-yenc-decoding.md`          | yEnc decoding & CRC verification               |
+| 05 | `implementation/05-queue-coordinator.md`      | Queue coordinator & download orchestration     |
+| 06 | `implementation/06-post-processing.md`        | Post-processing: PAR2, unpack, scripts         |
+| 07 | `implementation/07-web-server-api.md`         | Web server, JSON-RPC / XML-RPC API             |
+| 08 | `implementation/08-configuration.md`          | Configuration system                           |
+| 09 | `implementation/09-scheduler-services.md`     | Scheduler & background services                |
+| 10 | `implementation/10-feed-system.md`            | RSS / Atom feed system                         |
+| 11 | `implementation/11-extension-system.md`       | Extension / script system                      |
+| 12 | `implementation/12-disk-state.md`             | Disk state persistence & recovery              |
+| 13 | `implementation/13-logging-history.md`        | Logging, message buffer, history tracking      |
+| 14 | `design/14-rust-architecture.md`              | Rust crate structure & cross-cutting concerns  |
+| 15 | `design/15-download-flow.md`                  | End-to-end download flow walkthrough           |
 
 ---
 
@@ -201,6 +201,11 @@ The project is organised as a Cargo workspace with focused crates:
 | `bergamot-feed`      | RSS/Atom feed polling & matching            |
 | `bergamot-scheduler` | Cron-like task scheduler                    |
 | `bergamot-diskstate` | On-disk persistence & crash recovery        |
+| `bergamot-config`    | Configuration file parsing & validation     |
+| `bergamot-par2`      | Native PAR2 parsing, verification & repair  |
+| `bergamot-logging`   | Tracing subscriber layer & log ring buffer  |
+| `bergamot-extension` | Extension/script runner & environment setup |
+| `bergamot-nntp-stub` | Test stub NNTP server for e2e tests         |
 
 Each crate has an independent test suite and can be developed, tested,
 and documented in isolation.

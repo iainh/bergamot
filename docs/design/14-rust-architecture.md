@@ -8,94 +8,163 @@ bergamot is organized as a Cargo workspace with focused crates:
 
 ```
 bergamot/
-├── Cargo.toml              # workspace root
-├── bergamot/                   # binary crate (main entry point)
-│   ├── Cargo.toml
-│   └── src/
-│       └── main.rs
-├── bergamot-core/              # shared data structures, config, types
-│   ├── Cargo.toml
-│   └── src/
-│       ├── lib.rs
-│       ├── config.rs       # configuration parsing & defaults
-│       ├── types.rs        # NzbInfo, FileInfo, ArticleInfo, etc.
-│       └── error.rs        # shared error types
-├── bergamot-nntp/              # NNTP protocol client, connection pool
-│   ├── Cargo.toml
-│   └── src/
-│       ├── lib.rs
-│       ├── connection.rs   # single NNTP connection
-│       ├── pool.rs         # connection pool per server
-│       └── response.rs     # response parsing
-├── bergamot-nzb/               # NZB XML parser
-│   ├── Cargo.toml
-│   └── src/
-│       └── lib.rs
-├── bergamot-yenc/              # yEnc decoder
-│   ├── Cargo.toml
-│   └── src/
-│       └── lib.rs
-├── bergamot-queue/             # queue coordinator, scheduler
-│   ├── Cargo.toml
-│   └── src/
-│       ├── lib.rs
-│       ├── coordinator.rs  # QueueCoordinator actor
-│       ├── scheduler.rs    # article scheduling
-│       └── disk_state.rs   # persistence
-├── bergamot-post/              # post-processing (PAR2, unpack, move)
-│   ├── Cargo.toml
-│   └── src/
-│       ├── lib.rs
-│       ├── par2.rs         # PAR2 verify/repair
-│       ├── unpack.rs       # archive extraction
-│       └── cleanup.rs      # temp file removal, renaming
-├── bergamot-api/               # web server, JSON-RPC, XML-RPC
-│   ├── Cargo.toml
-│   └── src/
-│       ├── lib.rs
-│       ├── jsonrpc.rs
-│       ├── xmlrpc.rs
-│       └── routes.rs
-└── bergamot-cli/               # command-line interface
-    ├── Cargo.toml
-    └── src/
-        └── lib.rs
+├── Cargo.toml                  # workspace root
+├── src/                        # binary crate (main entry point)
+│   ├── main.rs
+│   ├── app.rs              # app wiring
+│   ├── cache.rs            # article cache
+│   ├── cli.rs              # CLI argument parsing
+│   ├── daemon.rs           # daemon mode
+│   ├── download.rs         # download worker
+│   ├── lib.rs
+│   └── writer.rs           # file writer
+├── crates/
+│   ├── bergamot-core/          # shared data models
+│   │   └── src/
+│   │       ├── lib.rs
+│   │       └── models.rs
+│   ├── bergamot-config/        # configuration parsing
+│   │   └── src/
+│   │       ├── lib.rs
+│   │       ├── error.rs
+│   │       ├── model.rs
+│   │       └── parse.rs
+│   ├── bergamot-nntp/          # NNTP protocol client, connection pool
+│   │   └── src/
+│   │       ├── lib.rs
+│   │       ├── error.rs
+│   │       ├── machine.rs      # protocol state machine
+│   │       ├── model.rs
+│   │       ├── pool.rs         # connection pool per server
+│   │       ├── protocol.rs
+│   │       ├── scheduler.rs    # article scheduling
+│   │       └── speed.rs        # speed tracking
+│   ├── bergamot-nntp-stub/     # test stub NNTP server
+│   │   └── src/
+│   │       ├── lib.rs
+│   │       └── main.rs
+│   ├── bergamot-nzb/           # NZB XML parser
+│   │   └── src/
+│   │       ├── lib.rs
+│   │       ├── error.rs
+│   │       ├── model.rs
+│   │       └── parser.rs
+│   ├── bergamot-yenc/          # yEnc decoder (SIMD-accelerated)
+│   │   └── src/
+│   │       ├── lib.rs
+│   │       ├── cache.rs
+│   │       ├── decode.rs
+│   │       ├── error.rs
+│   │       └── model.rs
+│   ├── bergamot-queue/         # queue coordinator
+│   │   └── src/
+│   │       ├── lib.rs
+│   │       ├── command.rs
+│   │       ├── coordinator.rs  # QueueCoordinator actor
+│   │       ├── error.rs
+│   │       └── status.rs
+│   ├── bergamot-postproc/      # post-processing pipeline
+│   │   └── src/
+│   │       ├── lib.rs
+│   │       ├── cleanup.rs
+│   │       ├── config.rs
+│   │       ├── error.rs
+│   │       ├── mover.rs
+│   │       ├── par2.rs
+│   │       ├── processor.rs
+│   │       └── unpack.rs
+│   ├── bergamot-par2/          # native PAR2 parser, verifier, repairer
+│   │   └── src/
+│   │       ├── lib.rs
+│   │       ├── error.rs
+│   │       ├── format/
+│   │       ├── galois.rs
+│   │       ├── model.rs
+│   │       ├── parser.rs
+│   │       ├── repair.rs
+│   │       └── verify.rs
+│   ├── bergamot-server/        # HTTP/HTTPS server, JSON-RPC, XML-RPC
+│   │   └── src/
+│   │       ├── lib.rs
+│   │       ├── auth.rs
+│   │       ├── config.rs
+│   │       ├── error.rs
+│   │       ├── rpc_module.rs
+│   │       ├── rpc.rs
+│   │       ├── server.rs
+│   │       ├── shutdown.rs
+│   │       ├── status.rs
+│   │       ├── tls.rs
+│   │       └── xmlrpc.rs
+│   ├── bergamot-feed/          # RSS/Atom/Newznab feed polling
+│   │   └── src/
+│   │       ├── lib.rs
+│   │       ├── coordinator.rs
+│   │       ├── fetch.rs
+│   │       └── rss.rs
+│   ├── bergamot-scheduler/     # cron-like task scheduler
+│   │   └── src/
+│   │       └── lib.rs
+│   ├── bergamot-diskstate/     # on-disk state persistence
+│   │   └── src/
+│   │       └── lib.rs
+│   ├── bergamot-logging/       # tracing subscriber, ring buffer
+│   │   └── src/
+│   │       ├── lib.rs
+│   │       └── tracing_layer.rs
+│   └── bergamot-extension/     # extension/script runner
+│       └── src/
+│           ├── lib.rs
+│           └── runner.rs
 ```
 
 ### Crate Responsibilities
 
 | Crate | Responsibility |
 |-------|----------------|
-| `bergamot` | Binary entry point — wires subsystems, handles signals, runs `main()` |
-| `bergamot-core` | Shared types (`NzbInfo`, `FileInfo`, `ArticleInfo`), configuration parsing, error types, constants |
-| `bergamot-nntp` | NNTP protocol implementation, connection lifecycle, connection pool with server levels/groups |
-| `bergamot-nzb` | Streaming NZB XML parsing via `quick-xml`, filename extraction, PAR2 classification, file reordering |
-| `bergamot-yenc` | yEnc line-by-line decoder, CRC32 verification, header parsing (`=ybegin`/`=ypart`/`=yend`) |
-| `bergamot-queue` | Queue coordinator actor, article scheduling, download slot management, health monitoring, disk-state persistence |
-| `bergamot-post` | Post-processing pipeline: PAR2 verify/repair, archive extraction (RAR/7z/ZIP), cleanup, file move, extension scripts |
-| `bergamot-api` | Axum-based HTTP server, JSON-RPC and XML-RPC endpoints for nzbget API compatibility, REST endpoints |
-| `bergamot-cli` | CLI argument parsing with `clap`, remote server commands (`-L`, `-P`, `-U`), daemon mode |
+| `bergamot` | Binary entry point, CLI, app wiring, download worker, file writer, article cache, daemon mode |
+| `bergamot-core` | Shared data models (`NzbInfo`, `FileInfo`, `ArticleInfo`, `DupMode`, etc.) |
+| `bergamot-config` | Configuration file parsing, model, validation, variable interpolation |
+| `bergamot-nntp` | NNTP protocol state machine, connection pool, body reader, speed tracking, article scheduling |
+| `bergamot-nntp-stub` | Test stub NNTP server for integration/e2e tests |
+| `bergamot-nzb` | NZB XML parsing, filename extraction, PAR2 classification |
+| `bergamot-yenc` | yEnc line decoder (SIMD-accelerated: NEON + SSE2), CRC32 verification, article cache |
+| `bergamot-queue` | Queue coordinator actor, command dispatch, status reporting, download orchestration |
+| `bergamot-postproc` | Post-processing pipeline: PAR2 verify/repair, unpack, cleanup, file move, extensions |
+| `bergamot-par2` | Native Rust PAR2 parser, verifier, and repairer with SIMD GF multiplication (NEON + SSSE3) |
+| `bergamot-server` | HTTP/HTTPS server (axum), JSON-RPC, XML-RPC, multi-role auth, TLS, static file serving |
+| `bergamot-feed` | RSS/Atom/Newznab feed polling, filter evaluation, feed coordinator |
+| `bergamot-scheduler` | Cron-like task scheduler for periodic services |
+| `bergamot-diskstate` | On-disk state persistence, WAL journaling, atomic writes, crash recovery |
+| `bergamot-logging` | Tracing subscriber layer, ring buffer, per-NZB log routing |
+| `bergamot-extension` | Extension/script runner, environment construction, output parsing |
 
 ### Dependency Graph
 
 ```
 bergamot (binary)
  ├── bergamot-core
+ ├── bergamot-config ──► bergamot-core
  ├── bergamot-nntp ──► bergamot-core
  ├── bergamot-nzb ──► bergamot-core
  ├── bergamot-yenc
  ├── bergamot-queue ──► bergamot-core, bergamot-nntp, bergamot-nzb, bergamot-yenc
- ├── bergamot-post ──► bergamot-core
- ├── bergamot-api ──► bergamot-core, bergamot-queue, bergamot-post
- └── bergamot-cli ──► bergamot-core, bergamot-api
+ ├── bergamot-postproc ──► bergamot-core, bergamot-par2
+ ├── bergamot-par2
+ ├── bergamot-server ──► bergamot-core, bergamot-queue, bergamot-postproc
+ ├── bergamot-feed ──► bergamot-core, bergamot-queue
+ ├── bergamot-scheduler
+ ├── bergamot-diskstate ──► bergamot-core
+ ├── bergamot-logging
+ └── bergamot-extension ──► bergamot-core
 ```
 
 Design rationale:
 
 - **`bergamot-yenc` has no internal dependencies** — it is a pure data-transformation library, usable and testable in isolation.
 - **`bergamot-queue` depends on `bergamot-nntp`, `bergamot-nzb`, `bergamot-yenc`** — it orchestrates the full download pipeline.
-- **`bergamot-post` depends only on `bergamot-core`** — post-processing operates on files on disk and does not need NNTP or queue internals.
-- **`bergamot-api` depends on `bergamot-queue` and `bergamot-post`** — it sends commands to the coordinator and queries post-processing status.
+- **`bergamot-postproc` depends on `bergamot-core` and `bergamot-par2`** — post-processing operates on files on disk and delegates PAR2 verification/repair to a dedicated crate.
+- **`bergamot-server` depends on `bergamot-queue` and `bergamot-postproc`** — it sends commands to the coordinator and queries post-processing status.
 
 ---
 
@@ -427,7 +496,7 @@ bergamot maintains backward compatibility with nzbget's RPC API so that existing
 Both JSON-RPC and XML-RPC endpoints implement the same method set. The API layer translates between RPC calls and `QueueCommand` messages sent to the coordinator.
 
 ```rust
-// bergamot-api/src/jsonrpc.rs
+// bergamot-server/src/rpc.rs
 pub async fn handle_jsonrpc(
     State(state): State<AppState>,
     Json(request): Json<JsonRpcRequest>,
@@ -627,7 +696,7 @@ panic = "abort"
 
 ### Performance Considerations
 
-- **yEnc decoding**: inner loop uses SIMD-friendly byte operations; consider `packed_simd` or manual NEON/SSE intrinsics if profiling shows it as a bottleneck.
+- **yEnc decoding**: inner loop uses SIMD-accelerated byte operations (NEON on aarch64, SSE2 on x86_64). PAR2 GF multiplication also uses SIMD (NEON on aarch64, SSSE3 on x86_64).
 - **CRC32**: `crc32fast` uses hardware acceleration (SSE4.2 / ARMv8) automatically.
 - **Connection pool**: pre-established connections avoid handshake latency; configurable pool size per server.
 - **Article cache**: optional in-memory write cache reduces small random writes to disk.

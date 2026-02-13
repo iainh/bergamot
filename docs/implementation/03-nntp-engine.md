@@ -1,5 +1,21 @@
 # NNTP Download Engine
 
+> **Crate module layout** (`crates/bergamot-nntp/src/`):
+>
+> | Module | Purpose |
+> |--------|---------|
+> | `lib.rs` | Public API re-exports |
+> | `error.rs` | `NntpError` enum |
+> | `model.rs` | `NewsServer`, `Encryption`, `IpVersion`, `NntpResponse` |
+> | `protocol.rs` | `NntpConnection`, `NntpStream`, `BodyReader`, TLS setup |
+> | `machine.rs` | Sans-I/O state machine driving command/response exchanges |
+> | `pool.rs` | `ServerPool` connection pool and factory traits |
+> | `scheduler.rs` | Weighted fair-queuing article scheduler (EWMA-based server selection) |
+> | `speed.rs` | `SpeedLimiter` / `SpeedLimiterHandle` — token-bucket rate limiting |
+>
+> The illustrative code below is simplified for reference; see the source modules
+> for the full implementation.
+
 ## NNTP Protocol Overview (RFC 3977)
 
 NNTP (Network News Transfer Protocol) is a TCP-based text protocol for accessing

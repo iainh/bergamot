@@ -359,51 +359,22 @@ async fn request_par2_volumes(
 }
 ```
 
-### PAR2 Library Options
+### PAR2 Implementation
 
-| Approach | Pros | Cons |
-|----------|------|------|
-| Shell out to `par2` command | Simple, well-tested, widely available | Process overhead, output parsing |
-| `par2` crate | Pure Rust, no external dependency | Maturity, feature completeness |
-| FFI to `libpar2` | Fast, full-featured | Build complexity, unsafe code |
-| Native implementation | Full control, integrated progress | Significant effort |
+PAR2 verification and repair are handled natively by the `bergamot-par2` crate, which provides a pure-Rust implementation with no external process dependencies. The crate is organized into:
 
-**Recommendation**: start by shelling out to the `par2` command-line tool (`par2cmdline` or `par2cmdline-turbo`). This is proven, handles edge cases, and allows focusing development effort elsewhere. Wrap it behind a trait so the implementation can be swapped later:
+- **`parser.rs`** — parses PAR2 file format (main packets, file descriptions, recovery blocks)
+- **`verify.rs`** — block-level verification using MD5/CRC32 checksums
+- **`repair.rs`** — Reed-Solomon reconstruction of damaged/missing blocks
+- **`galois.rs`** — GF(2¹⁶) multiplication tables with SIMD acceleration
+
+The post-processing pipeline calls into `bergamot-par2` directly as a library — no subprocess or output parsing is involved (unlike unpacking, which shells out to external tools like `unrar` and `7z`).
 
 ```rust
 #[async_trait]
 pub trait Par2Engine: Send + Sync {
     async fn verify(&self, par2_file: &Path, working_dir: &Path) -> Result<Par2Result, Par2Error>;
     async fn repair(&self, par2_file: &Path, working_dir: &Path) -> Result<Par2Result, Par2Error>;
-}
-
-pub struct Par2CommandLine {
-    par2_path: PathBuf, // path to par2 binary
-}
-
-#[async_trait]
-impl Par2Engine for Par2CommandLine {
-    async fn verify(&self, par2_file: &Path, working_dir: &Path) -> Result<Par2Result, Par2Error> {
-        let output = tokio::process::Command::new(&self.par2_path)
-            .arg("verify")
-            .arg(par2_file)
-            .current_dir(working_dir)
-            .output()
-            .await?;
-
-        parse_par2_output(&output)
-    }
-
-    async fn repair(&self, par2_file: &Path, working_dir: &Path) -> Result<Par2Result, Par2Error> {
-        let output = tokio::process::Command::new(&self.par2_path)
-            .arg("repair")
-            .arg(par2_file)
-            .current_dir(working_dir)
-            .output()
-            .await?;
-
-        parse_par2_output(&output)
-    }
 }
 
 #[derive(Debug)]

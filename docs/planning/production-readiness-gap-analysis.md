@@ -2,7 +2,7 @@
 
 ## Current State
 
-14 workspace crates with real implementations and comprehensive unit tests.
+16 workspace crates with real implementations and comprehensive unit tests.
 Phases 1–6 of the implementation plan are marked complete. All tests pass.
 However, the implementation plan itself warns that **many components only work
 to the extent needed to pass their tests** — the full runtime pipeline has not
@@ -124,9 +124,10 @@ bergamot can *run* extension scripts but lacks:
 - JSON manifest parsing for extension metadata, options, and requirements
 - Dependency checking
 
-### Multiple Authentication Roles
+### ✅ Multiple Authentication Roles
 
-NZBGet supports three access levels with different permissions:
+bergamot implements three access levels with per-method access control
+(`crates/bergamot-server/src/auth.rs`):
 
 | Role | Capabilities |
 |------|-------------|
@@ -134,7 +135,8 @@ NZBGet supports three access levels with different permissions:
 | **Restricted** | Can view status and queue but cannot change config |
 | **Add** | Can only add downloads (for automated tools) |
 
-bergamot appears to have single-role authentication only.
+A `required_access(method)` function maps each RPC method to its minimum
+`AccessLevel` (Control, Restricted, Add, or Denied).
 
 ### PAR Strategy (Par-First Downloading)
 
@@ -145,7 +147,9 @@ NZBGet intelligently prioritizes PAR2 file downloads:
 - Supports multiple PAR strategies (quick/full/force)
 - Can pause the queue during PAR verification
 
-bergamot has PAR2 verify/repair in post-processing but no smart download ordering.
+bergamot has a native Rust PAR2 implementation (`bergamot-par2`) with parser,
+verifier, repairer, and SIMD-accelerated GF multiplication — but no smart
+download ordering.
 
 ### Windows Service Support
 
@@ -172,17 +176,14 @@ None of these are implemented in bergamot.
 
 ## Testing & Reliability Gaps
 
-### No Integration Tests
+### ✅ Integration Tests
 
-Unit and crate-level tests exist, but no integration tests exercise the full
-pipeline:
-
-- Spin up a local NNTP server (or deterministic stub) that simulates missing
-  articles, slow responses, timeouts, disconnects mid-body, and auth failures
-- Feed a real multi-file multi-part yEnc NZB and verify final assembled files
-  match expected hashes
-- Verify restart mid-download resumes correctly
-- Verify history entries and statuses match NZBGet semantics
+Comprehensive end-to-end tests exist in `crates/bergamot/tests/e2e_flow.rs`
+using a stub NNTP server, covering: end-to-end download, multi-server failover,
+crash recovery, RPC schema conformance, history schema, editqueue, pause/resume,
+rate limiting, config roundtrip, auth rejection, multi-file NZB, concurrent
+downloads, post-processing, extension scripts, graceful shutdown, and error
+propagation.
 
 ### No RPC Conformance Tests
 
@@ -237,8 +238,7 @@ Priority order based on user impact:
 1. Duplicate detection policy enforcement
 2. Deobfuscation / smart rename (PAR2-based)
 3. Download quotas
-4. Multiple auth roles
-5. Extension manager lifecycle
+4. Extension manager lifecycle
 
 ### Step 5: Add Integration & Failure Tests
 
@@ -288,10 +288,10 @@ Build a production readiness test matrix covering:
 | Direct rename/unpack | ✅ | ❌ | Not implemented |
 | Download quotas | ✅ | ❌ | Not implemented |
 | Extension manager | ✅ | ❌ | No install/remove lifecycle |
-| Multiple auth roles | ✅ | ❌ | Single-role only |
+| Multiple auth roles | ✅ | ✅ | Three roles: Control, Restricted, Add |
 | PAR-first strategy | ✅ | ❌ | No smart ordering |
 | Built-in test tools | ✅ | ❌ | Not implemented |
 | Windows service | ✅ | ❌ | Not supported |
 | Update checking | ✅ | ❌ | Not implemented |
-| Integration tests | ✅ | ❌ | None |
-| Crash recovery tests | ✅ | ❌ | None |
+| Integration tests | ✅ | ✅ | E2E tests with stub NNTP server |
+| Crash recovery tests | ✅ | ✅ | crash_recovery_resumes_download test |
