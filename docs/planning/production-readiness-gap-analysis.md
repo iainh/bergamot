@@ -45,12 +45,12 @@ requires **exact** NZBGet RPC behaviour, not just "a method with that name."
   (`append(name, nzbcontent, category, priority, addToTop, addPaused, dupekey,
   dupescore, dupemode, params...)`) must be supported.
 - **`status` response** — NZBGet exposes many fields (day/month counters,
-  quotas, cache sizes, postproc states). bergamot currently returns month/day
-  size as zero and likely omits or approximates other fields.
-- **`editqueue` actions** — Several actions are explicitly no-ops: `Split`,
-  `Merge`, `SetName`, `SetDupeKey`, `SetDupeScore`, `SetDupeMode`,
-  `SetParameter`. If RPC advertises these but they don't work, clients will
-  silently break.
+  quotas, cache sizes, postproc states). ✅ bergamot now populates day/month
+  download counters from `SharedStatsTracker`. Quota and cache fields still
+  need work.
+- **`editqueue` actions** — ✅ `SetName`, `SetDupeKey`, `SetDupeScore`,
+  `SetDupeMode`, `SetParameter`, `SetPriority`, `SetCategory`, `GroupMoveOffset`
+  are now wired up and functional. `Split` and `Merge` remain as no-ops.
 - **`listgroups` / `history` / `listfiles` / `postqueue`** — Field names,
   enum values, and defaults must match NZBGet exactly.
 
@@ -77,13 +77,17 @@ UI — but this needs to be formalized and tested.
 
 ### Duplicate detection & scoring
 
-Fields exist on `NzbInfo` (`dup_key`, `dup_mode`, `dup_score`) and a
-`check_duplicate()` helper is present, but production requires:
+✅ Basic duplicate rejection is now enforced: `ingest_nzb()` returns a
+`Duplicate` error when `check_duplicate()` finds a match, preventing the
+download from being queued. `SetDupeKey`, `SetDupeScore`, and `SetDupeMode`
+editqueue actions are now functional.
 
-- Policy enforcement: hide/move duplicates to history with `DupHidden` status
-- Scoring behaviour consistent with NZBGet (SCORE/ALL/FORCE modes)
+Remaining work:
+
+- Move duplicates to history with `DupHidden` status instead of rejecting
+- Score-based comparison (allow higher-score duplicates to replace lower)
 - Per-category and per-append duplicate rules
-- Integration with the queue coordinator's add/restore paths
+- Accept `dupekey`/`dupescore`/`dupemode` from the `append` RPC call
 
 ### Deobfuscation & smart rename
 
@@ -283,10 +287,10 @@ Build a production readiness test matrix covering:
 | History cleanup | ✅ | ✅ | Implemented |
 | Config file compatibility | ✅ | ✅ | Implemented |
 | Web UI | ✅ | ❌ | No bundled assets |
-| Duplicate detection | ✅ | ⚠️ | Fields exist, no policy |
+| Duplicate detection | ✅ | ⚠️ | Basic rejection enforced, scoring/history TBD |
 | Deobfuscation | ✅ | ❌ | Not implemented |
 | Direct rename/unpack | ✅ | ❌ | Not implemented |
-| Download quotas | ✅ | ❌ | Not implemented |
+| Download quotas | ✅ | ⚠️ | Day/month counters populated, enforcement TBD |
 | Extension manager | ✅ | ❌ | No install/remove lifecycle |
 | Multiple auth roles | ✅ | ✅ | Three roles: Control, Restricted, Add |
 | PAR-first strategy | ✅ | ❌ | No smart ordering |
