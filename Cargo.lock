@@ -453,6 +453,7 @@ dependencies = [
  "bergamot-core",
  "bergamot-extension",
  "bergamot-par2",
+ "md-5",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",

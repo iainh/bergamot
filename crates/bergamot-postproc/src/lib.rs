@@ -1,5 +1,6 @@
 mod cleanup;
 mod config;
+mod deobfuscate;
 mod error;
 mod mover;
 mod par2;
@@ -8,6 +9,7 @@ mod unpack;
 
 pub use crate::cleanup::cleanup_archives;
 pub use crate::config::{Config, PostStrategy};
+pub use crate::deobfuscate::deobfuscate_files;
 pub use crate::error::{Par2Error, PostProcessError};
 pub use crate::mover::{move_to_destination, resolve_dest_dir};
 pub use crate::par2::{NativePar2Engine, Par2CommandLine, Par2Engine, Par2Result};

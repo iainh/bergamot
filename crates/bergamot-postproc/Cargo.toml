@@ -9,6 +9,7 @@ async-trait = "0.1"
 bergamot-core = { path = "../bergamot-core" }
 bergamot-extension = { path = "../bergamot-extension" }
 bergamot-par2 = { path = "../bergamot-par2" }
+md-5 = "0.10"
 thiserror = "2.0"
 tokio = { version = "1", features = ["fs", "macros", "process", "sync", "rt-multi-thread"] }
 tracing = "0.1"

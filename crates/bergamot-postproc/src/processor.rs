@@ -151,6 +151,37 @@ impl<E: Par2Engine, U: Unpacker> PostProcessor<E, U> {
         }
 
         ctx.set_stage(PostStage::ParRenaming);
+        if let Some(reporter) = &self.reporter {
+            reporter
+                .report_stage(nzb_id, bergamot_core::models::PostStage::ParRenaming)
+                .await;
+        }
+        if let Some(par2_file) = find_par2_file(&ctx.request.working_dir, &ctx.request.nzb_name) {
+            match bergamot_par2::parse_recovery_set_from_file(&par2_file) {
+                Ok(recovery_set) => {
+                    let renames = crate::deobfuscate::deobfuscate_files(
+                        &ctx.request.working_dir,
+                        &recovery_set,
+                    )
+                    .await;
+                    if !renames.is_empty() {
+                        tracing::info!(
+                            nzb = %ctx.request.nzb_name,
+                            count = renames.len(),
+                            "deobfuscated files using PAR2 metadata"
+                        );
+                    }
+                }
+                Err(err) => {
+                    tracing::debug!(
+                        nzb = %ctx.request.nzb_name,
+                        error = %err,
+                        "skipping deobfuscation: could not parse PAR2"
+                    );
+                }
+            }
+        }
+
         ctx.set_stage(PostStage::ParVerifying);
         if let Some(reporter) = &self.reporter {
             reporter
