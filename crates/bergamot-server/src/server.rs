@@ -480,9 +480,42 @@ impl WebServer {
                 axum_server::tls_rustls::RustlsConfig::from_pem_file(&cert_path, &key_path)
                     .await?;
 
-            let bind_addr: std::net::SocketAddr =
-                format!("{}:{}", self.config.control_ip, self.config.control_port).parse()?;
-            axum_server::bind_rustls(bind_addr, tls_config)
+            let https_addr: std::net::SocketAddr =
+                format!("{}:{}", self.config.control_ip, self.config.secure_port).parse()?;
+
+            if self.config.control_port != self.config.secure_port {
+                let redirect_host = self.config.control_ip.clone();
+                let redirect_port = self.config.secure_port;
+                let http_addr =
+                    format!("{}:{}", self.config.control_ip, self.config.control_port);
+                tokio::spawn(async move {
+                    let redirect_app = Router::new().fallback(
+                        move |req: axum::http::Request<axum::body::Body>| {
+                            let host = redirect_host.clone();
+                            let port = redirect_port;
+                            async move {
+                                let path_and_query = req
+                                    .uri()
+                                    .path_and_query()
+                                    .map(|pq| pq.as_str())
+                                    .unwrap_or("/");
+                                let port_suffix = if port == 443 {
+                                    String::new()
+                                } else {
+                                    format!(":{port}")
+                                };
+                                let url = format!("https://{host}{port_suffix}{path_and_query}");
+                                axum::response::Redirect::permanent(&url).into_response()
+                            }
+                        },
+                    );
+                    if let Ok(listener) = TcpListener::bind(&http_addr).await {
+                        let _ = axum::serve(listener, redirect_app).await;
+                    }
+                });
+            }
+
+            axum_server::bind_rustls(https_addr, tls_config)
                 .serve(app.into_make_service_with_connect_info::<std::net::SocketAddr>())
                 .await?;
         } else {
@@ -814,6 +847,7 @@ mod tests {
             control_ip: "127.0.0.1".to_string(),
             control_port: 6789,
             secure_control: false,
+            secure_port: 6791,
             secure_cert: None,
             secure_key: None,
             cert_store: std::path::PathBuf::new(),

@@ -250,6 +250,7 @@ mod tests {
             control_ip: "127.0.0.1".to_string(),
             control_port: 6789,
             secure_control: false,
+            secure_port: 6791,
             secure_cert: None,
             secure_key: None,
             cert_store: std::path::PathBuf::new(),

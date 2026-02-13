@@ -5,6 +5,7 @@ pub struct ServerConfig {
     pub control_ip: String,
     pub control_port: u16,
     pub secure_control: bool,
+    pub secure_port: u16,
     pub secure_cert: Option<PathBuf>,
     pub secure_key: Option<PathBuf>,
     pub cert_store: PathBuf,
