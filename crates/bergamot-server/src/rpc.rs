@@ -243,7 +243,7 @@ pub(crate) async fn rpc_editqueue(
         return rpc_editqueue_history(params, state).await;
     }
 
-    let _param = arr.get(1).and_then(|v| v.as_str()).unwrap_or("");
+    let param = arr.get(1).and_then(|v| v.as_str()).unwrap_or("");
 
     let ids: Vec<u32> = arr
         .get(2)
@@ -255,14 +255,17 @@ pub(crate) async fn rpc_editqueue(
         })
         .unwrap_or_default();
 
-    let action = parse_edit_command(command)?;
+    let action = parse_edit_command(command, param)?;
 
     queue.edit_queue(action, ids).await.map_err(rpc_error)?;
 
     Ok(serde_json::json!(true))
 }
 
-fn parse_edit_command(command: &str) -> Result<bergamot_queue::EditAction, JsonRpcError> {
+fn parse_edit_command(
+    command: &str,
+    param: &str,
+) -> Result<bergamot_queue::EditAction, JsonRpcError> {
     match command {
         "GroupMoveTop" => Ok(bergamot_queue::EditAction::Move(
             bergamot_queue::MovePosition::Top,
@@ -270,6 +273,18 @@ fn parse_edit_command(command: &str) -> Result<bergamot_queue::EditAction, JsonR
         "GroupMoveBottom" => Ok(bergamot_queue::EditAction::Move(
             bergamot_queue::MovePosition::Bottom,
         )),
+        "GroupMoveOffset" => {
+            let offset: i32 = param.parse().unwrap_or(0);
+            if offset > 0 {
+                Ok(bergamot_queue::EditAction::Move(
+                    bergamot_queue::MovePosition::Down(offset as u32),
+                ))
+            } else {
+                Ok(bergamot_queue::EditAction::Move(
+                    bergamot_queue::MovePosition::Up(offset.unsigned_abs()),
+                ))
+            }
+        }
         "GroupPause" => Ok(bergamot_queue::EditAction::Pause),
         "GroupResume" => Ok(bergamot_queue::EditAction::Resume),
         "GroupDelete" | "GroupDupeDelete" | "GroupFinalDelete" => {
@@ -279,6 +294,47 @@ fn parse_edit_command(command: &str) -> Result<bergamot_queue::EditAction, JsonR
             delete_files: false,
         }),
         "GroupPauseAllPars" | "GroupPauseExtraPars" => Ok(bergamot_queue::EditAction::Pause),
+        "GroupSetPriority" => {
+            let val: i32 = param.parse().unwrap_or(0);
+            Ok(bergamot_queue::EditAction::SetPriority(priority_from_i32(
+                val,
+            )))
+        }
+        "GroupSetCategory" => Ok(bergamot_queue::EditAction::SetCategory(param.to_string())),
+        "GroupSetName" => Ok(bergamot_queue::EditAction::SetName(param.to_string())),
+        "GroupSetDupeKey" => Ok(bergamot_queue::EditAction::SetDupeKey(param.to_string())),
+        "GroupSetDupeScore" => {
+            let score: i32 = param.parse().unwrap_or(0);
+            Ok(bergamot_queue::EditAction::SetDupeScore(score))
+        }
+        "GroupSetDupeMode" => {
+            let mode = match param {
+                "ALL" => bergamot_core::models::DupMode::All,
+                "FORCE" => bergamot_core::models::DupMode::Force,
+                _ => bergamot_core::models::DupMode::Score,
+            };
+            Ok(bergamot_queue::EditAction::SetDupeMode(mode))
+        }
+        "GroupSetParameter" => {
+            let (key, value) = param.split_once('=').unwrap_or((param, ""));
+            Ok(bergamot_queue::EditAction::SetParameter {
+                key: key.to_string(),
+                value: value.to_string(),
+            })
+        }
+        "GroupMerge" => {
+            let target_id: u32 = param.parse().unwrap_or(0);
+            Ok(bergamot_queue::EditAction::Merge { target_id })
+        }
+        "GroupSplit" => {
+            let indices: Vec<u32> = param
+                .split(',')
+                .filter_map(|s| s.trim().parse().ok())
+                .collect();
+            Ok(bergamot_queue::EditAction::Split {
+                file_indices: indices,
+            })
+        }
         _ => Err(rpc_error(format!("unknown editqueue command: {command}"))),
     }
 }
