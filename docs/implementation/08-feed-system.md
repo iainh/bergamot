@@ -1,8 +1,8 @@
-# Feed System
+# Feed system
 
-The feed system automatically discovers and downloads NZBs from RSS/Atom feeds. It periodically polls configured feeds, applies filter rules to incoming items, and enqueues matching NZBs into the download queue.
+The feed system automatically discovers and downloads NZBs from RSS/Atom feeds. It periodically polls configured feeds, applies filter rules to incoming items and enqueues matching NZBs into the download queue.
 
-## Feed Configuration
+## Feed configuration
 
 Each feed is defined in the configuration file with a numeric suffix (e.g., `Feed1.Name`, `Feed1.URL`):
 
@@ -34,7 +34,7 @@ pub struct FeedConfig {
 }
 ```
 
-## Feed Parsing
+## Feed parsing
 
 The feed parser supports both **RSS 2.0** and **Atom** formats. Parsing uses `quick-xml` to stream through the XML without loading the entire document into memory.
 
@@ -72,7 +72,7 @@ Items are extracted from `<feed><entry>` elements:
 </feed>
 ```
 
-### Extracted Fields
+### Extracted fields
 
 From each item the parser produces a `FeedItemInfo`:
 
@@ -111,11 +111,11 @@ The NZB URL is resolved from (in priority order):
 2. `<link>` element containing `/getnzb/` or ending in `.nzb`
 3. Direct `<link>` as fallback
 
-## Feed Filter Language
+## Feed filter language
 
 Filters are multi-line rules evaluated top-to-bottom against each feed item. The first matching rule determines the action.
 
-### Rule Syntax
+### Rule syntax
 
 ```
 Action: Field1(pattern1) Field2(pattern2) ...
@@ -151,7 +151,7 @@ Action: Field1(pattern1) Field2(pattern2) ...
 | `dupekey` | `dupekey(show-123)` | Set duplicate key |
 | `dupescore` | `dupescore(500)` | Set duplicate score |
 
-### Regex Support
+### Regex support
 
 Title and category fields support POSIX-like regex (mapped to the `regex` crate in Rust):
 
@@ -160,7 +160,7 @@ A: title(.*\b720p\b.*HDTV.*)
 R: title(.*\bCAM\b.*)
 ```
 
-### Filter Evaluation
+### Filter evaluation
 
 ```rust
 pub struct FeedFilter {
@@ -210,7 +210,7 @@ impl FeedFilter {
 }
 ```
 
-### Duplicate Key Generation
+### Duplicate key generation
 
 When a filter sets `dupekey`, or the item has IMDB/TVDB/RAGEID metadata, a
 duplicate key is generated so the queue's duplicate checker can prevent
@@ -335,7 +335,7 @@ impl FeedCoordinator {
 }
 ```
 
-## Feed History
+## Feed history
 
 Processed feed items are tracked in a history database to prevent re-downloads across restarts.
 

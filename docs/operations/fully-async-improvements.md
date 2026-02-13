@@ -1,8 +1,8 @@
-# Fully Async NNTP Implementation Improvements
+# Fully async NNTP implementation improvements
 
-This document catalogs every blocking, pseudo-blocking, and inefficient pattern in the NNTP download path, along with the specific changes required to make the implementation fully async.
+This document catalogues every blocking, pseudo-blocking, and inefficient pattern in the NNTP download path, along with the specific changes required to make the implementation fully async.
 
-## Current Architecture
+## Current architecture
 
 The download path flows through these components:
 
@@ -165,7 +165,7 @@ The success path clones the decoded segment data: `data: data.clone()`. The `dat
 | 8 | SpeedLimiter | Global mutex serializes all downloads | Actor pattern or lock-free token bucket | M | Medium |
 | 9 | DownloadResult | Unnecessary `data.clone()` | Move instead of clone | S | Low-Medium |
 
-### Recommended Implementation Order
+### Recommended implementation order
 
 **Phase 1 — Quick wins (items 1, 2, 4, 6, 9):** All small effort, can be done independently. Item 1 alone should resolve the speed drop at high connection counts.
 

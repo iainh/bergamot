@@ -1,6 +1,6 @@
-# Production Readiness Gap Analysis: bergamot vs nzbget
+# Production readiness gap analysis: bergamot vs nzbget
 
-## Current State
+## Current state
 
 16 workspace crates with real implementations and comprehensive unit tests.
 Phases 1–6 of the implementation plan are marked complete. All tests pass.
@@ -10,9 +10,9 @@ been validated end-to-end against real NNTP servers or real clients.
 
 ---
 
-## Critical Blockers
+## Critical blockers
 
-### 1. End-to-End Download Not Proven in Real Conditions
+### 1. End-to-end download not proven in real conditions
 
 Individual crates test well in isolation, but no one has verified the full
 runtime pipeline on a real NZB with a real NNTP server:
@@ -23,7 +23,7 @@ runtime pipeline on a real NZB with a real NNTP server:
   segments, which may produce corrupt outputs.
 - **Failure handling** — Missing articles (DMCA), timeouts, disconnects
   mid-body, and authentication failures need coherent retry/failover policies
-  that match real-world NNTP behavior.
+  that match real-world NNTP behaviour.
 - **Completion criteria** — `check_file_completion()` and
   `check_nzb_completion()` exist but haven't been exercised under realistic
   conditions (partial failures, mixed success/fail segments).
@@ -34,11 +34,11 @@ runtime pipeline on a real NZB with a real NNTP server:
 assemble files → PAR2 verify/repair → unpack → move to destination → verify
 final file hashes match expected output.
 
-### 2. RPC Schema Fidelity for Sonarr/Radarr
+### 2. RPC schema fidelity for Sonarr/Radarr
 
 Methods exist, but response shapes (field names, types, enum values) haven't
 been validated against real client traffic. Sonarr/Radarr compatibility
-requires **exact** NZBGet RPC behavior, not just "a method with that name."
+requires **exact** NZBGet RPC behaviour, not just "a method with that name."
 
 - **`append` payload format** — Many clients send NZB data as base64 content,
   not a local file path or URL. The exact NZBGet signature
@@ -57,7 +57,7 @@ requires **exact** NZBGet RPC behavior, not just "a method with that name."
 **Validation needed:** Run Sonarr/Radarr against bergamot, log every RPC request
 and response, and diff against NZBGet for the same scenarios.
 
-### 3. No Bundled Web UI
+### 3. No bundled web UI
 
 The server serves static files from an external `WebDir` directory, but there
 are no HTML/JS/CSS assets in the repository. The only embedded UI is a minimal
@@ -73,19 +73,19 @@ UI — but this needs to be formalized and tested.
 
 ---
 
-## Missing Features
+## Missing features
 
-### Duplicate Detection & Scoring
+### Duplicate detection & scoring
 
 Fields exist on `NzbInfo` (`dup_key`, `dup_mode`, `dup_score`) and a
 `check_duplicate()` helper is present, but production requires:
 
 - Policy enforcement: hide/move duplicates to history with `DupHidden` status
-- Scoring behavior consistent with NZBGet (SCORE/ALL/FORCE modes)
+- Scoring behaviour consistent with NZBGet (SCORE/ALL/FORCE modes)
 - Per-category and per-append duplicate rules
 - Integration with the queue coordinator's add/restore paths
 
-### Deobfuscation & Smart Rename
+### Deobfuscation & smart rename
 
 bergamot relies mainly on NZB metadata/subject parsing for filenames. NZBGet
 provides:
@@ -97,13 +97,13 @@ provides:
 - Par renaming and RAR renaming for renamed segments
 - Pre-unpack rename pipeline
 
-### Direct Rename / Direct Unpack
+### Direct rename / direct unpack
 
 NZBGet can rename and unpack files as they are downloaded, without waiting for
 the entire NZB to complete. This is a significant usability feature for large
 downloads. Not implemented in bergamot.
 
-### Download Quotas
+### Download quotas
 
 NZBGet supports daily and monthly download quotas with:
 
@@ -114,7 +114,7 @@ NZBGet supports daily and monthly download quotas with:
 bergamot's `status()` returns day/month counters as zero. No quota enforcement
 exists.
 
-### Extension Manager Lifecycle
+### Extension manager lifecycle
 
 bergamot can *run* extension scripts but lacks:
 
@@ -124,7 +124,7 @@ bergamot can *run* extension scripts but lacks:
 - JSON manifest parsing for extension metadata, options, and requirements
 - Dependency checking
 
-### ✅ Multiple Authentication Roles
+### ✅ Multiple authentication roles
 
 bergamot implements three access levels with per-method access control
 (`crates/bergamot-server/src/auth.rs`):
@@ -138,7 +138,7 @@ bergamot implements three access levels with per-method access control
 A `required_access(method)` function maps each RPC method to its minimum
 `AccessLevel` (Control, Restricted, Add, or Denied).
 
-### PAR Strategy (Par-First Downloading)
+### PAR2 strategy (par-first downloading)
 
 NZBGet intelligently prioritizes PAR2 file downloads:
 
@@ -151,16 +151,16 @@ bergamot has a native Rust PAR2 implementation (`bergamot-par2`) with parser,
 verifier, repairer, and SIMD-accelerated GF multiplication — but no smart
 download ordering.
 
-### Windows Service Support
+### Windows service support
 
 NZBGet supports running as a Windows service with install/remove commands.
 bergamot only supports POSIX daemon mode.
 
-### Update Checking
+### Update checking
 
 NZBGet can check for new versions and notify users. Not implemented in bergamot.
 
-### Testing Tools (Built-in Diagnostics)
+### Testing tools (built-in diagnostics)
 
 NZBGet provides built-in testing RPC methods:
 
@@ -174,9 +174,9 @@ None of these are implemented in bergamot.
 
 ---
 
-## Testing & Reliability Gaps
+## Testing & reliability gaps
 
-### ✅ Integration Tests
+### ✅ Integration tests
 
 Comprehensive end-to-end tests exist in `crates/bergamot/tests/e2e_flow.rs`
 using a stub NNTP server, covering: end-to-end download, multi-server failover,
@@ -185,14 +185,14 @@ rate limiting, config roundtrip, auth rejection, multi-file NZB, concurrent
 downloads, post-processing, extension scripts, graceful shutdown, and error
 propagation.
 
-### No RPC Conformance Tests
+### No RPC conformance tests
 
 - Golden tests: given an RPC request, assert the response matches NZBGet's
   schema exactly (including optional fields, types, enum values)
 - Client emulator tests: run Sonarr/Radarr's NZBGet integration flows against
   bergamot in CI (even smoke-level)
 
-### No Crash/Restart Recovery Tests
+### No crash/restart recovery tests
 
 Kill the process during:
 
@@ -202,36 +202,36 @@ Kill the process during:
 
 Assert that restart yields consistent queue state and no corrupt final outputs.
 
-### No Soak / Concurrency Testing
+### No soak / concurrency testing
 
 - Large queue + many connections + long runtime
 - Memory growth over time
-- Channel backpressure behavior under load
+- Channel backpressure behaviour under load
 - Lock contention / starvation detection
-- Log buffer behavior under sustained load
+- Log buffer behaviour under sustained load
 
 ---
 
-## Recommended Path to Production
+## Recommended path to production
 
-### Step 1: Prove End-to-End Correctness
+### Step 1: Prove end-to-end correctness
 
 Run a real NZB through the full pipeline against a real or simulated NNTP
 server. This will immediately surface assembly, offset, naming, and completion
 bugs that unit tests don't catch.
 
-### Step 2: Validate Sonarr/Radarr Compatibility
+### Step 2: Validate Sonarr/Radarr compatibility
 
 Point Sonarr at the RPC endpoint, trigger a download, and log/diff every RPC
 request and response against NZBGet. Fix schema mismatches, especially in
 `append`, `status`, `listgroups`, `history`, and `editqueue`.
 
-### Step 3: Decide Web UI Strategy
+### Step 3: Decide web UI strategy
 
 Either bundle NZBGet's webui (check licensing), build a custom UI, or
 explicitly document that users must supply their own webui directory.
 
-### Step 4: Close Highest-Value Feature Gaps
+### Step 4: Close highest-value feature gaps
 
 Priority order based on user impact:
 
@@ -240,7 +240,7 @@ Priority order based on user impact:
 3. Download quotas
 4. Extension manager lifecycle
 
-### Step 5: Add Integration & Failure Tests
+### Step 5: Add integration & failure tests
 
 Build a production readiness test matrix covering:
 
@@ -252,7 +252,7 @@ Build a production readiness test matrix covering:
 
 ---
 
-## Feature Parity Summary
+## Feature parity summary
 
 | Feature | nzbget | bergamot | Status |
 |---------|--------|------|--------|

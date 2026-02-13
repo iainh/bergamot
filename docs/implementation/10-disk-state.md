@@ -1,10 +1,10 @@
-# Disk State & Persistence
+# Disk state & persistence
 
-bergamot persists its runtime state (queue, history, download progress, server statistics, feed state) to disk so that it survives restarts and crashes. This document covers the state directory layout, serialization approach, persistence triggers, partial download resumption, crash-safety strategy, and version migration.
+bergamot persists its runtime state (queue, history, download progress, server statistics, feed state) to disk so that it survives restarts and crashes. This document covers the state directory layout, serialization approach, persistence triggers, partial download resumption, crash-safety strategy and version migration.
 
 ---
 
-## State Directory Layout
+## State directory layout
 
 All persistent state lives under `QueueDir` (default: `$DataDir/queue`):
 
@@ -25,7 +25,7 @@ QueueDir/                          # default: $DataDir/queue
 └── diskstate.lock                 # advisory lock preventing concurrent access
 ```
 
-### What Each File Stores
+### What each file stores
 
 | File | Contents | Written When |
 |------|----------|-------------|
@@ -39,7 +39,7 @@ QueueDir/                          # default: $DataDir/queue
 
 ---
 
-## Serialization Format
+## Serialization format
 
 nzbget uses custom binary/text formats for state persistence. For bergamot, we use **serde** with **JSON** as the primary format for debuggability, with an option to switch to **bincode** for performance if needed.
 
@@ -121,7 +121,7 @@ pub struct FeedHistoryItem {
 }
 ```
 
-### Why JSON over Binary
+### Why JSON over binary
 
 | Aspect | JSON | bincode |
 |--------|------|---------|
@@ -133,7 +133,7 @@ pub struct FeedHistoryItem {
 
 JSON is the default. If profiling shows state serialization as a bottleneck (unlikely — state files are small relative to download data), bincode can be enabled via a feature flag.
 
-### StateFormat Trait
+### StateFormat trait
 
 ```rust
 pub trait StateFormat: Send + Sync {
@@ -173,7 +173,7 @@ impl StateFormat for BincodeFormat {
 
 ---
 
-## DiskState Operations
+## DiskState operations
 
 The `DiskState` struct provides the unified persistence interface. All I/O goes through this struct, which handles atomic writes, directory layout, and format abstraction.
 
@@ -282,7 +282,7 @@ impl DiskState {
 }
 ```
 
-### Per-File Article State
+### Per-file article state
 
 Each file in the queue has a state file tracking which articles have been successfully downloaded. This enables resumption of partially-downloaded files.
 
@@ -336,7 +336,7 @@ impl FileArticleState {
 
 ---
 
-## Queue Persistence Triggers
+## Queue persistence triggers
 
 The queue state is saved at these points:
 
@@ -416,7 +416,7 @@ impl QueuePersistence {
 }
 ```
 
-### FlushQueue Tuning
+### FlushQueue tuning
 
 | `FlushQueue` Value | Trade-off |
 |---------------------|-----------|
@@ -427,7 +427,7 @@ impl QueuePersistence {
 
 ---
 
-## Partial Download Resumption
+## Partial download resumption
 
 The `ContinuePartial` option controls whether partially downloaded files are resumed after restart:
 
@@ -436,7 +436,7 @@ The `ContinuePartial` option controls whether partially downloaded files are res
 | `yes` (default) | Resume — load article completion state, skip completed articles |
 | `no` | Discard partial file state, re-download everything |
 
-### Resume Flow
+### Resume flow
 
 ```
 Startup
@@ -456,7 +456,7 @@ Startup
   └── Begin downloading from first uncompleted article
 ```
 
-### Article Completion Tracking During Download
+### Article completion tracking during download
 
 ```rust
 impl QueueCoordinator {
@@ -482,9 +482,9 @@ impl QueueCoordinator {
 
 ---
 
-## Crash Recovery
+## Crash recovery
 
-### Atomic Writes
+### Atomic writes
 
 All state files are written atomically using the write-to-temp-then-rename pattern:
 
@@ -519,7 +519,7 @@ This guarantees that a state file is either the old complete version or the new 
 3. `rename` temp → target (atomic on POSIX)
 4. `fsync` the parent directory (rename is durable)
 
-### Advisory Lock
+### Advisory lock
 
 On startup, bergamot acquires an advisory lock on `diskstate.lock` to prevent two instances from corrupting shared state:
 
@@ -549,7 +549,7 @@ impl StateLock {
 // Lock is released automatically when StateLock is dropped
 ```
 
-### Recovery Procedure
+### Recovery procedure
 
 On startup, `DiskState` performs a recovery sequence:
 
@@ -655,7 +655,7 @@ pub enum ConsistencyWarning {
 
 ---
 
-## Version Migration
+## Version migration
 
 State files include a `version` field. When loading state from a different version, the migration system applies incremental transformations:
 
@@ -690,7 +690,7 @@ impl QueueState {
 }
 ```
 
-### Serde Defaults for Forward Compatibility
+### Serde defaults for forward compatibility
 
 Use `#[serde(default)]` on new fields so that old state files deserialize cleanly without explicit migration for simple additions:
 
@@ -711,7 +711,7 @@ pub struct NzbState {
 }
 ```
 
-### Migration Strategy
+### Migration strategy
 
 | Change Type | Approach |
 |-------------|----------|

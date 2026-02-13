@@ -1,8 +1,8 @@
-# Logging & History
+# Logging & history
 
 bergamot provides a multi-target logging system and a history system that records the final state of every completed or failed download.
 
-## Log Levels
+## Log levels
 
 ```rust
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -25,7 +25,7 @@ Each level corresponds to a `tracing` severity and a nzbget `MessageKind`:
 | `Warning` | `tracing::warn!` | `"warning"` |
 | `Error` | `tracing::error!` | `"error"` |
 
-## Log Targets
+## Log targets
 
 Each log level can be directed to different targets:
 
@@ -48,7 +48,7 @@ Configuration options:
 | `DebugTarget` | `screen`, `log`, `both`, `none` | Where to send Debug messages |
 | `DetailTarget` | `screen`, `log`, `both`, `none` | Where to send Detail messages |
 
-## MessageKind and Log Struct
+## MessageKind and log struct
 
 ```rust
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -61,7 +61,7 @@ pub struct LogMessage {
 }
 ```
 
-## Structured Logging with `tracing`
+## Structured logging with `tracing`
 
 bergamot uses the `tracing` crate for structured, async-aware logging. A custom `tracing::Subscriber` layer routes messages to the appropriate targets.
 
@@ -90,7 +90,7 @@ pub fn init_logging(config: &LogConfig) -> Result<LogHandle> {
 }
 ```
 
-### Custom Layer
+### Custom layer
 
 ```rust
 use tracing::Subscriber;
@@ -135,7 +135,7 @@ impl<S: Subscriber> Layer<S> for NzbgLogLayer {
 }
 ```
 
-## Log File Management
+## Log file management
 
 ### Modes
 
@@ -212,7 +212,7 @@ impl FileLogWriter {
 }
 ```
 
-## Log Buffer (Ring Buffer)
+## Log buffer (ring buffer)
 
 An in-memory ring buffer holds recent log messages for the web UI's log display and the `log` API method.
 
@@ -256,7 +256,7 @@ impl LogBuffer {
 
 The `LogBuffer` config option controls capacity (default: 1000 messages).
 
-## Per-NZB Logging
+## Per-NZB logging
 
 When `NzbLog = yes`, log messages associated with a specific NZB (via the `nzb_id` field in structured logging) are stored alongside that NZB's state. This allows the UI to show a per-download log.
 
@@ -276,7 +276,7 @@ tracing::info!("starting post-processing");
 // The NzbgLogLayer extracts nzb_id from the span context
 ```
 
-## History System
+## History system
 
 ### HistoryCoordinator
 
@@ -340,7 +340,7 @@ pub struct HistoryEntry {
 }
 ```
 
-### History Status Enums
+### History status enums
 
 ```rust
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -378,7 +378,7 @@ pub enum HistoryMark {
 }
 ```
 
-### History Operations
+### History operations
 
 | Operation | API Method | Description |
 |-----------|-----------|-------------|
@@ -420,7 +420,7 @@ impl HistoryCoordinator {
 }
 ```
 
-### History Retention
+### History retention
 
 The `KeepHistory` option controls how long history entries are kept:
 

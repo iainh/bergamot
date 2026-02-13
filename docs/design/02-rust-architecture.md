@@ -2,7 +2,7 @@
 
 This document covers Rust-specific design decisions for bergamot: crate structure, async runtime, concurrency model, error handling, dependencies, testing, and deployment concerns.
 
-## Crate / Module Structure
+## Crate / module structure
 
 bergamot is organized as a Cargo workspace with focused crates:
 
@@ -118,7 +118,7 @@ bergamot/
 │           └── runner.rs
 ```
 
-### Crate Responsibilities
+### Crate responsibilities
 
 | Crate | Responsibility |
 |-------|----------------|
@@ -139,7 +139,7 @@ bergamot/
 | `bergamot-logging` | Tracing subscriber layer, ring buffer, per-NZB log routing |
 | `bergamot-extension` | Extension/script runner, environment construction, output parsing |
 
-### Dependency Graph
+### Dependency graph
 
 ```
 bergamot (binary)
@@ -168,7 +168,7 @@ Design rationale:
 
 ---
 
-## Async Runtime
+## Async runtime
 
 bergamot uses **tokio** with the multi-threaded runtime:
 
@@ -188,7 +188,7 @@ tokio is chosen because:
 - **Async-aware sync primitives** — `tokio::sync::{mpsc, broadcast, RwLock, Mutex, oneshot}` avoid blocking the runtime.
 - **Timers and intervals** — `tokio::time` provides non-blocking scheduling for periodic tasks (feed polling, queue saves, slot filling).
 
-### Runtime Configuration
+### Runtime configuration
 
 The runtime is configured with the default multi-threaded settings. Worker thread count defaults to the number of CPU cores, which is appropriate for bergamot's workload — NNTP I/O is the bottleneck on most systems, not CPU.
 
@@ -196,9 +196,9 @@ For embedded/NAS deployments with limited cores, tokio's work-stealing scheduler
 
 ---
 
-## Concurrency Model
+## Concurrency model
 
-### Actor Pattern for Queue Coordinator
+### Actor pattern for queue coordinator
 
 The `QueueCoordinator` owns all mutable queue state and receives commands via an `mpsc` channel. This avoids locks on the hot path:
 
@@ -264,7 +264,7 @@ Advantages of the actor pattern:
 - **Backpressure** — bounded channels prevent queue flooding.
 - **Testable** — the coordinator can be driven by a synthetic channel in unit tests.
 
-### Shared Read-Heavy State with `Arc<RwLock>`
+### Shared read-heavy state with `Arc<RwLock>`
 
 Configuration and server stats are read frequently but written rarely:
 
@@ -275,7 +275,7 @@ pub type SharedServerStats = Arc<RwLock<ServerStats>>;
 
 Multiple readers (API handlers, download tasks) can hold read locks concurrently. Writers (config reload, stats update) acquire exclusive access — these are infrequent operations.
 
-### Channel Pattern Summary
+### Channel pattern summary
 
 | Pattern | Use Case |
 |---------|----------|
@@ -285,7 +285,7 @@ Multiple readers (API handlers, download tasks) can hold read locks concurrently
 | `Arc<RwLock<T>>` | Read-heavy shared state (config, server stats) |
 | `Arc<Mutex<T>>` | Write-heavy shared state (log ring buffer) |
 
-### Download Worker Concurrency
+### Download worker concurrency
 
 Each NNTP connection runs as an independent tokio task. Multiple NZBs, files, and articles are downloaded simultaneously:
 
@@ -301,9 +301,9 @@ The coordinator limits total active downloads to the sum of configured connectio
 
 ---
 
-## Error Handling
+## Error handling
 
-### Library Errors: `thiserror`
+### Library errors: `thiserror`
 
 Each library crate defines its own error types using `thiserror`. This produces well-typed, descriptive errors that callers can match on:
 
@@ -335,7 +335,7 @@ pub enum NntpError {
 
 Each crate's error enum covers that crate's failure modes. `#[from]` conversions are used sparingly — only where the source error unambiguously maps to one variant.
 
-### Application Errors: `anyhow`
+### Application errors: `anyhow`
 
 The binary crate and top-level orchestration use `anyhow` for ergonomic error propagation with context:
 
@@ -356,7 +356,7 @@ The boundary is clear: library crates return typed errors via `thiserror`, the b
 
 ---
 
-## Key Crate Dependencies
+## Key crate dependencies
 
 | Crate | Version | Purpose | Used By |
 |-------|---------|---------|---------|
@@ -391,9 +391,9 @@ The boundary is clear: library crates return typed errors via `thiserror`, the b
 
 ---
 
-## Testing Strategy
+## Testing strategy
 
-### Unit Tests
+### Unit tests
 
 Each module includes `#[cfg(test)]` tests co-located with the code:
 
@@ -419,7 +419,7 @@ mod tests {
 }
 ```
 
-### Integration Tests with Mock NNTP Server
+### Integration tests with mock NNTP server
 
 A mock NNTP server enables end-to-end testing without a real Usenet provider. The mock server speaks the NNTP protocol over TCP and serves pre-loaded articles:
 
@@ -448,7 +448,7 @@ The mock server supports:
 - Delayed responses (tests timeout handling)
 - Connection drops (tests reconnection logic)
 
-### Property-Based Testing
+### Property-based testing
 
 Parsers (yEnc, NZB XML, feed filters) use `proptest` for fuzzing:
 
@@ -470,7 +470,7 @@ proptest! {
 }
 ```
 
-### Test Organization
+### Test organization
 
 | Level | Location | Scope |
 |-------|----------|-------|
@@ -481,7 +481,7 @@ proptest! {
 
 ---
 
-## API Compatibility
+## API compatibility
 
 bergamot maintains backward compatibility with nzbget's RPC API so that existing tools (Sonarr, Radarr, Lidarr, NZBHydra, etc.) work without modification:
 
@@ -519,7 +519,7 @@ pub async fn handle_jsonrpc(
 }
 ```
 
-### Compatibility Priorities
+### Compatibility priorities
 
 1. **Method names and parameters** — identical to nzbget's documented API.
 2. **Response format** — field names, types, and value ranges match nzbget.
@@ -528,7 +528,7 @@ pub async fn handle_jsonrpc(
 
 ---
 
-## Graceful Shutdown
+## Graceful shutdown
 
 Shutdown is coordinated via a `broadcast` channel. All subsystems subscribe to the shutdown signal and drain their work before exiting:
 
@@ -587,7 +587,7 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
 }
 ```
 
-### Shutdown Sequence
+### Shutdown sequence
 
 1. Receive SIGINT/SIGTERM or API `shutdown` command.
 2. Broadcast shutdown signal to all subsystems.
@@ -604,7 +604,7 @@ If in-flight downloads do not complete within a configurable timeout (default: 3
 
 ## Configuration
 
-### CLI Arguments (clap)
+### CLI arguments (clap)
 
 ```rust
 use clap::Parser;
@@ -643,7 +643,7 @@ pub enum RemoteCommand {
 }
 ```
 
-### Configuration File
+### Configuration file
 
 nzbget-compatible INI-style configuration, parsed with a custom parser (not the `config` crate) for full compatibility:
 
@@ -663,7 +663,7 @@ pub struct Config {
 }
 ```
 
-### Environment Variable Overrides
+### Environment variable overrides
 
 Environment variables override config file values using the `NZBG_` prefix:
 
@@ -673,9 +673,9 @@ NZBG_DESTDIR=/downloads bergamot
 
 ---
 
-## Binary Size & Performance
+## Binary size & performance
 
-### Release Profile
+### Release profile
 
 ```toml
 # Cargo.toml (workspace root)
@@ -694,7 +694,7 @@ panic = "abort"
 | `strip = true` | Remove debug symbols from binary |
 | `panic = "abort"` | Smaller binary (no unwinding tables) |
 
-### Performance Considerations
+### Performance considerations
 
 - **yEnc decoding**: inner loop uses SIMD-accelerated byte operations (NEON on aarch64, SSE2 on x86_64). PAR2 GF multiplication also uses SIMD (NEON on aarch64, SSSE3 on x86_64).
 - **CRC32**: `crc32fast` uses hardware acceleration (SSE4.2 / ARMv8) automatically.

@@ -1,6 +1,6 @@
-# Web Server & RPC API
+# Web server & RPC API
 
-## Architecture Overview
+## Architecture overview
 
 ```
                     HTTP Request
@@ -31,7 +31,7 @@
           JSON-RPC   XML-RPC   JSON-P-RPC
 ```
 
-## Recommended Framework: axum
+## Recommended framework: axum
 
 axum provides async, tower-based middleware, built-in extractors, and good performance:
 
@@ -80,7 +80,7 @@ impl WebServer {
 }
 ```
 
-## Server Configuration
+## Server configuration
 
 ```rust
 pub struct ServerConfig {
@@ -105,7 +105,7 @@ pub struct ServerConfig {
 
 ## Authentication
 
-### Three Access Levels
+### Three access levels
 
 nzbget defines three credential pairs, each granting a different level of access:
 
@@ -115,7 +115,7 @@ nzbget defines three credential pairs, each granting a different level of access
 | **Restricted** | `RestrictedUsername` / `RestrictedPassword` | Read-only: status, listgroups, history, log. No config changes. |
 | **Add** | `AddUsername` / `AddPassword` | Only `append` (add downloads) and `version` |
 
-### Auth Flow
+### Auth flow
 
 ```rust
 use axum::{
@@ -190,7 +190,7 @@ fn extract_basic_auth(request: &Request) -> Option<(String, String)> {
 }
 ```
 
-### Access Control Per Method
+### Access control per method
 
 ```rust
 fn required_access(method: &str) -> AccessLevel {
@@ -208,7 +208,7 @@ fn required_access(method: &str) -> AccessLevel {
 }
 ```
 
-## RPC Protocols
+## RPC protocols
 
 bergamot supports three RPC protocol variants on the same endpoint:
 
@@ -278,7 +278,7 @@ For cross-origin browser requests. Wraps JSON-RPC in a JSONP callback:
 cb123({"jsonrpc":"2.0","result":{"RemainingSizeLo":1234},"id":0});
 ```
 
-### RPC Dispatcher
+### RPC dispatcher
 
 ```rust
 use serde::{Deserialize, Serialize};
@@ -355,9 +355,9 @@ async fn dispatch_rpc(
 }
 ```
 
-## API Methods Reference
+## API methods reference
 
-### Program Control
+### Program control
 
 | Method | Parameters | Returns | Description |
 |--------|-----------|---------|-------------|
@@ -365,7 +365,7 @@ async fn dispatch_rpc(
 | `shutdown` | — | `bool` | Initiate graceful shutdown |
 | `reload` | — | `bool` | Reload config from disk |
 
-### Queue Management
+### Queue management
 
 | Method | Parameters | Returns | Description |
 |--------|-----------|---------|-------------|
@@ -376,7 +376,7 @@ async fn dispatch_rpc(
 | `editqueue` | `Command, Param, IDs[]` | `bool` | Edit queue entries (pause, delete, move, etc.) |
 | `scan` | `ScanNzbDir: bool` | `bool` | Scan incoming NZB directory |
 
-### Status & Logging
+### Status & logging
 
 | Method | Parameters | Returns | Description |
 |--------|-----------|---------|-------------|
@@ -643,7 +643,7 @@ pub struct LogEntry {
 }
 ```
 
-## 64-bit Integer Hi/Lo Splitting
+## 64-bit integer Hi/Lo splitting
 
 XML-RPC only supports 32-bit integers (`<i4>`). To represent 64-bit values (file sizes, byte counts), nzbget splits them into `Hi` and `Lo` 32-bit halves:
 
@@ -679,7 +679,7 @@ impl From<u64> for SizeFields {
 
 For JSON-RPC, these fields are still included for backwards compatibility, but clients can also use the `MB` variants or compute the full value from `Hi`/`Lo`.
 
-## Gzip Compression
+## Gzip compression
 
 Compress large responses when the client supports it:
 
@@ -696,7 +696,7 @@ fn build_router(state: Arc<AppState>) -> Router {
 }
 ```
 
-## CORS Support
+## CORS support
 
 Allow browser-based API clients from different origins:
 

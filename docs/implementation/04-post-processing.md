@@ -1,6 +1,6 @@
-# Post-Processing Pipeline
+# Post-processing pipeline
 
-## Pipeline Overview
+## Pipeline overview
 
 After a download completes, bergamot runs a multi-stage post-processing pipeline to verify, repair, unpack, and organize the downloaded files.
 
@@ -41,7 +41,7 @@ Download Complete
    History ─────── record final status in history
 ```
 
-## PostStage Enum
+## PostStage enum
 
 Each stage of the pipeline is tracked so progress can be reported to the UI:
 
@@ -62,7 +62,7 @@ pub enum PostStage {
 }
 ```
 
-## PostProcessor Struct
+## PostProcessor struct
 
 The `PostProcessor` runs in its own task, receiving completed downloads via a channel:
 
@@ -135,7 +135,7 @@ impl PostProcessor {
 }
 ```
 
-## Status Reporting Flow
+## Status reporting flow
 
 When a download completes, the NZB stays in the download queue while
 post-processing runs. The `PostProcessor` reports each stage back to the
@@ -177,7 +177,7 @@ sequenceDiagram
     Note over UI: NZB gone from downloads
 ```
 
-### Key Components
+### Key components
 
 - **`PostStatusReporter` trait** (`crates/bergamot-postproc/src/processor.rs`):
   Defines `report_stage()` and `report_done()` so the post-processor can
@@ -192,7 +192,7 @@ sequenceDiagram
   Maps `post_info.stage` to status strings (PP_QUEUED, VERIFYING_SOURCES,
   UNPACKING, MOVING, etc.) that the web UI already understands.
 
-### Status String Mapping
+### Status string mapping
 
 | PostStage      | listgroups Status    | Web UI Label   |
 |----------------|----------------------|----------------|
@@ -229,9 +229,9 @@ pub enum PostStrategy {
 - **Rocket**: best for fast connections with SSD storage.
 - **Aggressive**: enables direct unpack (see below).
 
-## PAR2 System
+## PAR2 system
 
-### What PAR2 Is
+### What PAR2 is
 
 PAR2 (Parity Archive Volume 2) uses Reed-Solomon error correction codes to detect and repair damaged or missing files. A PAR2 set contains:
 
@@ -240,7 +240,7 @@ PAR2 (Parity Archive Volume 2) uses Reed-Solomon error correction codes to detec
 
 The number of recovery blocks needed equals the number of missing or damaged blocks. If a download is missing 3 blocks, 3 recovery blocks from any combination of recovery volumes are sufficient to repair.
 
-### Verification Flow
+### Verification flow
 
 ```
 Load main .par2 file
@@ -275,7 +275,7 @@ All match   Mismatch or CRCs unavailable
     Continue pipeline
 ```
 
-### Quick Verification Using Article CRCs
+### Quick verification using article CRCs
 
 During download, the NNTP server provides a CRC32 for each article. bergamot stores these CRCs alongside the decoded file segments. During quick verification, these stored CRCs are compared against the CRC32 values in the PAR2 file's block checksums — if every block's CRC matches, the file is known good without reading the data back from disk:
 
@@ -315,7 +315,7 @@ fn quick_verify(
 }
 ```
 
-### Requesting More PAR2 Files
+### Requesting more PAR2 files
 
 Recovery volumes are typically paused in the download queue (nzbget convention: only the main `.par2` file downloads automatically). When repair needs more blocks:
 
@@ -359,7 +359,7 @@ async fn request_par2_volumes(
 }
 ```
 
-### PAR2 Implementation
+### PAR2 implementation
 
 PAR2 verification and repair are handled natively by the `bergamot-par2` crate, which provides a pure-Rust implementation with no external process dependencies. The crate is organized into:
 
@@ -388,7 +388,7 @@ pub enum Par2Result {
 
 ## Unpacking
 
-### Supported Formats
+### Supported formats
 
 - **RAR** archives (`.rar`, `.r00`–`.r99`, multi-part)
 - **7-Zip** archives (`.7z`)
@@ -475,7 +475,7 @@ impl UnpackController {
 }
 ```
 
-### Calling External Unpackers
+### Calling external unpackers
 
 Archives are extracted by shelling out to `unrar`, `7z`, or `unzip`. Output is parsed to detect errors:
 
@@ -516,7 +516,7 @@ async fn unrar(
 }
 ```
 
-### Direct Unpack
+### Direct unpack
 
 When `PostStrategy::Aggressive` is active and `DirectUnpack` is enabled, unpacking begins while files are still downloading. This works for RAR archives where volumes are downloaded in order:
 
@@ -557,7 +557,7 @@ impl DirectUnpack {
 }
 ```
 
-## Password Handling
+## Password handling
 
 Passwords for encrypted archives can come from multiple sources, checked in order:
 
@@ -651,7 +651,7 @@ fn remove_files_by_extension(dir: &Path, extensions: &[&str]) -> Result<(), std:
 }
 ```
 
-## File Moving
+## File moving
 
 After processing, files are moved from the intermediate directory to their final destination:
 
@@ -694,11 +694,11 @@ async fn move_files(ctx: &PostProcessContext, config: &Config) -> Result<PathBuf
 }
 ```
 
-## Obfuscation Handling
+## Obfuscation handling
 
 Usenet uploads are often obfuscated — filenames are replaced with random strings to avoid automated takedowns.
 
-### PAR2 Rename
+### PAR2 rename
 
 PAR2 files store the original filename and an MD5 hash for each protected file. By hashing the downloaded files and matching against the PAR2 metadata, original names can be restored:
 
@@ -735,7 +735,7 @@ fn par2_rename(working_dir: &Path, par2_info: &Par2FileInfo) -> Result<Vec<(Path
 }
 ```
 
-### RAR Rename
+### RAR rename
 
 RAR archives store the original filename in their headers. After PAR2 rename (which handles data files), RAR volumes with obfuscated names can be identified and renamed by reading their internal headers:
 

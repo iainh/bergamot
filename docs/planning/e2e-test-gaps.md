@@ -1,8 +1,8 @@
-# E2E Test Gaps
+# E2E test gaps
 
 Tracking file for end-to-end test coverage deficiencies to address before production readiness.
 
-## Existing E2E Tests
+## Existing E2E tests
 
 - [x] `end_to_end_append_download_flow` — basic append + download + file verification
 - [x] `missing_article_falls_back_to_second_server` — multi-server fallback
@@ -11,7 +11,7 @@ Tracking file for end-to-end test coverage deficiencies to address before produc
 - [x] `rpc_version_reports_compatibility` — `version` >= 26 for Sonarr/Radarr
 - [x] `rpc_listgroups_schema_during_download` — `listgroups` response fields during download
 
-## RPC API Coverage Gaps
+## RPC API coverage gaps
 
 - [x] **`history` schema conformance** — Validate all fields required by Sonarr/Radarr after a completed download
 - [x] **`editqueue`** — Queue manipulation: pause/resume/delete/move/priority changes
@@ -23,7 +23,7 @@ Tracking file for end-to-end test coverage deficiencies to address before produc
 - [ ] **`scan`** — NZB dropped into `NzbDir` gets auto-picked up
 - [ ] **XML-RPC** — All current tests use JSON-RPC; XML-RPC is a separate untested code path
 
-## Functional Scenarios
+## Functional scenarios
 
 - [x] **Authentication rejection** — Wrong credentials get a 401
 - [x] **Multi-file NZB** — Multiple distinct output files produced correctly

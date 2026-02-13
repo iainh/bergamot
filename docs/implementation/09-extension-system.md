@@ -1,8 +1,8 @@
-# Extension System
+# Extension system
 
-Extensions (called "scripts" in nzbget) are external programs invoked at various points in the download lifecycle. bergamot discovers, manages, and executes them as child processes, communicating via environment variables and exit codes.
+Extensions (called "scripts" in nzbget) are external programs invoked at various points in the download lifecycle. bergamot discovers, manages and executes them as child processes, communicating via environment variables and exit codes.
 
-## Extension Types
+## Extension types
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -41,7 +41,7 @@ pub enum ExtensionKind {
 }
 ```
 
-## Extension Lifecycle
+## Extension lifecycle
 
 ### Discovery
 
@@ -56,7 +56,7 @@ ScriptDir/
     └── manifest.json      # V2 format (nzbget v23+)
 ```
 
-### Metadata Parsing (V1 Format)
+### Metadata parsing (V1 format)
 
 V1 extensions embed metadata in header comments between marker lines:
 
@@ -115,7 +115,7 @@ pub enum ParamType {
 }
 ```
 
-### V2 Extension Format (nzbget v23+)
+### V2 extension format (nzbget v23+)
 
 V2 extensions use a `manifest.json` file:
 
@@ -143,7 +143,7 @@ V2 extensions use a `manifest.json` file:
 }
 ```
 
-## Script Execution
+## Script execution
 
 All extension types share the same execution model:
 
@@ -235,11 +235,11 @@ Extensions can send commands to bergamot by writing special lines to stdout:
 [DEBUG] Debug message
 ```
 
-## Post-Processing Scripts
+## Post-processing scripts
 
 Executed after an NZB completes post-processing (PAR2 + unpack).
 
-### Environment Variables (`NZBPP_*`)
+### Environment variables (`NZBPP_*`)
 
 | Variable | Description |
 |----------|-------------|
@@ -256,7 +256,7 @@ Executed after an NZB completes post-processing (PAR2 + unpack).
 | `NZBPP_DUPEKEY` | Duplicate key |
 | `NZBPP_DUPESCORE` | Duplicate score |
 
-### Exit Codes
+### Exit codes
 
 | Code | Constant | Meaning |
 |------|----------|---------|
@@ -282,11 +282,11 @@ impl PostProcessResult {
 }
 ```
 
-## Scan Scripts
+## Scan scripts
 
 Triggered when a new NZB file is detected in the incoming directory.
 
-### Environment Variables (`NZBNA_*`)
+### Environment variables (`NZBNA_*`)
 
 | Variable | Description |
 |----------|-------------|
@@ -301,7 +301,7 @@ Triggered when a new NZB file is detected in the incoming directory.
 | `NZBNA_DUPESCORE` | Duplicate score |
 | `NZBNA_DUPEMODE` | Duplicate mode |
 
-### Exit Codes
+### Exit codes
 
 | Code | Meaning |
 |------|---------|
@@ -309,11 +309,11 @@ Triggered when a new NZB file is detected in the incoming directory.
 | `94` | Failure — reject the NZB |
 | `95` | None — no decision (pass to next script) |
 
-## Queue Scripts
+## Queue scripts
 
 Triggered on queue events. The `QueueEvents` metadata field specifies which events the script handles.
 
-### Queue Events
+### Queue events
 
 | Event | `NZBNA_EVENT` value | Trigger |
 |-------|---------------------|---------|
@@ -324,7 +324,7 @@ Triggered on queue events. The `QueueEvents` metadata field specifies which even
 | NZB marked | `NZB_MARKED` | NZB marked (good/bad/etc.) |
 | URL completed | `URL_COMPLETED` | URL fetch completed |
 
-## Scheduler Scripts
+## Scheduler scripts
 
 Triggered at a configured time. Uses `TaskTime` metadata:
 
@@ -335,11 +335,11 @@ Triggered at a configured time. Uses `TaskTime` metadata:
 
 The time format follows nzbget's scheduler syntax: `WeekDay;Hour:Minute` with wildcards.
 
-## Feed Scripts
+## Feed scripts
 
 Executed during feed processing to augment filter evaluation. The script receives feed item details and can override accept/reject decisions.
 
-### Environment Variables (`NZBFP_*`)
+### Environment variables (`NZBFP_*`)
 
 | Variable | Description |
 |----------|-------------|
@@ -349,7 +349,7 @@ Executed during feed processing to augment filter evaluation. The script receive
 | `NZBFP_SIZE` | Item size in bytes |
 | `NZBFP_IMDBID` | IMDB ID (if available) |
 
-## Extension Manager
+## Extension manager
 
 The `ExtensionManager` handles discovery, ordering, and invocation:
 
@@ -444,7 +444,7 @@ impl ExtensionManager {
 }
 ```
 
-### Common Environment Variables
+### Common environment variables
 
 All extension types receive these base variables:
 

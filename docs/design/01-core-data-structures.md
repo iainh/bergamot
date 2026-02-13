@@ -7,7 +7,7 @@ idioms.
 
 ---
 
-## Object Hierarchy
+## Object hierarchy
 
 ```
 DownloadQueue
@@ -149,7 +149,7 @@ pub enum Priority {
 
 ---
 
-## Status Enumerations
+## Status enumerations
 
 Every status enum uses explicit discriminants so that values are stable
 across serialization and the RPC API.
@@ -337,7 +337,7 @@ pub struct FileInfo {
 }
 ```
 
-### File Ordering Within an NZB
+### File ordering within an NZB
 
 The order of `FileInfo` entries in `NzbInfo::files` is significant and
 follows NZBGet's strategy for efficient PAR2 handling:
@@ -611,7 +611,7 @@ pub enum PostMessageKind {
 
 ---
 
-## Thread Safety & Concurrency Model
+## Thread safety & concurrency model
 
 NZBGet protects `DownloadQueue` with a single global mutex that every
 thread (downloader, post-processor, RPC handler, scheduler) must
@@ -683,7 +683,7 @@ targeted optimizations (batching, the hybrid snapshot) at that point.
 
 ---
 
-## Snapshot Types
+## Snapshot types
 
 For read-only consumers (API responses, web UI), the coordinator can
 produce lightweight snapshots that clone only the data needed:
@@ -715,7 +715,7 @@ pub struct NzbSummary {
 
 ---
 
-## Relationship to Disk State
+## Relationship to disk state
 
 All structures above must be serializable for crash recovery. See
 [12-disk-state.md](12-disk-state.md) for the persistence format.

@@ -1,12 +1,12 @@
-# NZB File Parsing
+# NZB file parsing
 
-## NZB XML Format
+## NZB XML format
 
 NZB (Newzbin) files are XML documents that describe a set of Usenet articles needed
 to reconstruct binary files. The format was created by the Newzbin indexing service
 and is now the de facto standard for Usenet binary downloading.
 
-### Example NZB File
+### Example NZB file
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -50,7 +50,7 @@ and is now the de facto standard for Usenet binary downloading.
 </nzb>
 ```
 
-### Element Reference
+### Element reference
 
 | Element | Parent | Attributes | Content |
 |---------|--------|------------|---------|
@@ -65,7 +65,7 @@ and is now the de facto standard for Usenet binary downloading.
 
 ---
 
-## Parser Strategy: `quick-xml`
+## Parser strategy: `quick-xml`
 
 | Crate | Style | Allocation | Speed | Recommendation |
 |-------|-------|------------|-------|----------------|
@@ -89,7 +89,7 @@ quick-xml = "0.37"
 
 ---
 
-## Parsing Flow
+## Parsing flow
 
 ```
 ┌──────────┐     ┌──────────────┐     ┌─────────────────────────┐     ┌────────────────┐     ┌─────────┐
@@ -112,7 +112,7 @@ quick-xml = "0.37"
                                      └─────────────────┘
 ```
 
-### State Transitions
+### State transitions
 
 ```
 Initial ──[<nzb>]──▶ InNzb
@@ -135,7 +135,7 @@ InNzb ──[</nzb>]──▶ done
 
 ---
 
-## Rust Parser Implementation Sketch
+## Rust parser implementation sketch
 
 ```rust
 use std::io::BufRead;
@@ -390,7 +390,7 @@ impl NzbParser {
 
 ---
 
-## Filename Extraction from Subject Lines
+## Filename extraction from subject lines
 
 Usenet posting subjects follow informal but consistent patterns. The filename is
 almost always enclosed in double quotes within the subject. Common formats:
@@ -402,7 +402,7 @@ almost always enclosed in double quotes within the subject. Common formats:
 | Alt format | `(My File) [01/15] - "file.part01.rar" - 750.00 MB yEnc` |
 | No yEnc tag | `My.File - "file.part01.rar" (1/50)` |
 
-### Extraction Logic
+### Extraction logic
 
 ```rust
 use regex::Regex;
@@ -441,7 +441,7 @@ mod tests {
 
 ---
 
-## PAR2 File Detection and Classification
+## PAR2 file detection and classification
 
 PAR2 (Parity Archive 2) files provide error correction for Usenet downloads. The
 downloader must identify them to support repair workflows:
@@ -492,7 +492,7 @@ pub fn classify_par(filename: &Option<String>) -> ParStatus {
 
 ---
 
-## File Ordering (ReorderFiles)
+## File ordering (ReorderFiles)
 
 When `ReorderFiles` is enabled, parsed files are sorted to optimize download
 and post-processing:
@@ -527,11 +527,11 @@ fn file_sort_order(file: &NzbFile) -> (u8, u32, String) {
 
 ---
 
-## Hash Calculation for Duplicate Detection
+## Hash calculation for duplicate detection
 
 Two hashes are computed to detect duplicate NZB submissions:
 
-### Content Hash
+### Content hash
 
 Derived from the sorted message-IDs of all segments across all files. Two NZBs
 with identical articles (regardless of metadata differences) produce the same
@@ -556,7 +556,7 @@ pub fn compute_content_hash(files: &[NzbFile]) -> u32 {
 }
 ```
 
-### Name Hash
+### Name hash
 
 Derived from sorted filenames extracted from subjects. Used to detect re-uploads
 of the same content under different message-IDs.
@@ -579,7 +579,7 @@ pub fn compute_name_hash(files: &[NzbFile]) -> u32 {
 
 ---
 
-## Post-Parse Processing Steps
+## Post-parse processing steps
 
 After the XML is parsed into raw structures, several processing steps produce the
 final `NzbInfo`:
@@ -600,7 +600,7 @@ final `NzbInfo`:
 
 ---
 
-## Error Types
+## Error types
 
 ```rust
 #[derive(Debug, thiserror::Error)]
@@ -624,7 +624,7 @@ pub enum NzbError {
 
 ---
 
-## NZB Sources
+## NZB sources
 
 NZB files can enter the system through several paths:
 

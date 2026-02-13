@@ -1,8 +1,8 @@
-# Scheduler and Background Services
+# Scheduler and background services
 
-bergamot runs several background services alongside the download engine. Each service performs a periodic task — scanning for new NZBs, monitoring disk space, cleaning up connections, maintaining history, and executing scheduled commands.
+bergamot runs several background services alongside the download engine. Each service performs a periodic task — scanning for new NZBs, monitoring disk space, cleaning up connections, maintaining history and executing scheduled commands.
 
-## Service Trait
+## Service trait
 
 All background services implement a common trait:
 
@@ -23,7 +23,7 @@ pub trait Service: Send + Sync + 'static {
 }
 ```
 
-### Service Runner
+### Service runner
 
 Each service is spawned as a tokio task. The runner calls `tick()` at the configured interval and listens for a shutdown signal:
 
@@ -54,11 +54,11 @@ async fn run_service(
 }
 ```
 
-## Scheduler Service
+## Scheduler service
 
 The scheduler executes commands at configured times, replicating nzbget's `Task*` options.
 
-### Data Model
+### Data model
 
 ```rust
 use chrono::NaiveTime;
@@ -91,7 +91,7 @@ pub enum SchedulerCommand {
 }
 ```
 
-### Weekday Bitmask
+### Weekday bitmask
 
 ```
 Bit 0 = Monday     (0x01)
@@ -109,7 +109,7 @@ Bit 6 = Sunday     (0x40)
 
 The config format `WeekDays=1-5` translates to `0x1F`. Individual days can be listed: `WeekDays=1,3,5` for Monday/Wednesday/Friday.
 
-### Execution Logic
+### Execution logic
 
 ```rust
 impl ScheduledTask {
@@ -143,7 +143,7 @@ impl ScheduledTask {
 }
 ```
 
-### Scheduler Tick
+### Scheduler tick
 
 ```rust
 pub struct Scheduler {
@@ -214,7 +214,7 @@ async fn execute_command(
 }
 ```
 
-## NZB Directory Scanner
+## NZB directory scanner
 
 Watches the `NzbDir` directory for incoming `.nzb` files. Files are only processed once their modification time is older than `NzbDirFileAge` seconds, preventing partially-written files from being picked up.
 
@@ -266,7 +266,7 @@ impl NzbDirScanner {
 }
 ```
 
-## Disk Space Monitor
+## Disk space monitor
 
 Periodically checks free disk space on `DestDir`, `InterDir`, and `TempDir`. Pauses downloads when any volume drops below the `DiskSpace` threshold and resumes when space is recovered.
 
@@ -311,7 +311,7 @@ impl Service for DiskSpaceMonitor {
 }
 ```
 
-## Connection Cleanup
+## Connection cleanup
 
 Closes NNTP connections that have been idle beyond a timeout. This frees server-side resources and avoids stale connections that may have been silently dropped by firewalls or the server.
 
@@ -336,7 +336,7 @@ impl Service for ConnectionCleanup {
 }
 ```
 
-## History Cleanup
+## History cleanup
 
 Removes completed download entries from history that are older than `KeepHistory` days. Runs once per hour.
 
@@ -367,7 +367,7 @@ impl Service for HistoryCleanup {
 }
 ```
 
-## Statistics Tracker
+## Statistics tracker
 
 Tracks download volume per server with daily and monthly byte counters. Data is persisted for quota enforcement and the web UI statistics view.
 
@@ -451,7 +451,7 @@ impl StatsTracker {
 }
 ```
 
-## System Health Check
+## System health check
 
 Monitors system-level health: disk write speed, connection liveness, TLS certificate expiry, and queue consistency.
 
@@ -511,7 +511,7 @@ impl HealthChecker {
 }
 ```
 
-## Service Lifecycle
+## Service lifecycle
 
 All services follow the same lifecycle, managed by the application's main loop:
 
@@ -559,7 +559,7 @@ All services follow the same lifecycle, managed by the application's main loop:
 └────────────────────────┘
 ```
 
-### Startup Code
+### Startup code
 
 ```rust
 use tokio::sync::broadcast;

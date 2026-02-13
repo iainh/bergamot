@@ -1,4 +1,4 @@
-# NNTP Download Engine
+# NNTP download engine
 
 > **Crate module layout** (`crates/bergamot-nntp/src/`):
 >
@@ -16,12 +16,12 @@
 > The illustrative code below is simplified for reference; see the source modules
 > for the full implementation.
 
-## NNTP Protocol Overview (RFC 3977)
+## NNTP protocol overview (RFC 3977)
 
 NNTP (Network News Transfer Protocol) is a TCP-based text protocol for accessing
 Usenet articles. A binary downloader only needs a small subset of the full protocol.
 
-### Required Commands
+### Required commands
 
 | Command | Purpose | Example |
 |---------|---------|---------|
@@ -33,7 +33,7 @@ Usenet articles. A binary downloader only needs a small subset of the full proto
 | `STAT <message-id>` | Check if article exists (no transfer) | `STAT <abc@news.example.com>` |
 | `QUIT` | Close connection gracefully | `QUIT` |
 
-### Typical Session
+### Typical session
 
 ```
 S: 200 news.example.com NNRP Service Ready (posting ok)
@@ -53,7 +53,7 @@ S: 205 Connection closing
 
 ---
 
-## Response Codes
+## Response codes
 
 | Code | Meaning | Context |
 |------|---------|---------|
@@ -75,7 +75,7 @@ S: 205 Connection closing
 
 ---
 
-## Article Transfer Format
+## Article transfer format
 
 NNTP uses a dot-stuffed text format inherited from SMTP:
 
@@ -100,7 +100,7 @@ The parser must:
 
 ---
 
-## NewsServer Configuration
+## NewsServer configuration
 
 ```rust
 #[derive(Debug, Clone)]
@@ -141,7 +141,7 @@ pub enum IpVersion {
 
 ---
 
-## Connection Pool Architecture
+## Connection pool architecture
 
 ```
 ┌─────────────────────────────────────────────────────────┐
@@ -176,7 +176,7 @@ pub enum IpVersion {
 └─────────────────────────────────────────────────────────┘
 ```
 
-### Connection Lifecycle
+### Connection lifecycle
 
 ```
                   ┌─────────┐
@@ -207,7 +207,7 @@ pub enum IpVersion {
 
 ---
 
-## Connection Selection Algorithm
+## Connection selection algorithm
 
 When a download task needs a connection, the pool selects one using this strategy:
 
@@ -233,7 +233,7 @@ fn select_connection(pool, article, want_server) -> Option<Connection>:
     return None  // all servers exhausted, article failed
 ```
 
-### Server Levels and Groups
+### Server levels and groups
 
 - **Level 0** — Primary servers, tried first for every article.
 - **Level 1+** — Fill/backup servers, tried only after all lower levels fail.
@@ -244,7 +244,7 @@ fn select_connection(pool, article, want_server) -> Option<Connection>:
 
 ---
 
-## Article Download Flow
+## Article download flow
 
 Each article download runs as an async task:
 
@@ -295,7 +295,7 @@ Each article download runs as an async task:
 
 ---
 
-## Retry Strategy
+## Retry strategy
 
 ```
                     ┌─────────────┐
@@ -328,7 +328,7 @@ Each article download runs as an async task:
 
 ---
 
-## Speed Limiting
+## Speed limiting
 
 When `DownloadRate` is configured (bytes/sec), the engine throttles across all
 connections using a token bucket:
@@ -376,7 +376,7 @@ impl SpeedLimiter {
 
 ---
 
-## Quota Management
+## Quota management
 
 Monthly and daily download quotas prevent exceeding ISP or provider limits:
 
@@ -589,7 +589,7 @@ impl NntpConnection {
 
 ---
 
-## TLS Support (rustls)
+## TLS support (rustls)
 
 TLS connections use `tokio-rustls` with `rustls` as the backend (no OpenSSL dependency):
 

@@ -1,6 +1,6 @@
 # bergamot Implementation Plan
 
-## Current State (Post-TDD Audit)
+## Current state (post-TDD audit)
 
 14 workspace crates with real implementations and comprehensive tests. The binary
 entrypoint, config loading, tracing, CLI parsing, daemon mode, web server,
@@ -9,7 +9,7 @@ in `app.rs`. However, an end-to-end audit reveals that **many components only
 work to the extent needed to pass their tests** — the actual runtime cannot
 download anything yet.
 
-### What Works
+### What works
 
 - **Binary entrypoint + wiring** — config → tracing → spawn coordinator/server/scheduler → graceful shutdown ✅
 - **CLI parsing** — config path, log level, daemon mode, pidfile ✅
@@ -34,7 +34,7 @@ download anything yet.
 - **Article cache** — bounded LRU cache with eviction ✅
 - **Daemon mode / pidfile** — double-fork daemonize, pidfile create/cleanup ✅
 
-### Critical Gap: Nothing Actually Downloads
+### Critical gap: nothing actually downloads
 
 The **#1 blocker** is that `QueueCommand::AddNzb` in `coordinator.rs` creates an
 `NzbInfo` with `files: Vec::new()`. The NZB file content is never read or parsed.
@@ -44,7 +44,7 @@ produced and the download worker sits idle.
 
 ---
 
-## Phase 1 — Make Downloads Work (Critical Path)
+## Phase 1 — Make downloads work (critical path)
 
 These items must be completed in order for the application to function as a
 downloader at all.
@@ -59,7 +59,7 @@ downloader at all.
 
 ---
 
-## Phase 2 — Post-Processing Integration ✅
+## Phase 2 — Post-processing integration ✅
 
 | # | Gap | Status |
 |---|-----|--------|
@@ -71,7 +71,7 @@ downloader at all.
 
 ---
 
-## Phase 3 — RPC Completeness ✅
+## Phase 3 — RPC completeness ✅
 
 | # | RPC Method | Status |
 |---|------------|--------|
@@ -93,7 +93,7 @@ downloader at all.
 
 ---
 
-## Phase 4 — Feed & Scheduler Integration ✅
+## Phase 4 — Feed & scheduler integration ✅
 
 | # | Gap | Status |
 |---|-----|--------|
@@ -107,7 +107,7 @@ downloader at all.
 
 ---
 
-## Phase 5 — Server & Auth Hardening ✅
+## Phase 5 — Server & auth hardening ✅
 
 | # | Gap | Status |
 |---|-----|--------|
@@ -119,7 +119,7 @@ downloader at all.
 
 ---
 
-## Phase 6 — Operational Completeness ✅
+## Phase 6 — Operational completeness ✅
 
 | # | Gap | Status |
 |---|-----|--------|
@@ -135,7 +135,7 @@ downloader at all.
 
 ---
 
-## Previously Completed ✅
+## Previously completed ✅
 
 | Item | Status |
 |------|--------|
@@ -156,7 +156,7 @@ downloader at all.
 
 ---
 
-## Key Design Guardrails
+## Key design guardrails
 
 - **State ownership**: Keep the coordinator as the single owner of mutable queue
   state (actor model). Don't leak `Arc<Mutex<QueueState>>` everywhere.
@@ -170,7 +170,7 @@ downloader at all.
 - **Filesystem correctness**: Atomic renames, temp suffixes, pre-allocation
   strategy, cross-device moves.
 
-## Recommended Priority
+## Recommended priority
 
 1. **Phase 1** (NZB ingestion + download lifecycle) — without this, the app does nothing useful
 2. **Phase 2** (Post-processing) — without this, downloaded files are raw segments

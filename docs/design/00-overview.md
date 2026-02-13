@@ -1,6 +1,6 @@
 # 00 — Architecture Overview
 
-## What Is bergamot?
+## What is bergamot?
 
 **bergamot** is a ground-up Rust reimplementation of
 [NZBGet](https://nzbget.com), the efficient Usenet binary downloader
@@ -18,7 +18,7 @@ guarantees.
 
 ---
 
-## High-Level Architecture
+## High-level architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -82,7 +82,7 @@ guarantees.
 
 ---
 
-## Document Index
+## Document index
 
 ### Design
 
@@ -128,11 +128,11 @@ guarantees.
 
 ---
 
-## Key Design Principles
+## Key design principles
 
 These principles are inherited from NZBGet and carry forward into bergamot.
 
-### Performance First
+### Performance first
 
 NZBGet was designed to saturate gigabit (and faster) links on hardware
 as modest as a Raspberry Pi. bergamot must match that bar. Hot paths —
@@ -150,7 +150,7 @@ Downloads can take hours or days. The system must survive:
 - corrupted articles (PAR2 repair, per-article CRC checks),
 - partial downloads (resume from exact byte position).
 
-### Low Resource Usage
+### Low resource usage
 
 Memory and CPU budgets must remain predictable. The article cache is
 bounded. Decoded segments are flushed to disk promptly. Connection
@@ -177,9 +177,9 @@ bergamot aims for drop-in compatibility with NZBGet's:
 
 ---
 
-## Rust-Specific Goals
+## Rust-specific goals
 
-### Memory Safety Without GC
+### Memory safety without GC
 
 Rust's ownership and borrowing system eliminates use-after-free, double
 free, and data races at compile time. This replaces NZBGet's manual
@@ -193,7 +193,7 @@ the Tokio async runtime. This replaces NZBGet's thread-per-connection
 model with a small pool of OS threads multiplexing thousands of
 futures, reducing context-switch overhead and memory footprint.
 
-### Fearless Concurrency
+### Fearless concurrency
 
 Shared mutable state is managed through message-passing (tokio
 channels, actor-style coordinators) rather than bare mutexes wherever
@@ -201,13 +201,13 @@ practical. Where shared state is unavoidable, `Arc<RwLock<_>>` or
 lock-free structures are used with clear ownership boundaries
 documented per module.
 
-### Modern API Surface
+### Modern API surface
 
 While maintaining backward-compatible JSON-RPC, bergamot also exposes a
 clean REST/JSON API suitable for modern front-end frameworks and
 OpenAPI documentation.
 
-### Modular Crate Structure
+### Modular crate structure
 
 The project is organised as a Cargo workspace with focused crates:
 

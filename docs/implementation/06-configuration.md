@@ -1,10 +1,10 @@
-# Configuration System
+# Configuration system
 
-bergamot uses an INI-style configuration file compatible with nzbget's `nzbget.conf` format. The configuration controls every aspect of the application: paths, security, news servers, categories, download behavior, post-processing, and logging.
+bergamot uses an INI-style configuration file compatible with nzbget's `nzbget.conf` format. The configuration controls every aspect of the application: paths, security, news servers, categories, download behaviour, post-processing, and logging.
 
-## Config File Format
+## Config file format
 
-### Basic Syntax
+### Basic syntax
 
 ```ini
 # This is a comment
@@ -17,7 +17,7 @@ TempDir=${MainDir}/tmp
 
 Lines starting with `#` are comments. Options use `Key=Value` syntax with no spaces around the `=`. Values are trimmed of leading/trailing whitespace.
 
-### Variable Interpolation
+### Variable interpolation
 
 Values may reference other options using `${OptionName}` syntax. The tilde character `~` in paths expands to the user's home directory.
 
@@ -32,7 +32,7 @@ LogFile=${DestDir}/bergamot.log
 
 Interpolation is resolved at load time in a single pass. Forward references (referencing an option defined later in the file) resolve against defaults or previously loaded values.
 
-### Numbered Sections
+### Numbered sections
 
 Servers, categories, RSS feeds, and scheduled tasks use numbered option groups rather than INI section headers:
 
@@ -77,9 +77,9 @@ Feed1.Filter=size:>100MB
 
 Numbers must be sequential starting from 1. Gaps are not permitted.
 
-## Configuration Options Reference
+## Configuration options reference
 
-### System / Paths
+### System / paths
 
 | Option | Default | Description |
 |--------|---------|-------------|
@@ -118,7 +118,7 @@ Numbers must be sequential starting from 1. Gaps are not permitted.
 | `DaemonUsername` | `root` | System user to run as when started as root (drops privileges). |
 | `UMask` | `1000` | File creation mask (octal). `1000` means use the system default. |
 
-### News Servers (Numbered: `Server1.*`, `Server2.*`, ...)
+### News servers (numbered: `Server1.*`, `Server2.*`, ...)
 
 | Option | Default | Description |
 |--------|---------|-------------|
@@ -140,7 +140,7 @@ Numbers must be sequential starting from 1. Gaps are not permitted.
 | `CertVerification` | `no` | Verify the server's TLS certificate against the CA store. |
 | `Notes` | (empty) | Free-form notes about this server (not used by the application). |
 
-### Categories (Numbered: `Category1.*`, `Category2.*`, ...)
+### Categories (numbered: `Category1.*`, `Category2.*`, ...)
 
 | Option | Default | Description |
 |--------|---------|-------------|
@@ -192,7 +192,7 @@ Numbers must be sequential starting from 1. Gaps are not permitted.
 | `QuotaStartDay` | `1` | Day of month when the monthly quota resets (1–31). |
 | `DailyQuota` | `0` | Daily download quota in GB. `0` means unlimited. |
 
-### PAR2 / Verification
+### PAR2 / verification
 
 | Option | Default | Description |
 |--------|---------|-------------|
@@ -242,7 +242,7 @@ Numbers must be sequential starting from 1. Gaps are not permitted.
 
 ## Implementation
 
-### Config Struct
+### Config struct
 
 ```rust
 use std::collections::HashMap;
@@ -326,7 +326,7 @@ pub struct CategoryConfig {
 }
 ```
 
-### Parsing and Variable Interpolation
+### Parsing and variable interpolation
 
 ```rust
 use std::collections::HashMap;
@@ -386,7 +386,7 @@ fn interpolate(
 }
 ```
 
-### Extracting Numbered Sections
+### Extracting numbered sections
 
 ```rust
 fn extract_servers(raw: &HashMap<String, String>) -> Vec<ServerConfig> {
@@ -450,7 +450,7 @@ fn parse_bool(value: Option<&String>, default: bool) -> bool {
 }
 ```
 
-### Runtime Config Changes via API
+### Runtime config changes via API
 
 The JSON-RPC/XML-RPC API supports modifying configuration at runtime:
 
@@ -517,7 +517,7 @@ impl Config {
 }
 ```
 
-### Error Types
+### Error types
 
 ```rust
 #[derive(Debug, thiserror::Error)]

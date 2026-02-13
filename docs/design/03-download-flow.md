@@ -1,10 +1,10 @@
-# End-to-End Download Flow
+# End-to-end download flow
 
 This document traces the complete lifecycle of a download from NZB acquisition through to final placement in history. Each stage describes the data transformations, error paths, and the Rust components involved.
 
 ---
 
-## Flow Overview
+## Flow overview
 
 ```
  ┌─────────────────────────────────────────────────────────────────┐
@@ -47,7 +47,7 @@ This document traces the complete lifecycle of a download from NZB acquisition t
 
 ---
 
-## Stage 1: NZB Acquisition
+## Stage 1: NZB acquisition
 
 NZB files enter bergamot through five paths, all converging on the same parsing pipeline:
 
@@ -59,11 +59,11 @@ NZB files enter bergamot through five paths, all converging on the same parsing 
 | **RSS feed** | Feed coordinator polls RSS/Atom feeds | `FeedCoordinator` scheduler | Matching items have their NZB URLs fetched automatically |
 | **API append** | Raw XML submitted via JSON-RPC/XML-RPC | `append` RPC method | Used by Sonarr, Radarr, NZBHydra |
 
-### Gzip Handling
+### Gzip handling
 
 `.nzb.gz` files are detected by checking for gzip magic bytes (`1f 8b`) and transparently decompressed via `flate2::read::GzDecoder`.
 
-### Error Paths
+### Error paths
 
 | Error | Recovery |
 |-------|----------|
@@ -73,11 +73,11 @@ NZB files enter bergamot through five paths, all converging on the same parsing 
 
 ---
 
-## Stage 2: NZB Parsing
+## Stage 2: NZB parsing
 
 The raw XML bytes are parsed into an `NzbInfo` structure by `bergamot-nzb` using `quick-xml`'s streaming pull parser.
 
-### Processing Steps
+### Processing steps
 
 1. **XML parsing** — streaming state machine processes `<nzb>`, `<head>`, `<meta>`, `<file>`, `<groups>`, `<segments>` elements without building a DOM.
 2. **Metadata extraction** — `<meta>` elements populate `NzbMeta` (title, password, category, tags).
@@ -90,7 +90,7 @@ The raw XML bytes are parsed into an `NzbInfo` structure by `bergamot-nzb` using
 9. **Hash computation** — `content_hash` (sorted message-IDs) and `name_hash` (sorted filenames) for duplicate detection.
 10. **File reordering** (if `ReorderFiles` enabled) — content files first, then main PAR2, then repair volumes sorted by block count ascending.
 
-### Error Paths
+### Error paths
 
 | Error | Recovery |
 |-------|----------|
@@ -101,7 +101,7 @@ The raw XML bytes are parsed into an `NzbInfo` structure by `bergamot-nzb` using
 
 ---
 
-## Stage 3: Queue Addition
+## Stage 3: Queue addition
 
 The parsed `NzbInfo` is added to the `DownloadQueue` via a `QueueCommand::AddNzb` message to the coordinator.
 
@@ -115,7 +115,7 @@ The parsed `NzbInfo` is added to the `DownloadQueue` via a `QueueCommand::AddNzb
 6. **ID assignment** — unique monotonic IDs for the NZB and each file.
 7. **Disk state save** — queue snapshot written atomically (write to `.tmp`, then rename).
 
-### Error Paths
+### Error paths
 
 | Error | Recovery |
 |-------|----------|
@@ -124,11 +124,11 @@ The parsed `NzbInfo` is added to the `DownloadQueue` via a `QueueCommand::AddNzb
 
 ---
 
-## Stage 4: Article Scheduling
+## Stage 4: Article scheduling
 
 The coordinator's main loop fills download slots by selecting the next eligible article.
 
-### Selection Algorithm
+### Selection algorithm
 
 ```
 for each NZB (sorted by priority descending, Force first):
@@ -141,7 +141,7 @@ for each NZB (sorted by priority descending, Force first):
                 return this segment
 ```
 
-### File Type Priority Order
+### File type priority order
 
 | Priority | File Type | Rationale |
 |----------|-----------|-----------|
@@ -149,7 +149,7 @@ for each NZB (sorted by priority descending, Force first):
 | 1 | Data files (content) | The actual desired content |
 | 2 (last) | PAR2 repair volumes | Downloaded on-demand only when needed |
 
-### Connection Assignment
+### Connection assignment
 
 Once an article is selected, the coordinator acquires a connection from the server pool:
 
@@ -159,7 +159,7 @@ Once an article is selected, the coordinator acquires a connection from the serv
 4. If no level-0 server can serve the article, try level 1 (fill/backup), then level 2, etc.
 5. If no connection is available across all servers, the article waits.
 
-### Error Paths
+### Error paths
 
 | Error | Recovery |
 |-------|----------|
@@ -169,11 +169,11 @@ Once an article is selected, the coordinator acquires a connection from the serv
 
 ---
 
-## Stage 5: NNTP Download
+## Stage 5: NNTP download
 
 Each article download runs as an independent tokio task with a checked-out connection.
 
-### Protocol Sequence
+### Protocol sequence
 
 ```
 C: (TCP connect + optional TLS handshake)
@@ -195,11 +195,11 @@ S: .
 
 The body is streamed line-by-line to the yEnc decoder — the full article body is never buffered in memory.
 
-### Group Caching
+### Group caching
 
 `NntpConnection` caches the current group. If the next article is in the same group, the `GROUP` command is skipped, saving a round-trip.
 
-### Error Paths
+### Error paths
 
 | Error | Response Code | Recovery |
 |-------|---------------|----------|
@@ -210,17 +210,17 @@ The body is streamed line-by-line to the yEnc decoder — the full article body 
 | Connection dropped | — | Return connection to pool as broken; acquire new connection, retry |
 | Server quota exceeded | — | Block server for configured backoff period |
 
-### Server Failover
+### Server failover
 
 When an article fails on one server, it is marked as failed for that specific server and returned to `Undefined` status. The scheduler will assign it to the next eligible server (same or higher level). The article only permanently fails when all servers at all levels have been tried.
 
 ---
 
-## Stage 6: yEnc Decoding
+## Stage 6: yEnc decoding
 
 As body lines stream in from the NNTP connection, the `YencDecoder` processes them through a state machine:
 
-### State Machine
+### State machine
 
 ```
 WaitingForHeader ──[=ybegin]──► WaitingForPart (if multi-part)
@@ -238,11 +238,11 @@ DecodingBody ──[=yend]──► Finished (verify CRC, emit DecodedSegment)
 
 Each data byte is decoded by subtracting 42 (mod 256). Escape sequences (`=` followed by a byte) subtract 106 (42 + 64). Line terminators (`\r`, `\n`) are skipped.
 
-### CRC32 Verification
+### CRC32 verification
 
 A `crc32fast::Hasher` computes a running CRC32 of decoded bytes. On `=yend`, the computed CRC is compared against the `pcrc32` header value. Hardware-accelerated CRC32 instructions (SSE4.2 on x86_64, CRC32 on ARMv8) are used automatically.
 
-### Error Paths
+### Error paths
 
 | Error | Recovery |
 |-------|----------|
@@ -253,11 +253,11 @@ A `crc32fast::Hasher` computes a running CRC32 of decoded bytes. On `=yend`, the
 
 ---
 
-## Stage 7: Article Writing
+## Stage 7: Article writing
 
 After successful decoding, the `DecodedSegment` (containing the decoded bytes, byte range, and CRC) must be written to disk.
 
-### Direct Write Mode
+### Direct write mode
 
 The segment is written directly to the output file at its correct byte offset. The output file is pre-allocated to the full file size using `fallocate`/`ftruncate`:
 
@@ -274,11 +274,11 @@ Output file (pre-allocated to file_size bytes):
 
 Segments can arrive out of order — each is written at its `begin - 1` offset (yEnc uses 1-indexed offsets).
 
-### Cache Mode
+### Cache mode
 
 An in-memory `ArticleCache` holds decoded segments before flushing to disk. This batches writes and reduces random I/O when segments arrive out of order. The cache is bounded by `ArticleCacheSize` (configurable in bytes). When the cache exceeds its limit, the largest file's segments are evicted and flushed.
 
-### Error Paths
+### Error paths
 
 | Error | Recovery |
 |-------|----------|
@@ -288,7 +288,7 @@ An in-memory `ArticleCache` holds decoded segments before flushing to disk. This
 
 ---
 
-## Stage 8: File Completion
+## Stage 8: File completion
 
 When all segments for a file have a terminal status (`Completed` or `Failed`), the coordinator finalizes the file.
 
@@ -301,7 +301,7 @@ When all segments for a file have a terminal status (`Completed` or `Failed`), t
 5. **Update NZB counters** — `remaining_file_count`, `success_size`, `failed_size` are updated.
 6. **Health recalculation** — the NZB's health is recomputed. If health drops below `critical_health`, the configured `HealthCheck` action is taken (Park, Delete, or None).
 
-### Error Paths
+### Error paths
 
 | Error | Recovery |
 |-------|----------|
@@ -311,7 +311,7 @@ When all segments for a file have a terminal status (`Completed` or `Failed`), t
 
 ---
 
-## Stage 9: NZB Completion
+## Stage 9: NZB completion
 
 When all files in an NZB have been completed (successfully or not), the coordinator triggers post-processing.
 
@@ -322,11 +322,11 @@ When all files in an NZB have been completed (successfully or not), the coordina
 3. **Post-processing request** — a `PostProcessRequest` is sent to the `PostProcessor` via its `mpsc` channel, containing the NZB ID, name, working directory, category, parameters, and accumulated status.
 4. **Download stats finalization** — download time, total bytes, article success/failure counts are recorded.
 
-### PAR2 Volume On-Demand Download
+### PAR2 volume on-demand download
 
 If file completion reveals damage (failed articles, CRC mismatches), and PAR2 repair volumes are paused in the queue, the coordinator may unpause enough repair volumes to cover the needed blocks before triggering post-processing. This is determined by comparing damaged blocks against available recovery blocks.
 
-### Error Paths
+### Error paths
 
 | Error | Recovery |
 |-------|----------|
@@ -335,11 +335,11 @@ If file completion reveals damage (failed articles, CRC mismatches), and PAR2 re
 
 ---
 
-## Stage 10: Post-Processing
+## Stage 10: Post-processing
 
 The `PostProcessor` runs as its own tokio task, processing completed NZBs sequentially (or in parallel, depending on `PostStrategy`).
 
-### Pipeline Stages
+### Pipeline stages
 
 ```
 PAR2 Rename ──► PAR2 Verify ──► PAR2 Repair (if needed)
@@ -348,17 +348,17 @@ PAR2 Rename ──► PAR2 Verify ──► PAR2 Repair (if needed)
                                RAR Rename ──► Unpack ──► Cleanup ──► Move ──► Extensions
 ```
 
-#### 10a: PAR2 Rename
+#### 10a: PAR2 rename
 
 Obfuscated files are renamed to their original names by matching MD5 hashes against PAR2 metadata. This must happen before verification so that PAR2 can find the files it expects.
 
-#### 10b: PAR2 Verify
+#### 10b: PAR2 verify
 
 **Quick verify**: compare stored article CRCs against PAR2 block checksums — no disk reads needed if CRCs were captured during download.
 
 **Full verify** (if quick verify inconclusive): read each file from disk, compute MD5 per block, compare against PAR2 metadata.
 
-#### 10c: PAR2 Repair
+#### 10c: PAR2 repair
 
 If verification found damaged or missing blocks:
 
@@ -369,7 +369,7 @@ If verification found damaged or missing blocks:
 
 If insufficient recovery blocks are available, PAR2 repair fails.
 
-#### 10d: RAR Rename
+#### 10d: RAR rename
 
 After PAR2 rename (which handles data files), obfuscated RAR archives are identified by reading RAR magic bytes and internal headers, then renamed.
 
@@ -389,16 +389,16 @@ Move files from `InterDir` (temp directory) to `DestDir` (final destination). Ca
 
 Run user-defined post-processing scripts (Python, Bash, etc.) with nzbget-compatible environment variables (`NZBOP_*`, `NZBNA_*`, `NZBPR_*`).
 
-### Post-Processing Strategies
+### Post-processing strategies
 
-| Strategy | Behavior |
-|----------|----------|
+| Strategy | Behaviour |
+|----------|-----------|
 | `Sequential` | One job at a time; downloads pause during PAR2 repair |
 | `Balanced` | One job at a time; downloads continue during repair |
 | `Rocket` | Multiple jobs in parallel; downloads continue |
 | `Aggressive` | Like Rocket; also starts unpacking during download (direct unpack) |
 
-### Error Paths
+### Error paths
 
 | Stage | Error | Recovery |
 |-------|-------|----------|
@@ -416,7 +416,7 @@ Run user-defined post-processing scripts (Python, Bash, etc.) with nzbget-compat
 
 After post-processing completes (or after deletion/failure), the NZB is moved from the download queue to history.
 
-### History Entry Creation
+### History entry creation
 
 A `HistoryEntry` is created from the NZB state and post-processing results:
 
@@ -426,7 +426,7 @@ A `HistoryEntry` is created from the NZB state and post-processing results:
 - **`MoveStatus`** — `None`, `Success`, `Failure`.
 - **Script statuses** — per-extension exit codes.
 
-### Timing and Statistics
+### Timing and statistics
 
 The history entry records:
 
@@ -436,7 +436,7 @@ The history entry records:
 - File count, article count, failed article count
 - Final health value
 
-### Retention Management
+### Retention management
 
 The `KeepHistory` config option controls retention:
 
@@ -447,7 +447,7 @@ The `KeepHistory` config option controls retention:
 
 Purging runs after each new entry is added and periodically.
 
-### History Operations (API)
+### History operations (API)
 
 | Operation | Description |
 |-----------|-------------|
@@ -460,7 +460,7 @@ Purging runs after each new entry is added and periodically.
 
 ---
 
-## Concurrency Model
+## Concurrency model
 
 Multiple NZBs, files, and articles are processed simultaneously across all stages:
 
@@ -491,7 +491,7 @@ Multiple NZBs, files, and articles are processed simultaneously across all stage
     └──────────────────┘                    └──────────────────┘
 ```
 
-### Concurrency Boundaries
+### Concurrency boundaries
 
 | Resource | Concurrency Limit | Configured By |
 |----------|-------------------|---------------|
@@ -501,7 +501,7 @@ Multiple NZBs, files, and articles are processed simultaneously across all stage
 | Post-processing jobs | 1 (Sequential/Balanced) or N (Rocket/Aggressive) | `PostStrategy` |
 | Feed polling | Sequential per feed, periodic interval | `FeedInterval` |
 
-### Data Flow Between Stages
+### Data flow between stages
 
 | From | To | Mechanism |
 |------|-----|-----------|

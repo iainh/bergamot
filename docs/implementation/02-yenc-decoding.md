@@ -1,6 +1,6 @@
-# yEnc Decoding & Article Assembly
+# yEnc decoding & article assembly
 
-## yEnc Format Overview
+## yEnc format overview
 
 yEnc is the standard binary encoding used on Usenet. Each byte of the original
 binary data is encoded by adding 42 (mod 256) to produce a printable character.
@@ -10,9 +10,9 @@ A small set of "critical" bytes that would break NNTP framing are escaped with a
 Decoding is the reverse: subtract 42 from each character, handling escape
 sequences by subtracting 106 (42 + 64) from the byte following `=`.
 
-## Message Structure
+## Message structure
 
-### Single-Part Article
+### Single-part article
 
 ```
 =ybegin line=128 size=123456 name=example.bin
@@ -20,7 +20,7 @@ sequences by subtracting 106 (42 + 64) from the byte following `=`.
 =yend size=123456 crc32=ABCD1234
 ```
 
-### Multi-Part Article
+### Multi-part article
 
 ```
 =ybegin part=1 line=128 size=123456 name=example.bin
@@ -32,7 +32,7 @@ sequences by subtracting 106 (42 + 64) from the byte following `=`.
 The `=ypart` header specifies the byte range within the original file that this
 segment covers. `begin` is 1-indexed.
 
-## Header Fields
+## Header fields
 
 | Field   | Header    | Description                                      |
 |---------|-----------|--------------------------------------------------|
@@ -45,7 +45,7 @@ segment covers. `begin` is 1-indexed.
 | `pcrc32`| `=yend`   | CRC32 of this part's decoded data                |
 | `crc32` | `=yend`   | CRC32 of the entire file (often only on last part)|
 
-## Core Decode Algorithm
+## Core decode algorithm
 
 ```rust
 /// Decode a single yEnc-encoded line into `output`.
@@ -78,7 +78,7 @@ fn decode_yenc_line(line: &[u8], output: &mut Vec<u8>) -> usize {
 }
 ```
 
-## Escaped Characters
+## Escaped characters
 
 | Original Byte | Value | Encoded As | Reason                        |
 |---------------|-------|------------|-------------------------------|
@@ -90,7 +90,7 @@ fn decode_yenc_line(line: &[u8], output: &mut Vec<u8>) -> usize {
 
 Each escaped form is computed as `= (original + 42 + 64) mod 256`.
 
-## Streaming Decoder Design
+## Streaming decoder design
 
 The decoder processes article data line-by-line as it arrives from the NNTP
 connection, avoiding the need to buffer the entire article in memory.
@@ -176,7 +176,7 @@ impl YencDecoder {
 }
 ```
 
-## CRC32 Validation
+## CRC32 validation
 
 Validation happens at two levels using `crc32fast`:
 
@@ -232,9 +232,9 @@ pub enum CrcLevel {
 }
 ```
 
-## Article Writing Strategies
+## Article writing strategies
 
-### Direct Write Mode
+### Direct write mode
 
 Each decoded segment is written directly to the target output file at its
 correct byte offset. The output file is pre-allocated to `file_size` bytes.
@@ -254,13 +254,13 @@ fn write_segment_direct(
 }
 ```
 
-### Temporary File Mode
+### Temporary file mode
 
 Segments are written to a temporary file (e.g., `filename.bergamot.tmp`) and
 renamed to the final name only after all parts have been received and verified.
 This prevents incomplete files from appearing in the output directory.
 
-## Article Cache
+## Article cache
 
 An in-memory cache holds decoded segments before they are flushed to disk. This
 allows batching writes and reduces random I/O when segments arrive out of order.
@@ -338,7 +338,7 @@ impl ArticleCache {
 }
 ```
 
-## File Completion
+## File completion
 
 When all articles for a file have been downloaded and decoded:
 
@@ -381,7 +381,7 @@ fn complete_file(
 }
 ```
 
-## Performance Considerations
+## Performance considerations
 
 | Technique              | Benefit                                                   |
 |------------------------|-----------------------------------------------------------|

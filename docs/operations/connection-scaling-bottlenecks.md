@@ -1,8 +1,8 @@
-# Connection Scaling Bottlenecks
+# Connection scaling bottlenecks
 
 When increasing the connection count for both servers from 15 to 50 (100 total), overall download speed drops. This document captures the identified bottlenecks and recommended fixes.
 
-## Root Causes
+## Root causes
 
 ### 1. `try_acquire_owned()` fails instantly when busy (Critical)
 
@@ -71,7 +71,7 @@ Per server, every fetch touches:
 
 With 100 concurrent tasks these small locks become noticeably contended, especially the idle pool `Vec` lock.
 
-## Recommended Fixes (by priority)
+## Recommended fixes (by priority)
 
 ### 1. Fix ServerPool permit acquisition to wait instead of failing
 

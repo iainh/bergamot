@@ -1,4 +1,4 @@
-# Queue Coordinator
+# Queue coordinator
 
 The Queue Coordinator is the central orchestrator of bergamot. It owns the download
 queue, schedules articles to download connections, tracks progress, detects
@@ -50,7 +50,7 @@ file/NZB completion, and enforces speed and quota limits.
                  └─────────────────────────────┘
 ```
 
-## Actor Model Design
+## Actor model design
 
 The coordinator runs as a single long-lived tokio task. External components
 communicate with it via a command channel (MPSC). Download tasks report back
@@ -120,7 +120,7 @@ pub enum QueueCommand {
 }
 ```
 
-## Main Loop
+## Main loop
 
 The coordinator uses `tokio::select!` to multiplex three event sources:
 
@@ -154,7 +154,7 @@ impl QueueCoordinator {
 The periodic timer ensures download slots are filled even when no completions
 or commands arrive (e.g., after un-pausing).
 
-## Article Selection Algorithm
+## Article selection algorithm
 
 When filling download slots, the coordinator walks the queue in priority order
 and picks the first eligible article:
@@ -186,7 +186,7 @@ impl QueueCoordinator {
 }
 ```
 
-## Priority Ordering
+## Priority ordering
 
 Articles are selected according to a multi-level priority scheme:
 
@@ -219,7 +219,7 @@ pub enum FileTypePriority {
 }
 ```
 
-## Download Slot Management
+## Download slot management
 
 ```rust
 impl QueueCoordinator {
@@ -269,7 +269,7 @@ impl QueueCoordinator {
 }
 ```
 
-## Completion Handling
+## Completion handling
 
 ```rust
 pub struct DownloadCompletion {
@@ -341,7 +341,7 @@ impl QueueCoordinator {
 }
 ```
 
-## File & NZB Completion Detection
+## File & NZB completion detection
 
 ```rust
 impl QueueCoordinator {
@@ -376,7 +376,7 @@ impl QueueCoordinator {
 }
 ```
 
-## Health Monitoring
+## Health monitoring
 
 Health is tracked as a permille value (0–1000) representing the ratio of
 successfully downloaded articles to total articles.
@@ -415,9 +415,9 @@ impl DownloadQueue {
 }
 ```
 
-### HealthCheck Modes
+### HealthCheck modes
 
-| Mode     | Behavior                                                              |
+| Mode     | Behaviour                                                             |
 |----------|-----------------------------------------------------------------------|
 | `Park`   | Pause the NZB when health drops below critical; wait for manual action.|
 | `Delete` | Automatically delete the NZB and its files when health is critical.   |
@@ -432,7 +432,7 @@ pub enum HealthCheck {
 }
 ```
 
-## Queue Edit Operations
+## Queue edit operations
 
 Batch editing allows the API layer to apply operations to one or more NZBs in a
 single command:
@@ -472,7 +472,7 @@ pub enum DupeMode {
 }
 ```
 
-## State Persistence
+## State persistence
 
 The queue state is persisted to disk so that downloads survive restarts.
 
