@@ -84,24 +84,47 @@ guarantees.
 
 ## Document Index
 
-| #  | File                                          | Topic                                         |
-|----|-----------------------------------------------|-----------------------------------------------|
-| 00 | `design/00-overview.md`                       | Architecture overview (this document)          |
-| 01 | `design/01-core-data-structures.md`           | Core data structures & ownership model         |
-| 02 | `implementation/02-nzb-parsing.md`            | NZB file parsing                               |
-| 03 | `implementation/03-nntp-engine.md`            | NNTP connection engine & article downloading   |
-| 04 | `implementation/04-yenc-decoding.md`          | yEnc decoding & CRC verification               |
-| 05 | `implementation/05-queue-coordinator.md`      | Queue coordinator & download orchestration     |
-| 06 | `implementation/06-post-processing.md`        | Post-processing: PAR2, unpack, scripts         |
-| 07 | `implementation/07-web-server-api.md`         | Web server, JSON-RPC / XML-RPC API             |
-| 08 | `implementation/08-configuration.md`          | Configuration system                           |
-| 09 | `implementation/09-scheduler-services.md`     | Scheduler & background services                |
-| 10 | `implementation/10-feed-system.md`            | RSS / Atom feed system                         |
-| 11 | `implementation/11-extension-system.md`       | Extension / script system                      |
-| 12 | `implementation/12-disk-state.md`             | Disk state persistence & recovery              |
-| 13 | `implementation/13-logging-history.md`        | Logging, message buffer, history tracking      |
-| 14 | `design/14-rust-architecture.md`              | Rust crate structure & cross-cutting concerns  |
-| 15 | `design/15-download-flow.md`                  | End-to-end download flow walkthrough           |
+### Design
+
+| File                                          | Topic                                         |
+|-----------------------------------------------|-----------------------------------------------|
+| `design/00-overview.md`                       | Architecture overview (this document)          |
+| `design/01-core-data-structures.md`           | Core data structures & ownership model         |
+| `design/02-rust-architecture.md`              | Rust crate structure & cross-cutting concerns  |
+| `design/03-download-flow.md`                  | End-to-end download flow walkthrough           |
+
+### Implementation
+
+| File                                          | Topic                                         |
+|-----------------------------------------------|-----------------------------------------------|
+| `implementation/00-nzb-parsing.md`            | NZB file parsing                               |
+| `implementation/01-nntp-engine.md`            | NNTP connection engine & article downloading   |
+| `implementation/02-yenc-decoding.md`          | yEnc decoding & CRC verification               |
+| `implementation/03-queue-coordinator.md`      | Queue coordinator & download orchestration     |
+| `implementation/04-post-processing.md`        | Post-processing: PAR2, unpack, scripts         |
+| `implementation/05-web-server-api.md`         | Web server, JSON-RPC / XML-RPC API             |
+| `implementation/06-configuration.md`          | Configuration system                           |
+| `implementation/07-scheduler-services.md`     | Scheduler & background services                |
+| `implementation/08-feed-system.md`            | RSS / Atom feed system                         |
+| `implementation/09-extension-system.md`       | Extension / script system                      |
+| `implementation/10-disk-state.md`             | Disk state persistence & recovery              |
+| `implementation/11-logging-history.md`        | Logging, message buffer, history tracking      |
+
+### Operations
+
+| File                                          | Topic                                         |
+|-----------------------------------------------|-----------------------------------------------|
+| `operations/connection-scaling-bottlenecks.md`| Connection scaling diagnosis & fixes           |
+| `operations/fully-async-improvements.md`      | Async I/O improvement catalog                  |
+| `operations/systemd/nzbg.service`             | systemd service unit file                      |
+
+### Planning
+
+| File                                          | Topic                                         |
+|-----------------------------------------------|-----------------------------------------------|
+| `planning/implementation-plan.md`             | Phased implementation plan & tracking          |
+| `planning/e2e-test-gaps.md`                   | E2E test coverage tracking                     |
+| `planning/production-readiness-gap-analysis.md`| Production readiness gap analysis             |
 
 ---
 
