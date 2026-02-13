@@ -21,7 +21,7 @@ pub struct JsonFormat;
 
 impl StateFormat for JsonFormat {
     fn serialize<T: Serialize>(&self, value: &T) -> anyhow::Result<Vec<u8>> {
-        Ok(serde_json::to_vec_pretty(value)?)
+        Ok(serde_json::to_vec(value)?)
     }
 
     fn deserialize<T: for<'de> Deserialize<'de>>(&self, data: &[u8]) -> anyhow::Result<T> {
