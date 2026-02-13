@@ -1938,4 +1938,1015 @@ mod tests {
 
         handle.shutdown().await.expect("shutdown");
     }
+
+    fn full_config_content() -> &'static str {
+        concat!(
+            "MainDir=/data\n",
+            "DestDir=/data/completed\n",
+            "InterDir=/data/intermediate\n",
+            "NzbDir=/data/nzb\n",
+            "QueueDir=/data/queue\n",
+            "TempDir=/data/tmp\n",
+            "ScriptDir=/data/scripts\n",
+            "Extensions=ext1, ext2\n",
+            "ScriptOrder=ext2, ext1\n",
+            "LogFile=/data/bergamot.log\n",
+            "ControlIP=127.0.0.1\n",
+            "ControlPort=6789\n",
+            "ControlUsername=admin\n",
+            "ControlPassword=secret\n",
+            "RestrictedUsername=viewer\n",
+            "RestrictedPassword=viewpass\n",
+            "AddUsername=adder\n",
+            "AddPassword=addpass\n",
+            "FormAuth=yes\n",
+            "SecureControl=no\n",
+            "SecurePort=6791\n",
+            "SecureCert=/path/cert.pem\n",
+            "SecureKey=/path/key.pem\n",
+            "CertCheck=no\n",
+            "Server1.Active=yes\n",
+            "Server1.Name=Primary\n",
+            "Server1.Level=0\n",
+            "Server1.Optional=no\n",
+            "Server1.Group=0\n",
+            "Server1.Host=news.example.com\n",
+            "Server1.Port=563\n",
+            "Server1.Username=user1\n",
+            "Server1.Password=pass1\n",
+            "Server1.JoinGroup=no\n",
+            "Server1.Encryption=yes\n",
+            "Server1.Cipher=AES256\n",
+            "Server1.Connections=8\n",
+            "Server1.Retention=1200\n",
+            "Server1.IpVersion=auto\n",
+            "Server1.Notes=primary server\n",
+            "Server1.CertVerification=strict\n",
+            "Server2.Active=no\n",
+            "Server2.Name=Backup\n",
+            "Server2.Level=1\n",
+            "Server2.Optional=yes\n",
+            "Server2.Group=1\n",
+            "Server2.Host=backup.example.com\n",
+            "Server2.Port=119\n",
+            "Server2.Username=user2\n",
+            "Server2.Password=pass2\n",
+            "Server2.JoinGroup=yes\n",
+            "Server2.Encryption=no\n",
+            "Server2.Cipher=\n",
+            "Server2.Connections=4\n",
+            "Server2.Retention=0\n",
+            "Server2.IpVersion=ipv4\n",
+            "Server2.Notes=\n",
+            "Server2.CertVerification=none\n",
+            "Category1.Name=Movies\n",
+            "Category1.DestDir=/data/movies\n",
+            "Category1.Unpack=yes\n",
+            "Category1.Extensions=ext1\n",
+            "Category1.Aliases=Films, Cinema\n",
+            "Category2.Name=TV\n",
+            "Category2.DestDir=/data/tv\n",
+            "Category2.Unpack=no\n",
+            "Category2.Extensions=\n",
+            "Category2.Aliases=Television, Series\n",
+            "AppendCategoryDir=yes\n",
+            "NzbDirInterval=5\n",
+            "DupeCheck=yes\n",
+            "ContinuePartial=yes\n",
+            "ArticleCache=256\n",
+            "DirectWrite=yes\n",
+            "WriteBuffer=0\n",
+            "DiskSpace=250\n",
+            "KeepHistory=30\n",
+            "DownloadRate=1000\n",
+            "ArticleRetries=3\n",
+            "ArticleInterval=10\n",
+            "ArticleTimeout=60\n",
+            "CrcCheck=yes\n",
+            "ParCheck=auto\n",
+            "ParRepair=yes\n",
+            "ParRename=yes\n",
+            "Unpack=yes\n",
+            "DirectUnpack=no\n",
+            "UnpackCleanupDisk=yes\n",
+            "UnrarCmd=unrar\n",
+            "SevenZipCmd=7z\n",
+            "WriteLog=append\n",
+            "RotateLog=3\n",
+            "InfoTarget=both\n",
+            "WarningTarget=both\n",
+            "ErrorTarget=both\n",
+            "DetailTarget=log\n",
+            "DebugTarget=none\n",
+            "SystemHealthCheck=yes\n",
+            "Task1.Time=08:00\n",
+            "Task1.WeekDays=1,2,3,4,5\n",
+            "Task1.Command=PauseDownload\n",
+            "Task1.Param=\n",
+            "Feed1.Name=MyFeed\n",
+            "Feed1.URL=https://indexer.example.com/rss\n",
+            "Feed1.Backlog=no\n",
+            "Feed1.PauseNzb=no\n",
+            "Feed1.Filter=size:>100MB\n",
+            "Feed1.Interval=15\n",
+            "Feed1.Category=TV\n",
+            "Feed1.Priority=50\n",
+            "Feed1.Extensions=ext1\n",
+        )
+    }
+
+    fn state_with_full_config() -> (AppState, tempfile::TempDir) {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let config_path = tmp.path().join("bergamot.conf");
+        std::fs::write(&config_path, full_config_content()).expect("write");
+        let raw = bergamot_config::parse_config(full_config_content()).expect("parse");
+        let config = bergamot_config::Config::from_raw(raw);
+        let config = std::sync::Arc::new(std::sync::RwLock::new(config));
+        let state = AppState::default().with_config(config, config_path);
+        (state, tmp)
+    }
+
+    fn find_entry<'a>(entries: &'a [serde_json::Value], name: &str) -> Option<&'a str> {
+        entries
+            .iter()
+            .find(|e| e["Name"].as_str() == Some(name))
+            .and_then(|e| e["Value"].as_str())
+    }
+
+    #[test]
+    fn config_loadconfig_returns_all_path_options() {
+        let (state, _tmp) = state_with_full_config();
+        let result = rpc_loadconfig(&state).expect("loadconfig");
+        let entries = result.as_array().expect("array");
+
+        assert_eq!(find_entry(entries, "MainDir"), Some("/data"));
+        assert_eq!(find_entry(entries, "DestDir"), Some("/data/completed"));
+        assert_eq!(find_entry(entries, "InterDir"), Some("/data/intermediate"));
+        assert_eq!(find_entry(entries, "NzbDir"), Some("/data/nzb"));
+        assert_eq!(find_entry(entries, "QueueDir"), Some("/data/queue"));
+        assert_eq!(find_entry(entries, "TempDir"), Some("/data/tmp"));
+        assert_eq!(find_entry(entries, "ScriptDir"), Some("/data/scripts"));
+        assert_eq!(find_entry(entries, "LogFile"), Some("/data/bergamot.log"));
+    }
+
+    #[test]
+    fn config_loadconfig_returns_all_security_options() {
+        let (state, _tmp) = state_with_full_config();
+        let result = rpc_loadconfig(&state).expect("loadconfig");
+        let entries = result.as_array().expect("array");
+
+        assert_eq!(find_entry(entries, "ControlIP"), Some("127.0.0.1"));
+        assert_eq!(find_entry(entries, "ControlPort"), Some("6789"));
+        assert_eq!(find_entry(entries, "ControlUsername"), Some("admin"));
+        assert_eq!(find_entry(entries, "ControlPassword"), Some("secret"));
+        assert_eq!(find_entry(entries, "RestrictedUsername"), Some("viewer"));
+        assert_eq!(find_entry(entries, "RestrictedPassword"), Some("viewpass"));
+        assert_eq!(find_entry(entries, "AddUsername"), Some("adder"));
+        assert_eq!(find_entry(entries, "AddPassword"), Some("addpass"));
+        assert_eq!(find_entry(entries, "FormAuth"), Some("yes"));
+        assert_eq!(find_entry(entries, "SecureControl"), Some("no"));
+        assert_eq!(find_entry(entries, "SecurePort"), Some("6791"));
+        assert_eq!(find_entry(entries, "SecureCert"), Some("/path/cert.pem"));
+        assert_eq!(find_entry(entries, "SecureKey"), Some("/path/key.pem"));
+        assert_eq!(find_entry(entries, "CertCheck"), Some("no"));
+    }
+
+    #[test]
+    fn config_loadconfig_returns_all_server_options() {
+        let (state, _tmp) = state_with_full_config();
+        let result = rpc_loadconfig(&state).expect("loadconfig");
+        let entries = result.as_array().expect("array");
+
+        assert_eq!(find_entry(entries, "Server1.Active"), Some("yes"));
+        assert_eq!(find_entry(entries, "Server1.Name"), Some("Primary"));
+        assert_eq!(find_entry(entries, "Server1.Level"), Some("0"));
+        assert_eq!(find_entry(entries, "Server1.Optional"), Some("no"));
+        assert_eq!(find_entry(entries, "Server1.Group"), Some("0"));
+        assert_eq!(find_entry(entries, "Server1.Host"), Some("news.example.com"));
+        assert_eq!(find_entry(entries, "Server1.Port"), Some("563"));
+        assert_eq!(find_entry(entries, "Server1.Username"), Some("user1"));
+        assert_eq!(find_entry(entries, "Server1.Password"), Some("pass1"));
+        assert_eq!(find_entry(entries, "Server1.JoinGroup"), Some("no"));
+        assert_eq!(find_entry(entries, "Server1.Encryption"), Some("yes"));
+        assert_eq!(find_entry(entries, "Server1.Cipher"), Some("AES256"));
+        assert_eq!(find_entry(entries, "Server1.Connections"), Some("8"));
+        assert_eq!(find_entry(entries, "Server1.Retention"), Some("1200"));
+        assert_eq!(find_entry(entries, "Server1.IpVersion"), Some("auto"));
+        assert_eq!(find_entry(entries, "Server1.Notes"), Some("primary server"));
+        assert_eq!(
+            find_entry(entries, "Server1.CertVerification"),
+            Some("strict")
+        );
+
+        assert_eq!(find_entry(entries, "Server2.Active"), Some("no"));
+        assert_eq!(find_entry(entries, "Server2.Name"), Some("Backup"));
+        assert_eq!(find_entry(entries, "Server2.Level"), Some("1"));
+        assert_eq!(find_entry(entries, "Server2.Optional"), Some("yes"));
+        assert_eq!(find_entry(entries, "Server2.Group"), Some("1"));
+        assert_eq!(find_entry(entries, "Server2.Host"), Some("backup.example.com"));
+        assert_eq!(find_entry(entries, "Server2.Port"), Some("119"));
+        assert_eq!(find_entry(entries, "Server2.Encryption"), Some("no"));
+        assert_eq!(find_entry(entries, "Server2.Connections"), Some("4"));
+        assert_eq!(find_entry(entries, "Server2.Retention"), Some("0"));
+        assert_eq!(find_entry(entries, "Server2.IpVersion"), Some("ipv4"));
+        assert_eq!(
+            find_entry(entries, "Server2.CertVerification"),
+            Some("none")
+        );
+    }
+
+    #[test]
+    fn config_loadconfig_returns_all_category_options() {
+        let (state, _tmp) = state_with_full_config();
+        let result = rpc_loadconfig(&state).expect("loadconfig");
+        let entries = result.as_array().expect("array");
+
+        assert_eq!(find_entry(entries, "Category1.Name"), Some("Movies"));
+        assert_eq!(find_entry(entries, "Category1.DestDir"), Some("/data/movies"));
+        assert_eq!(find_entry(entries, "Category1.Unpack"), Some("yes"));
+        assert_eq!(find_entry(entries, "Category1.Extensions"), Some("ext1"));
+        assert_eq!(
+            find_entry(entries, "Category1.Aliases"),
+            Some("Films, Cinema")
+        );
+        assert_eq!(find_entry(entries, "Category2.Name"), Some("TV"));
+        assert_eq!(find_entry(entries, "Category2.DestDir"), Some("/data/tv"));
+        assert_eq!(find_entry(entries, "Category2.Unpack"), Some("no"));
+        assert_eq!(
+            find_entry(entries, "Category2.Aliases"),
+            Some("Television, Series")
+        );
+    }
+
+    #[test]
+    fn config_loadconfig_returns_all_download_options() {
+        let (state, _tmp) = state_with_full_config();
+        let result = rpc_loadconfig(&state).expect("loadconfig");
+        let entries = result.as_array().expect("array");
+
+        assert_eq!(find_entry(entries, "AppendCategoryDir"), Some("yes"));
+        assert_eq!(find_entry(entries, "NzbDirInterval"), Some("5"));
+        assert_eq!(find_entry(entries, "DupeCheck"), Some("yes"));
+        assert_eq!(find_entry(entries, "ContinuePartial"), Some("yes"));
+        assert_eq!(find_entry(entries, "ArticleCache"), Some("256"));
+        assert_eq!(find_entry(entries, "DirectWrite"), Some("yes"));
+        assert_eq!(find_entry(entries, "WriteBuffer"), Some("0"));
+        assert_eq!(find_entry(entries, "DiskSpace"), Some("250"));
+        assert_eq!(find_entry(entries, "KeepHistory"), Some("30"));
+        assert_eq!(find_entry(entries, "DownloadRate"), Some("1000"));
+    }
+
+    #[test]
+    fn config_loadconfig_returns_all_connection_options() {
+        let (state, _tmp) = state_with_full_config();
+        let result = rpc_loadconfig(&state).expect("loadconfig");
+        let entries = result.as_array().expect("array");
+
+        assert_eq!(find_entry(entries, "ArticleRetries"), Some("3"));
+        assert_eq!(find_entry(entries, "ArticleInterval"), Some("10"));
+        assert_eq!(find_entry(entries, "ArticleTimeout"), Some("60"));
+    }
+
+    #[test]
+    fn config_loadconfig_returns_all_par_options() {
+        let (state, _tmp) = state_with_full_config();
+        let result = rpc_loadconfig(&state).expect("loadconfig");
+        let entries = result.as_array().expect("array");
+
+        assert_eq!(find_entry(entries, "CrcCheck"), Some("yes"));
+        assert_eq!(find_entry(entries, "ParCheck"), Some("auto"));
+        assert_eq!(find_entry(entries, "ParRepair"), Some("yes"));
+        assert_eq!(find_entry(entries, "ParRename"), Some("yes"));
+    }
+
+    #[test]
+    fn config_loadconfig_returns_all_unpack_options() {
+        let (state, _tmp) = state_with_full_config();
+        let result = rpc_loadconfig(&state).expect("loadconfig");
+        let entries = result.as_array().expect("array");
+
+        assert_eq!(find_entry(entries, "Unpack"), Some("yes"));
+        assert_eq!(find_entry(entries, "DirectUnpack"), Some("no"));
+        assert_eq!(find_entry(entries, "UnpackCleanupDisk"), Some("yes"));
+        assert_eq!(find_entry(entries, "UnrarCmd"), Some("unrar"));
+        assert_eq!(find_entry(entries, "SevenZipCmd"), Some("7z"));
+    }
+
+    #[test]
+    fn config_loadconfig_returns_all_logging_options() {
+        let (state, _tmp) = state_with_full_config();
+        let result = rpc_loadconfig(&state).expect("loadconfig");
+        let entries = result.as_array().expect("array");
+
+        assert_eq!(find_entry(entries, "WriteLog"), Some("append"));
+        assert_eq!(find_entry(entries, "RotateLog"), Some("3"));
+        assert_eq!(find_entry(entries, "InfoTarget"), Some("both"));
+        assert_eq!(find_entry(entries, "WarningTarget"), Some("both"));
+        assert_eq!(find_entry(entries, "ErrorTarget"), Some("both"));
+        assert_eq!(find_entry(entries, "DetailTarget"), Some("log"));
+        assert_eq!(find_entry(entries, "DebugTarget"), Some("none"));
+        assert_eq!(find_entry(entries, "SystemHealthCheck"), Some("yes"));
+    }
+
+    #[test]
+    fn config_loadconfig_returns_all_scheduler_options() {
+        let (state, _tmp) = state_with_full_config();
+        let result = rpc_loadconfig(&state).expect("loadconfig");
+        let entries = result.as_array().expect("array");
+
+        assert_eq!(find_entry(entries, "Task1.Time"), Some("08:00"));
+        assert_eq!(find_entry(entries, "Task1.WeekDays"), Some("1,2,3,4,5"));
+        assert_eq!(find_entry(entries, "Task1.Command"), Some("PauseDownload"));
+    }
+
+    #[test]
+    fn config_loadconfig_returns_all_feed_options() {
+        let (state, _tmp) = state_with_full_config();
+        let result = rpc_loadconfig(&state).expect("loadconfig");
+        let entries = result.as_array().expect("array");
+
+        assert_eq!(find_entry(entries, "Feed1.Name"), Some("MyFeed"));
+        assert_eq!(
+            find_entry(entries, "Feed1.URL"),
+            Some("https://indexer.example.com/rss")
+        );
+        assert_eq!(find_entry(entries, "Feed1.Backlog"), Some("no"));
+        assert_eq!(find_entry(entries, "Feed1.PauseNzb"), Some("no"));
+        assert_eq!(find_entry(entries, "Feed1.Filter"), Some("size:>100MB"));
+        assert_eq!(find_entry(entries, "Feed1.Interval"), Some("15"));
+        assert_eq!(find_entry(entries, "Feed1.Category"), Some("TV"));
+        assert_eq!(find_entry(entries, "Feed1.Priority"), Some("50"));
+        assert_eq!(find_entry(entries, "Feed1.Extensions"), Some("ext1"));
+    }
+
+    #[test]
+    fn config_loadconfig_returns_extension_options() {
+        let (state, _tmp) = state_with_full_config();
+        let result = rpc_loadconfig(&state).expect("loadconfig");
+        let entries = result.as_array().expect("array");
+
+        assert_eq!(find_entry(entries, "Extensions"), Some("ext1, ext2"));
+        assert_eq!(find_entry(entries, "ScriptOrder"), Some("ext2, ext1"));
+    }
+
+    #[test]
+    fn saveconfig_roundtrip_all_path_options() {
+        let (state, tmp) = state_with_full_config();
+        let save_params = serde_json::json!([[
+            {"Name": "MainDir", "Value": "/new"},
+            {"Name": "DestDir", "Value": "/new/done"},
+            {"Name": "InterDir", "Value": "/new/inter"},
+            {"Name": "NzbDir", "Value": "/new/nzb"},
+            {"Name": "QueueDir", "Value": "/new/queue"},
+            {"Name": "TempDir", "Value": "/new/tmp"},
+            {"Name": "ScriptDir", "Value": "/new/scripts"},
+            {"Name": "LogFile", "Value": "/new/bergamot.log"},
+        ]]);
+        let result = rpc_saveconfig(save_params.as_array().unwrap().first().unwrap(), &state)
+            .expect("saveconfig");
+        assert_eq!(result, serde_json::json!(true));
+
+        let saved = std::fs::read_to_string(tmp.path().join("bergamot.conf")).expect("read");
+        assert!(saved.contains("MainDir=/new\n"));
+        assert!(saved.contains("DestDir=/new/done\n"));
+        assert!(saved.contains("InterDir=/new/inter\n"));
+        assert!(saved.contains("NzbDir=/new/nzb\n"));
+        assert!(saved.contains("QueueDir=/new/queue\n"));
+        assert!(saved.contains("TempDir=/new/tmp\n"));
+        assert!(saved.contains("ScriptDir=/new/scripts\n"));
+        assert!(saved.contains("LogFile=/new/bergamot.log\n"));
+
+        let reload_result = rpc_loadconfig(&state).expect("loadconfig after save");
+        let entries = reload_result.as_array().expect("array");
+        assert_eq!(find_entry(entries, "MainDir"), Some("/new"));
+        assert_eq!(find_entry(entries, "DestDir"), Some("/new/done"));
+        assert_eq!(find_entry(entries, "InterDir"), Some("/new/inter"));
+        assert_eq!(find_entry(entries, "NzbDir"), Some("/new/nzb"));
+        assert_eq!(find_entry(entries, "QueueDir"), Some("/new/queue"));
+        assert_eq!(find_entry(entries, "TempDir"), Some("/new/tmp"));
+        assert_eq!(find_entry(entries, "ScriptDir"), Some("/new/scripts"));
+        assert_eq!(find_entry(entries, "LogFile"), Some("/new/bergamot.log"));
+    }
+
+    #[test]
+    fn saveconfig_roundtrip_all_security_options() {
+        let (state, tmp) = state_with_full_config();
+        let params = serde_json::json!([
+            {"Name": "ControlIP", "Value": "0.0.0.0"},
+            {"Name": "ControlPort", "Value": "7890"},
+            {"Name": "ControlUsername", "Value": "newadmin"},
+            {"Name": "ControlPassword", "Value": "newpass"},
+            {"Name": "RestrictedUsername", "Value": "restricted"},
+            {"Name": "RestrictedPassword", "Value": "rpass"},
+            {"Name": "AddUsername", "Value": "newadder"},
+            {"Name": "AddPassword", "Value": "apass"},
+            {"Name": "FormAuth", "Value": "no"},
+            {"Name": "SecureControl", "Value": "yes"},
+            {"Name": "SecurePort", "Value": "6792"},
+            {"Name": "SecureCert", "Value": "/new/cert.pem"},
+            {"Name": "SecureKey", "Value": "/new/key.pem"},
+            {"Name": "CertCheck", "Value": "yes"},
+        ]);
+        let result = rpc_saveconfig(&params, &state).expect("saveconfig");
+        assert_eq!(result, serde_json::json!(true));
+
+        let saved = std::fs::read_to_string(tmp.path().join("bergamot.conf")).expect("read");
+        assert!(saved.contains("ControlIP=0.0.0.0\n"));
+        assert!(saved.contains("ControlPort=7890\n"));
+        assert!(saved.contains("ControlUsername=newadmin\n"));
+        assert!(saved.contains("ControlPassword=newpass\n"));
+        assert!(saved.contains("FormAuth=no\n"));
+        assert!(saved.contains("SecureControl=yes\n"));
+        assert!(saved.contains("SecurePort=6792\n"));
+        assert!(saved.contains("CertCheck=yes\n"));
+
+        let reload_result = rpc_loadconfig(&state).expect("loadconfig after save");
+        let entries = reload_result.as_array().expect("array");
+        assert_eq!(find_entry(entries, "ControlIP"), Some("0.0.0.0"));
+        assert_eq!(find_entry(entries, "ControlPort"), Some("7890"));
+        assert_eq!(find_entry(entries, "ControlUsername"), Some("newadmin"));
+        assert_eq!(find_entry(entries, "ControlPassword"), Some("newpass"));
+        assert_eq!(find_entry(entries, "FormAuth"), Some("no"));
+        assert_eq!(find_entry(entries, "SecureControl"), Some("yes"));
+        assert_eq!(find_entry(entries, "SecurePort"), Some("6792"));
+        assert_eq!(find_entry(entries, "CertCheck"), Some("yes"));
+    }
+
+    #[test]
+    fn saveconfig_roundtrip_all_server_options() {
+        let (state, tmp) = state_with_full_config();
+        let params = serde_json::json!([
+            {"Name": "Server1.Active", "Value": "no"},
+            {"Name": "Server1.Name", "Value": "NewPrimary"},
+            {"Name": "Server1.Level", "Value": "2"},
+            {"Name": "Server1.Optional", "Value": "yes"},
+            {"Name": "Server1.Group", "Value": "5"},
+            {"Name": "Server1.Host", "Value": "new.example.com"},
+            {"Name": "Server1.Port", "Value": "443"},
+            {"Name": "Server1.Username", "Value": "newuser"},
+            {"Name": "Server1.Password", "Value": "newpass"},
+            {"Name": "Server1.JoinGroup", "Value": "yes"},
+            {"Name": "Server1.Encryption", "Value": "no"},
+            {"Name": "Server1.Cipher", "Value": "RC4"},
+            {"Name": "Server1.Connections", "Value": "16"},
+            {"Name": "Server1.Retention", "Value": "3000"},
+            {"Name": "Server1.IpVersion", "Value": "ipv6"},
+            {"Name": "Server1.Notes", "Value": "updated notes"},
+            {"Name": "Server1.CertVerification", "Value": "none"},
+        ]);
+        let result = rpc_saveconfig(&params, &state).expect("saveconfig");
+        assert_eq!(result, serde_json::json!(true));
+
+        let saved = std::fs::read_to_string(tmp.path().join("bergamot.conf")).expect("read");
+        assert!(saved.contains("Server1.Active=no\n"));
+        assert!(saved.contains("Server1.Name=NewPrimary\n"));
+        assert!(saved.contains("Server1.Host=new.example.com\n"));
+        assert!(saved.contains("Server1.Port=443\n"));
+        assert!(saved.contains("Server1.Connections=16\n"));
+        assert!(saved.contains("Server1.Retention=3000\n"));
+        assert!(saved.contains("Server1.IpVersion=ipv6\n"));
+
+        let reload_result = rpc_loadconfig(&state).expect("loadconfig after save");
+        let entries = reload_result.as_array().expect("array");
+        assert_eq!(find_entry(entries, "Server1.Active"), Some("no"));
+        assert_eq!(find_entry(entries, "Server1.Name"), Some("NewPrimary"));
+        assert_eq!(find_entry(entries, "Server1.Level"), Some("2"));
+        assert_eq!(find_entry(entries, "Server1.Optional"), Some("yes"));
+        assert_eq!(find_entry(entries, "Server1.Group"), Some("5"));
+        assert_eq!(find_entry(entries, "Server1.Host"), Some("new.example.com"));
+        assert_eq!(find_entry(entries, "Server1.Port"), Some("443"));
+        assert_eq!(find_entry(entries, "Server1.Username"), Some("newuser"));
+        assert_eq!(find_entry(entries, "Server1.Password"), Some("newpass"));
+        assert_eq!(find_entry(entries, "Server1.JoinGroup"), Some("yes"));
+        assert_eq!(find_entry(entries, "Server1.Encryption"), Some("no"));
+        assert_eq!(find_entry(entries, "Server1.Cipher"), Some("RC4"));
+        assert_eq!(find_entry(entries, "Server1.Connections"), Some("16"));
+        assert_eq!(find_entry(entries, "Server1.Retention"), Some("3000"));
+        assert_eq!(find_entry(entries, "Server1.IpVersion"), Some("ipv6"));
+        assert_eq!(
+            find_entry(entries, "Server1.Notes"),
+            Some("updated notes")
+        );
+        assert_eq!(
+            find_entry(entries, "Server1.CertVerification"),
+            Some("none")
+        );
+    }
+
+    #[test]
+    fn saveconfig_roundtrip_all_category_options() {
+        let (state, tmp) = state_with_full_config();
+        let params = serde_json::json!([
+            {"Name": "Category1.Name", "Value": "Films"},
+            {"Name": "Category1.DestDir", "Value": "/new/films"},
+            {"Name": "Category1.Unpack", "Value": "no"},
+            {"Name": "Category1.Extensions", "Value": "ext2, ext3"},
+            {"Name": "Category1.Aliases", "Value": "Movie, Flick"},
+        ]);
+        let result = rpc_saveconfig(&params, &state).expect("saveconfig");
+        assert_eq!(result, serde_json::json!(true));
+
+        let saved = std::fs::read_to_string(tmp.path().join("bergamot.conf")).expect("read");
+        assert!(saved.contains("Category1.Name=Films\n"));
+        assert!(saved.contains("Category1.DestDir=/new/films\n"));
+        assert!(saved.contains("Category1.Unpack=no\n"));
+
+        let reload_result = rpc_loadconfig(&state).expect("loadconfig after save");
+        let entries = reload_result.as_array().expect("array");
+        assert_eq!(find_entry(entries, "Category1.Name"), Some("Films"));
+        assert_eq!(
+            find_entry(entries, "Category1.DestDir"),
+            Some("/new/films")
+        );
+        assert_eq!(find_entry(entries, "Category1.Unpack"), Some("no"));
+        assert_eq!(
+            find_entry(entries, "Category1.Extensions"),
+            Some("ext2, ext3")
+        );
+        assert_eq!(
+            find_entry(entries, "Category1.Aliases"),
+            Some("Movie, Flick")
+        );
+    }
+
+    #[test]
+    fn saveconfig_roundtrip_all_download_options() {
+        let (state, tmp) = state_with_full_config();
+        let params = serde_json::json!([
+            {"Name": "AppendCategoryDir", "Value": "no"},
+            {"Name": "NzbDirInterval", "Value": "10"},
+            {"Name": "DupeCheck", "Value": "no"},
+            {"Name": "ContinuePartial", "Value": "no"},
+            {"Name": "ArticleCache", "Value": "512"},
+            {"Name": "DirectWrite", "Value": "no"},
+            {"Name": "WriteBuffer", "Value": "4096"},
+            {"Name": "DiskSpace", "Value": "500"},
+            {"Name": "KeepHistory", "Value": "60"},
+            {"Name": "DownloadRate", "Value": "2000"},
+        ]);
+        let result = rpc_saveconfig(&params, &state).expect("saveconfig");
+        assert_eq!(result, serde_json::json!(true));
+
+        let saved = std::fs::read_to_string(tmp.path().join("bergamot.conf")).expect("read");
+        assert!(saved.contains("AppendCategoryDir=no\n"));
+        assert!(saved.contains("ArticleCache=512\n"));
+        assert!(saved.contains("DiskSpace=500\n"));
+        assert!(saved.contains("DownloadRate=2000\n"));
+        assert!(saved.contains("KeepHistory=60\n"));
+
+        let reload_result = rpc_loadconfig(&state).expect("loadconfig after save");
+        let entries = reload_result.as_array().expect("array");
+        assert_eq!(find_entry(entries, "AppendCategoryDir"), Some("no"));
+        assert_eq!(find_entry(entries, "NzbDirInterval"), Some("10"));
+        assert_eq!(find_entry(entries, "DupeCheck"), Some("no"));
+        assert_eq!(find_entry(entries, "ContinuePartial"), Some("no"));
+        assert_eq!(find_entry(entries, "ArticleCache"), Some("512"));
+        assert_eq!(find_entry(entries, "DirectWrite"), Some("no"));
+        assert_eq!(find_entry(entries, "WriteBuffer"), Some("4096"));
+        assert_eq!(find_entry(entries, "DiskSpace"), Some("500"));
+        assert_eq!(find_entry(entries, "KeepHistory"), Some("60"));
+        assert_eq!(find_entry(entries, "DownloadRate"), Some("2000"));
+    }
+
+    #[test]
+    fn saveconfig_roundtrip_all_connection_options() {
+        let (state, tmp) = state_with_full_config();
+        let params = serde_json::json!([
+            {"Name": "ArticleRetries", "Value": "5"},
+            {"Name": "ArticleInterval", "Value": "20"},
+            {"Name": "ArticleTimeout", "Value": "120"},
+        ]);
+        let result = rpc_saveconfig(&params, &state).expect("saveconfig");
+        assert_eq!(result, serde_json::json!(true));
+
+        let saved = std::fs::read_to_string(tmp.path().join("bergamot.conf")).expect("read");
+        assert!(saved.contains("ArticleRetries=5\n"));
+        assert!(saved.contains("ArticleInterval=20\n"));
+        assert!(saved.contains("ArticleTimeout=120\n"));
+
+        let reload_result = rpc_loadconfig(&state).expect("loadconfig after save");
+        let entries = reload_result.as_array().expect("array");
+        assert_eq!(find_entry(entries, "ArticleRetries"), Some("5"));
+        assert_eq!(find_entry(entries, "ArticleInterval"), Some("20"));
+        assert_eq!(find_entry(entries, "ArticleTimeout"), Some("120"));
+    }
+
+    #[test]
+    fn saveconfig_roundtrip_all_par_options() {
+        let (state, tmp) = state_with_full_config();
+        let params = serde_json::json!([
+            {"Name": "CrcCheck", "Value": "no"},
+            {"Name": "ParCheck", "Value": "always"},
+            {"Name": "ParRepair", "Value": "no"},
+            {"Name": "ParRename", "Value": "no"},
+        ]);
+        let result = rpc_saveconfig(&params, &state).expect("saveconfig");
+        assert_eq!(result, serde_json::json!(true));
+
+        let saved = std::fs::read_to_string(tmp.path().join("bergamot.conf")).expect("read");
+        assert!(saved.contains("CrcCheck=no\n"));
+        assert!(saved.contains("ParCheck=always\n"));
+        assert!(saved.contains("ParRepair=no\n"));
+        assert!(saved.contains("ParRename=no\n"));
+
+        let reload_result = rpc_loadconfig(&state).expect("loadconfig after save");
+        let entries = reload_result.as_array().expect("array");
+        assert_eq!(find_entry(entries, "CrcCheck"), Some("no"));
+        assert_eq!(find_entry(entries, "ParCheck"), Some("always"));
+        assert_eq!(find_entry(entries, "ParRepair"), Some("no"));
+        assert_eq!(find_entry(entries, "ParRename"), Some("no"));
+    }
+
+    #[test]
+    fn saveconfig_roundtrip_all_unpack_options() {
+        let (state, tmp) = state_with_full_config();
+        let params = serde_json::json!([
+            {"Name": "Unpack", "Value": "no"},
+            {"Name": "DirectUnpack", "Value": "yes"},
+            {"Name": "UnpackCleanupDisk", "Value": "no"},
+            {"Name": "UnrarCmd", "Value": "/usr/bin/unrar"},
+            {"Name": "SevenZipCmd", "Value": "/usr/bin/7z"},
+        ]);
+        let result = rpc_saveconfig(&params, &state).expect("saveconfig");
+        assert_eq!(result, serde_json::json!(true));
+
+        let saved = std::fs::read_to_string(tmp.path().join("bergamot.conf")).expect("read");
+        assert!(saved.contains("Unpack=no\n"));
+        assert!(saved.contains("DirectUnpack=yes\n"));
+        assert!(saved.contains("UnpackCleanupDisk=no\n"));
+        assert!(saved.contains("UnrarCmd=/usr/bin/unrar\n"));
+        assert!(saved.contains("SevenZipCmd=/usr/bin/7z\n"));
+
+        let reload_result = rpc_loadconfig(&state).expect("loadconfig after save");
+        let entries = reload_result.as_array().expect("array");
+        assert_eq!(find_entry(entries, "Unpack"), Some("no"));
+        assert_eq!(find_entry(entries, "DirectUnpack"), Some("yes"));
+        assert_eq!(find_entry(entries, "UnpackCleanupDisk"), Some("no"));
+        assert_eq!(find_entry(entries, "UnrarCmd"), Some("/usr/bin/unrar"));
+        assert_eq!(find_entry(entries, "SevenZipCmd"), Some("/usr/bin/7z"));
+    }
+
+    #[test]
+    fn saveconfig_roundtrip_all_logging_options() {
+        let (state, tmp) = state_with_full_config();
+        let params = serde_json::json!([
+            {"Name": "WriteLog", "Value": "reset"},
+            {"Name": "RotateLog", "Value": "5"},
+            {"Name": "InfoTarget", "Value": "screen"},
+            {"Name": "WarningTarget", "Value": "log"},
+            {"Name": "ErrorTarget", "Value": "none"},
+            {"Name": "DetailTarget", "Value": "both"},
+            {"Name": "DebugTarget", "Value": "log"},
+            {"Name": "SystemHealthCheck", "Value": "no"},
+        ]);
+        let result = rpc_saveconfig(&params, &state).expect("saveconfig");
+        assert_eq!(result, serde_json::json!(true));
+
+        let saved = std::fs::read_to_string(tmp.path().join("bergamot.conf")).expect("read");
+        assert!(saved.contains("WriteLog=reset\n"));
+        assert!(saved.contains("RotateLog=5\n"));
+        assert!(saved.contains("InfoTarget=screen\n"));
+        assert!(saved.contains("ErrorTarget=none\n"));
+
+        let reload_result = rpc_loadconfig(&state).expect("loadconfig after save");
+        let entries = reload_result.as_array().expect("array");
+        assert_eq!(find_entry(entries, "WriteLog"), Some("reset"));
+        assert_eq!(find_entry(entries, "RotateLog"), Some("5"));
+        assert_eq!(find_entry(entries, "InfoTarget"), Some("screen"));
+        assert_eq!(find_entry(entries, "WarningTarget"), Some("log"));
+        assert_eq!(find_entry(entries, "ErrorTarget"), Some("none"));
+        assert_eq!(find_entry(entries, "DetailTarget"), Some("both"));
+        assert_eq!(find_entry(entries, "DebugTarget"), Some("log"));
+        assert_eq!(find_entry(entries, "SystemHealthCheck"), Some("no"));
+    }
+
+    #[test]
+    fn saveconfig_roundtrip_all_scheduler_options() {
+        let (state, tmp) = state_with_full_config();
+        let params = serde_json::json!([
+            {"Name": "Task1.Time", "Value": "22:30"},
+            {"Name": "Task1.WeekDays", "Value": "6,7"},
+            {"Name": "Task1.Command", "Value": "UnpauseDownload"},
+            {"Name": "Task1.Param", "Value": "1000"},
+        ]);
+        let result = rpc_saveconfig(&params, &state).expect("saveconfig");
+        assert_eq!(result, serde_json::json!(true));
+
+        let saved = std::fs::read_to_string(tmp.path().join("bergamot.conf")).expect("read");
+        assert!(saved.contains("Task1.Time=22:30\n"));
+        assert!(saved.contains("Task1.WeekDays=6,7\n"));
+        assert!(saved.contains("Task1.Command=UnpauseDownload\n"));
+        assert!(saved.contains("Task1.Param=1000\n"));
+
+        let reload_result = rpc_loadconfig(&state).expect("loadconfig after save");
+        let entries = reload_result.as_array().expect("array");
+        assert_eq!(find_entry(entries, "Task1.Time"), Some("22:30"));
+        assert_eq!(find_entry(entries, "Task1.WeekDays"), Some("6,7"));
+        assert_eq!(find_entry(entries, "Task1.Command"), Some("UnpauseDownload"));
+        assert_eq!(find_entry(entries, "Task1.Param"), Some("1000"));
+    }
+
+    #[test]
+    fn saveconfig_roundtrip_all_feed_options() {
+        let (state, tmp) = state_with_full_config();
+        let params = serde_json::json!([
+            {"Name": "Feed1.Name", "Value": "NewFeed"},
+            {"Name": "Feed1.URL", "Value": "https://new.example.com/rss"},
+            {"Name": "Feed1.Backlog", "Value": "yes"},
+            {"Name": "Feed1.PauseNzb", "Value": "yes"},
+            {"Name": "Feed1.Filter", "Value": "title:.*Linux.*"},
+            {"Name": "Feed1.Interval", "Value": "30"},
+            {"Name": "Feed1.Category", "Value": "Software"},
+            {"Name": "Feed1.Priority", "Value": "100"},
+            {"Name": "Feed1.Extensions", "Value": "ext2, ext3"},
+        ]);
+        let result = rpc_saveconfig(&params, &state).expect("saveconfig");
+        assert_eq!(result, serde_json::json!(true));
+
+        let saved = std::fs::read_to_string(tmp.path().join("bergamot.conf")).expect("read");
+        assert!(saved.contains("Feed1.Name=NewFeed\n"));
+        assert!(saved.contains("Feed1.URL=https://new.example.com/rss\n"));
+        assert!(saved.contains("Feed1.Interval=30\n"));
+
+        let reload_result = rpc_loadconfig(&state).expect("loadconfig after save");
+        let entries = reload_result.as_array().expect("array");
+        assert_eq!(find_entry(entries, "Feed1.Name"), Some("NewFeed"));
+        assert_eq!(
+            find_entry(entries, "Feed1.URL"),
+            Some("https://new.example.com/rss")
+        );
+        assert_eq!(find_entry(entries, "Feed1.Backlog"), Some("yes"));
+        assert_eq!(find_entry(entries, "Feed1.PauseNzb"), Some("yes"));
+        assert_eq!(
+            find_entry(entries, "Feed1.Filter"),
+            Some("title:.*Linux.*")
+        );
+        assert_eq!(find_entry(entries, "Feed1.Interval"), Some("30"));
+        assert_eq!(find_entry(entries, "Feed1.Category"), Some("Software"));
+        assert_eq!(find_entry(entries, "Feed1.Priority"), Some("100"));
+        assert_eq!(
+            find_entry(entries, "Feed1.Extensions"),
+            Some("ext2, ext3")
+        );
+    }
+
+    #[test]
+    fn saveconfig_roundtrip_extension_options() {
+        let (state, tmp) = state_with_full_config();
+        let params = serde_json::json!([
+            {"Name": "Extensions", "Value": "ext3, ext4"},
+            {"Name": "ScriptOrder", "Value": "ext4, ext3"},
+        ]);
+        let result = rpc_saveconfig(&params, &state).expect("saveconfig");
+        assert_eq!(result, serde_json::json!(true));
+
+        let saved = std::fs::read_to_string(tmp.path().join("bergamot.conf")).expect("read");
+        assert!(saved.contains("Extensions=ext3, ext4\n"));
+        assert!(saved.contains("ScriptOrder=ext4, ext3\n"));
+
+        let reload_result = rpc_loadconfig(&state).expect("loadconfig after save");
+        let entries = reload_result.as_array().expect("array");
+        assert_eq!(find_entry(entries, "Extensions"), Some("ext3, ext4"));
+        assert_eq!(find_entry(entries, "ScriptOrder"), Some("ext4, ext3"));
+    }
+
+    #[test]
+    fn saveconfig_reload_reflects_saved_structural_changes() {
+        let (state, _tmp) = state_with_full_config();
+        let params = serde_json::json!([
+            {"Name": "DownloadRate", "Value": "5000"},
+            {"Name": "DiskSpace", "Value": "100"},
+        ]);
+        rpc_saveconfig(&params, &state).expect("saveconfig");
+
+        rpc_reload(&state).expect("reload");
+
+        let config = state.config().unwrap().read().unwrap();
+        assert_eq!(config.download_rate, 5000);
+        assert_eq!(config.disk_space, 100);
+    }
+
+    #[test]
+    fn saveconfig_reload_reflects_server_changes() {
+        let (state, _tmp) = state_with_full_config();
+        let params = serde_json::json!([
+            {"Name": "Server1.Host", "Value": "changed.example.com"},
+            {"Name": "Server1.Port", "Value": "443"},
+            {"Name": "Server1.Connections", "Value": "20"},
+        ]);
+        rpc_saveconfig(&params, &state).expect("saveconfig");
+
+        rpc_reload(&state).expect("reload");
+
+        let config = state.config().unwrap().read().unwrap();
+        assert_eq!(config.servers[0].host, "changed.example.com");
+        assert_eq!(config.servers[0].port, 443);
+        assert_eq!(config.servers[0].connections, 20);
+    }
+
+    #[test]
+    fn saveconfig_reload_reflects_category_changes() {
+        let (state, _tmp) = state_with_full_config();
+        let params = serde_json::json!([
+            {"Name": "Category1.Name", "Value": "Anime"},
+            {"Name": "Category1.DestDir", "Value": "/data/anime"},
+        ]);
+        rpc_saveconfig(&params, &state).expect("saveconfig");
+
+        rpc_reload(&state).expect("reload");
+
+        let config = state.config().unwrap().read().unwrap();
+        assert_eq!(config.categories[0].name, "Anime");
+        assert_eq!(
+            config.categories[0].dest_dir,
+            std::path::PathBuf::from("/data/anime")
+        );
+    }
+
+    #[test]
+    fn saveconfig_reload_reflects_boolean_option_changes() {
+        let (state, _tmp) = state_with_full_config();
+        let params = serde_json::json!([
+            {"Name": "AppendCategoryDir", "Value": "no"},
+            {"Name": "UnpackCleanupDisk", "Value": "no"},
+            {"Name": "FormAuth", "Value": "no"},
+            {"Name": "SecureControl", "Value": "yes"},
+        ]);
+        rpc_saveconfig(&params, &state).expect("saveconfig");
+
+        rpc_reload(&state).expect("reload");
+
+        let config = state.config().unwrap().read().unwrap();
+        assert!(!config.append_category_dir);
+        assert!(!config.unpack_cleanup_disk);
+        assert!(!config.form_auth);
+        assert!(config.secure_control);
+    }
+
+    #[test]
+    fn saveconfig_adds_new_server() {
+        let (state, _tmp) = state_with_full_config();
+        let params = serde_json::json!([
+            {"Name": "Server3.Active", "Value": "yes"},
+            {"Name": "Server3.Host", "Value": "third.example.com"},
+            {"Name": "Server3.Port", "Value": "563"},
+            {"Name": "Server3.Connections", "Value": "2"},
+            {"Name": "Server3.Level", "Value": "2"},
+        ]);
+        rpc_saveconfig(&params, &state).expect("saveconfig");
+
+        rpc_reload(&state).expect("reload");
+
+        let config = state.config().unwrap().read().unwrap();
+        assert_eq!(config.servers.len(), 3);
+        assert_eq!(config.servers[2].host, "third.example.com");
+        assert_eq!(config.servers[2].level, 2);
+    }
+
+    #[test]
+    fn saveconfig_adds_new_category() {
+        let (state, _tmp) = state_with_full_config();
+        let params = serde_json::json!([
+            {"Name": "Category3.Name", "Value": "Music"},
+            {"Name": "Category3.DestDir", "Value": "/data/music"},
+            {"Name": "Category3.Unpack", "Value": "no"},
+        ]);
+        rpc_saveconfig(&params, &state).expect("saveconfig");
+
+        rpc_reload(&state).expect("reload");
+
+        let config = state.config().unwrap().read().unwrap();
+        assert_eq!(config.categories.len(), 3);
+        assert_eq!(config.categories[2].name, "Music");
+        assert!(!config.categories[2].unpack);
+    }
+
+    #[test]
+    fn configtemplates_contains_all_option_sections() {
+        let result = rpc_configtemplates().expect("configtemplates");
+        let entries = result.as_array().expect("array");
+        let template = entries[0]["Template"].as_str().expect("template string");
+
+        let expected_options = [
+            "MainDir",
+            "DestDir",
+            "InterDir",
+            "NzbDir",
+            "QueueDir",
+            "TempDir",
+            "ScriptDir",
+            "Extensions",
+            "ScriptOrder",
+            "LogFile",
+            "ControlIP",
+            "ControlPort",
+            "ControlUsername",
+            "ControlPassword",
+            "RestrictedUsername",
+            "RestrictedPassword",
+            "AddUsername",
+            "AddPassword",
+            "FormAuth",
+            "SecureControl",
+            "SecurePort",
+            "SecureCert",
+            "SecureKey",
+            "CertCheck",
+            "Server1.Active",
+            "Server1.Name",
+            "Server1.Level",
+            "Server1.Optional",
+            "Server1.Group",
+            "Server1.Host",
+            "Server1.Port",
+            "Server1.Username",
+            "Server1.Password",
+            "Server1.JoinGroup",
+            "Server1.Encryption",
+            "Server1.Cipher",
+            "Server1.Connections",
+            "Server1.Retention",
+            "Server1.IpVersion",
+            "Server1.Notes",
+            "Server1.CertVerification",
+            "Category1.Name",
+            "Category1.DestDir",
+            "Category1.Unpack",
+            "Category1.Extensions",
+            "Category1.Aliases",
+            "AppendCategoryDir",
+            "NzbDirInterval",
+            "DupeCheck",
+            "ContinuePartial",
+            "ArticleCache",
+            "DirectWrite",
+            "WriteBuffer",
+            "DiskSpace",
+            "KeepHistory",
+            "DownloadRate",
+            "ArticleRetries",
+            "ArticleInterval",
+            "ArticleTimeout",
+            "CrcCheck",
+            "ParCheck",
+            "ParRepair",
+            "ParRename",
+            "Unpack",
+            "DirectUnpack",
+            "UnpackCleanupDisk",
+            "UnrarCmd",
+            "SevenZipCmd",
+            "WriteLog",
+            "RotateLog",
+            "InfoTarget",
+            "WarningTarget",
+            "ErrorTarget",
+            "DetailTarget",
+            "DebugTarget",
+            "SystemHealthCheck",
+            "Task1.Time",
+            "Task1.WeekDays",
+            "Task1.Command",
+            "Task1.Param",
+            "Feed1.Name",
+            "Feed1.URL",
+            "Feed1.Backlog",
+            "Feed1.PauseNzb",
+            "Feed1.Filter",
+            "Feed1.Interval",
+            "Feed1.Category",
+            "Feed1.Priority",
+            "Feed1.Extensions",
+        ];
+
+        for option in &expected_options {
+            assert!(
+                template.contains(option),
+                "configtemplates should contain option: {option}"
+            );
+        }
+    }
+
+    #[test]
+    fn config_and_loadconfig_return_identical_results() {
+        let (state, _tmp) = state_with_full_config();
+        let config_result = rpc_loadconfig(&state).expect("config");
+        let loadconfig_result = rpc_loadconfig(&state).expect("loadconfig");
+        assert_eq!(config_result, loadconfig_result);
+    }
+
+    #[test]
+    fn saveconfig_no_config_returns_error() {
+        let state = AppState::default();
+        let params = serde_json::json!([{"Name": "DownloadRate", "Value": "100"}]);
+        let result = rpc_saveconfig(&params, &state);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn loadconfig_no_config_returns_error() {
+        let state = AppState::default();
+        let result = rpc_loadconfig(&state);
+        assert!(result.is_err());
+    }
 }

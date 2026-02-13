@@ -17,7 +17,7 @@ Tracking file for end-to-end test coverage deficiencies to address before produc
 - [x] **`editqueue`** — Queue manipulation: pause/resume/delete/move/priority changes
 - [x] **`pausedownload`/`resumedownload`** — Downloads actually pause and resume
 - [x] **`rate`** — Speed limiting takes effect during download
-- [ ] **`config`/`saveconfig`** — Round-trip config read/write; Sonarr uses `config` to discover paths
+- [x] **`config`/`saveconfig`** — Round-trip config read/write; Sonarr uses `config` to discover paths
 - [ ] **`servervolumes`** — Bytes-transferred accounting after download
 - [ ] **`postqueue`** — Post-processing queue visibility during/after download
 - [ ] **`scan`** — NZB dropped into `NzbDir` gets auto-picked up
