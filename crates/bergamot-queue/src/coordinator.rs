@@ -1239,13 +1239,54 @@ impl QueueCoordinator {
                 }
                 Ok(())
             }
-            EditAction::SetParameter { .. }
-            | EditAction::Merge { .. }
-            | EditAction::Split { .. }
-            | EditAction::SetName { .. }
-            | EditAction::SetDupeKey { .. }
-            | EditAction::SetDupeScore(_)
-            | EditAction::SetDupeMode(_) => Ok(()),
+            EditAction::SetName(name) => {
+                for id in ids {
+                    if let Some(nzb) = self.queue.queue.iter_mut().find(|nzb| nzb.id == id) {
+                        nzb.name = name.clone();
+                    }
+                }
+                Ok(())
+            }
+            EditAction::SetDupeKey(key) => {
+                for id in ids {
+                    if let Some(nzb) = self.queue.queue.iter_mut().find(|nzb| nzb.id == id) {
+                        nzb.dup_key = key.clone();
+                    }
+                }
+                Ok(())
+            }
+            EditAction::SetDupeScore(score) => {
+                for id in ids {
+                    if let Some(nzb) = self.queue.queue.iter_mut().find(|nzb| nzb.id == id) {
+                        nzb.dup_score = score;
+                    }
+                }
+                Ok(())
+            }
+            EditAction::SetDupeMode(mode) => {
+                for id in ids {
+                    if let Some(nzb) = self.queue.queue.iter_mut().find(|nzb| nzb.id == id) {
+                        nzb.dup_mode = mode;
+                    }
+                }
+                Ok(())
+            }
+            EditAction::SetParameter { ref key, ref value } => {
+                for id in &ids {
+                    if let Some(nzb) = self.queue.queue.iter_mut().find(|nzb| nzb.id == *id) {
+                        if let Some(param) = nzb.parameters.iter_mut().find(|p| p.name == *key) {
+                            param.value = value.clone();
+                        } else {
+                            nzb.parameters.push(bergamot_core::models::NzbParameter {
+                                name: key.clone(),
+                                value: value.clone(),
+                            });
+                        }
+                    }
+                }
+                Ok(())
+            }
+            EditAction::Merge { .. } | EditAction::Split { .. } => Ok(()),
         }
     }
 
