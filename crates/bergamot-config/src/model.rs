@@ -37,6 +37,8 @@ pub struct Config {
     pub append_category_dir: bool,
     pub unpack_cleanup_disk: bool,
     pub ext_cleanup_disk: String,
+    pub monthly_quota: u64,
+    pub daily_quota: u64,
     pub post_strategy: bergamot_core::models::PostStrategy,
     raw: HashMap<String, String>,
 }
@@ -160,6 +162,15 @@ impl Config {
             .cloned()
             .unwrap_or_else(|| ".par2, .sfv".to_string());
 
+        let monthly_quota = raw
+            .get("MonthlyQuota")
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(0);
+        let daily_quota = raw
+            .get("DailyQuota")
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(0);
+
         let post_strategy = raw
             .get("PostStrategy")
             .map(|value| match value.to_lowercase().as_str() {
@@ -205,6 +216,8 @@ impl Config {
             append_category_dir,
             unpack_cleanup_disk,
             ext_cleanup_disk,
+            monthly_quota,
+            daily_quota,
             post_strategy,
             raw,
         }

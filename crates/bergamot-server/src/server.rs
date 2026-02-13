@@ -254,6 +254,19 @@ impl AppState {
         let day_fields = crate::status::SizeFields::from(day_bytes);
         let month_fields = crate::status::SizeFields::from(month_bytes);
 
+        let (monthly_quota, daily_quota) = self
+            .config
+            .as_ref()
+            .map(|c| {
+                let cfg = c.read().unwrap();
+                (cfg.monthly_quota, cfg.daily_quota)
+            })
+            .unwrap_or((0, 0));
+        let quota_reached = self
+            .stats_tracker
+            .as_ref()
+            .is_some_and(|tracker| tracker.check_quota_reached(monthly_quota, daily_quota));
+
         StatusResponse {
             remaining_size_lo: remaining_fields.lo,
             remaining_size_hi: remaining_fields.hi,
@@ -295,7 +308,7 @@ impl AppState {
             post_paused,
             scan_paused,
             server_stand_by: download_rate == 0,
-            quota_reached: false,
+            quota_reached,
             feed_active: false,
             free_disk_space_lo: dest_free_fields.lo,
             free_disk_space_hi: dest_free_fields.hi,

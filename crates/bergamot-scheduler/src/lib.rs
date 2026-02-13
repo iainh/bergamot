@@ -835,6 +835,28 @@ impl StatsTracker {
             .is_some_and(|volume| volume.bytes_this_month >= quota_bytes)
     }
 
+    pub fn check_daily_quota(&self, server_id: u32, quota_gb: u64) -> bool {
+        if quota_gb == 0 {
+            return false;
+        }
+        let quota_bytes = quota_gb * 1024 * 1024 * 1024;
+        self.volumes
+            .get(&server_id)
+            .is_some_and(|volume| volume.bytes_today >= quota_bytes)
+    }
+
+    pub fn is_any_quota_reached(&self, monthly_quota_gb: u64, daily_quota_gb: u64) -> bool {
+        if monthly_quota_gb == 0 && daily_quota_gb == 0 {
+            return false;
+        }
+        let monthly_bytes = monthly_quota_gb * 1024 * 1024 * 1024;
+        let daily_bytes = daily_quota_gb * 1024 * 1024 * 1024;
+        let total_month: u64 = self.volumes.values().map(|v| v.bytes_this_month).sum();
+        let total_day: u64 = self.volumes.values().map(|v| v.bytes_today).sum();
+        (monthly_quota_gb > 0 && total_month >= monthly_bytes)
+            || (daily_quota_gb > 0 && total_day >= daily_bytes)
+    }
+
     fn roll_day(&mut self, today: NaiveDate) {
         for volume in self.volumes.values_mut() {
             volume
@@ -923,6 +945,13 @@ impl SharedStatsTracker {
         if let Ok(mut tracker) = self.inner.lock() {
             tracker.reset_volume(server_id);
         }
+    }
+
+    pub fn check_quota_reached(&self, monthly_quota_gb: u64, daily_quota_gb: u64) -> bool {
+        self.inner
+            .lock()
+            .map(|t| t.is_any_quota_reached(monthly_quota_gb, daily_quota_gb))
+            .unwrap_or(false)
     }
 
     pub fn snapshot_with_date(
