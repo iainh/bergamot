@@ -241,6 +241,19 @@ impl AppState {
         let inter_free_fields = crate::status::SizeFields::from(inter_free);
         let inter_total_fields = crate::status::SizeFields::from(inter_total);
 
+        let (day_bytes, month_bytes) = self
+            .stats_tracker
+            .as_ref()
+            .map(|tracker| {
+                let volumes = tracker.snapshot_volumes();
+                let day: u64 = volumes.values().map(|v| v.bytes_today).sum();
+                let month: u64 = volumes.values().map(|v| v.bytes_this_month).sum();
+                (day, month)
+            })
+            .unwrap_or((0, 0));
+        let day_fields = crate::status::SizeFields::from(day_bytes);
+        let month_fields = crate::status::SizeFields::from(month_bytes);
+
         StatusResponse {
             remaining_size_lo: remaining_fields.lo,
             remaining_size_hi: remaining_fields.hi,
@@ -251,12 +264,12 @@ impl AppState {
             downloaded_size_lo: downloaded_fields.lo,
             downloaded_size_hi: downloaded_fields.hi,
             downloaded_size_mb: downloaded_fields.mb,
-            month_size_lo: 0,
-            month_size_hi: 0,
-            month_size_mb: 0,
-            day_size_lo: 0,
-            day_size_hi: 0,
-            day_size_mb: 0,
+            month_size_lo: month_fields.lo,
+            month_size_hi: month_fields.hi,
+            month_size_mb: month_fields.mb,
+            day_size_lo: day_fields.lo,
+            day_size_hi: day_fields.hi,
+            day_size_mb: day_fields.mb,
             article_cache_lo: 0,
             article_cache_hi: 0,
             article_cache_mb: 0,
