@@ -1663,10 +1663,11 @@ impl QueueCoordinator {
             self.check_duplicate(&dup_key, bergamot_core::models::DupMode::Score)
         {
             tracing::info!(
-                "skipping duplicate download: {} (matches id {})",
+                "rejecting duplicate download: {} (matches id {})",
                 name,
                 existing_id
             );
+            return Err(QueueError::Duplicate { name, existing_id });
         }
 
         let mut files = Vec::with_capacity(parsed.files.len());

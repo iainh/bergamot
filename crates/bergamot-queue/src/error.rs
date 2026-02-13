@@ -16,4 +16,7 @@ pub enum QueueError {
 
     #[error("I/O error: {0}")]
     IoError(String),
+
+    #[error("duplicate download: {name} (matches existing id {existing_id})")]
+    Duplicate { name: String, existing_id: u32 },
 }
