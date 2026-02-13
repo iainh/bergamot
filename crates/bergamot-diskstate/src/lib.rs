@@ -74,15 +74,65 @@ impl<F: StateFormat> DiskState<F> {
         atomic_write(&path, &data)
     }
 
+    pub fn wal_path(&self, file_id: u32) -> PathBuf {
+        self.state_dir.join(format!("file/{file_id:08}.wal"))
+    }
+
+    pub fn append_file_wal(&self, file_id: u32, entries: &[(u32, u32)]) -> anyhow::Result<()> {
+        use std::io::Write;
+        let path = self.wal_path(file_id);
+        let mut file = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)?;
+        for &(article_index, crc) in entries {
+            file.write_all(&article_index.to_le_bytes())?;
+            file.write_all(&crc.to_le_bytes())?;
+        }
+        Ok(())
+    }
+
     pub fn load_file_state(&self, file_id: u32) -> anyhow::Result<FileArticleState> {
         let path = self.state_dir.join(format!("file/{file_id:08}.state"));
         let data = fs::read(&path)?;
-        self.format.deserialize(&data)
+        let mut state: FileArticleState = self.format.deserialize(&data)?;
+
+        let wal_path = self.wal_path(file_id);
+        if wal_path.exists() {
+            let wal_data = fs::read(&wal_path)?;
+            let record_size = 8;
+            let full_records = wal_data.len() / record_size;
+            for i in 0..full_records {
+                let offset = i * record_size;
+                let article_index =
+                    u32::from_le_bytes(wal_data[offset..offset + 4].try_into().unwrap());
+                let crc = u32::from_le_bytes(wal_data[offset + 4..offset + 8].try_into().unwrap());
+                state.mark_article_done(article_index, crc);
+            }
+        }
+
+        Ok(state)
+    }
+
+    pub fn compact_file_state(&self, file_id: u32, state: &FileArticleState) -> anyhow::Result<()> {
+        self.save_file_state(file_id, state)?;
+        let wal_path = self.wal_path(file_id);
+        match fs::remove_file(&wal_path) {
+            Ok(()) => Ok(()),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(err) => Err(err.into()),
+        }
     }
 
     pub fn delete_file_state(&self, file_id: u32) -> anyhow::Result<()> {
         let path = self.state_dir.join(format!("file/{file_id:08}.state"));
         match fs::remove_file(&path) {
+            Ok(()) => {}
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(err) => return Err(err.into()),
+        }
+        let wal_path = self.wal_path(file_id);
+        match fs::remove_file(&wal_path) {
             Ok(()) => Ok(()),
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
             Err(err) => Err(err.into()),
@@ -191,7 +241,8 @@ impl<F: StateFormat> DiskState<F> {
             if nzb.success_article_count > 0 || nzb.failed_article_count > 0 {
                 for &file_id in &nzb.file_ids {
                     let state_path = self.state_dir.join(format!("file/{file_id:08}.state"));
-                    if !state_path.exists() {
+                    let wal_path = self.wal_path(file_id);
+                    if !state_path.exists() && !wal_path.exists() {
                         warnings.push(ConsistencyWarning::MissingFileState { file_id });
                     }
                 }
@@ -596,6 +647,119 @@ mod tests {
         atomic_write_relaxed(&path, data).expect("write");
         let read_back = fs::read(&path).expect("read");
         assert_eq!(read_back, data);
+    }
+
+    #[test]
+    fn wal_roundtrip_replays_entries_on_load() {
+        let temp = TempDir::new().expect("temp dir");
+        let disk_state = DiskState::new(temp.path().to_path_buf(), JsonFormat).expect("disk state");
+
+        let mut state = FileArticleState::new(1, 100);
+        state.mark_article_done(0, 0xAAAA);
+        disk_state
+            .save_file_state(1, &state)
+            .expect("save snapshot");
+
+        disk_state
+            .append_file_wal(1, &[(5, 0xBBBB), (10, 0xCCCC)])
+            .expect("append wal");
+
+        let loaded = disk_state.load_file_state(1).expect("load");
+        assert!(loaded.is_article_done(0));
+        assert!(loaded.is_article_done(5));
+        assert!(loaded.is_article_done(10));
+        assert_eq!(loaded.article_crcs[&0], 0xAAAA);
+        assert_eq!(loaded.article_crcs[&5], 0xBBBB);
+        assert_eq!(loaded.article_crcs[&10], 0xCCCC);
+    }
+
+    #[test]
+    fn wal_partial_tail_is_ignored() {
+        let temp = TempDir::new().expect("temp dir");
+        let disk_state = DiskState::new(temp.path().to_path_buf(), JsonFormat).expect("disk state");
+
+        let state = FileArticleState::new(1, 100);
+        disk_state
+            .save_file_state(1, &state)
+            .expect("save snapshot");
+
+        let wal_path = disk_state.wal_path(1);
+        let mut data = Vec::new();
+        data.extend_from_slice(&3u32.to_le_bytes());
+        data.extend_from_slice(&0xDDDDu32.to_le_bytes());
+        data.push(0xFF); // partial trailing byte
+        fs::write(&wal_path, &data).expect("write wal");
+
+        let loaded = disk_state.load_file_state(1).expect("load");
+        assert!(loaded.is_article_done(3));
+        assert_eq!(loaded.article_crcs[&3], 0xDDDD);
+        assert_eq!(loaded.completed_count(), 1);
+    }
+
+    #[test]
+    fn delete_file_state_removes_wal() {
+        let temp = TempDir::new().expect("temp dir");
+        let disk_state = DiskState::new(temp.path().to_path_buf(), JsonFormat).expect("disk state");
+
+        let state = FileArticleState::new(1, 10);
+        disk_state.save_file_state(1, &state).expect("save");
+        disk_state
+            .append_file_wal(1, &[(1, 0x1111)])
+            .expect("append");
+
+        assert!(disk_state.wal_path(1).exists());
+        disk_state.delete_file_state(1).expect("delete");
+        assert!(!disk_state.wal_path(1).exists());
+        let state_path = disk_state.state_dir.join("file/00000001.state");
+        assert!(!state_path.exists());
+    }
+
+    #[test]
+    fn compact_file_state_writes_snapshot_and_removes_wal() {
+        let temp = TempDir::new().expect("temp dir");
+        let disk_state = DiskState::new(temp.path().to_path_buf(), JsonFormat).expect("disk state");
+
+        let mut state = FileArticleState::new(1, 100);
+        state.mark_article_done(0, 0xAAAA);
+        disk_state.save_file_state(1, &state).expect("save");
+        disk_state
+            .append_file_wal(1, &[(5, 0xBBBB)])
+            .expect("append");
+
+        let full_state = disk_state.load_file_state(1).expect("load");
+        disk_state
+            .compact_file_state(1, &full_state)
+            .expect("compact");
+
+        assert!(!disk_state.wal_path(1).exists());
+        let reloaded = disk_state.load_file_state(1).expect("reload");
+        assert!(reloaded.is_article_done(0));
+        assert!(reloaded.is_article_done(5));
+        assert_eq!(reloaded.article_crcs[&5], 0xBBBB);
+    }
+
+    #[test]
+    fn validate_consistency_accepts_wal_only_presence() {
+        let temp = TempDir::new().expect("temp dir");
+        let disk_state = DiskState::new(temp.path().to_path_buf(), JsonFormat).expect("disk state");
+
+        let mut queue = sample_queue_state();
+        queue.nzbs[0].success_article_count = 1;
+
+        let state = FileArticleState::new(10, 10);
+        disk_state.save_file_state(10, &state).expect("save");
+
+        disk_state
+            .append_file_wal(11, &[(0, 0x1111)])
+            .expect("append wal for file 11");
+
+        let warnings = disk_state.validate_consistency(&queue).expect("validate");
+        assert!(
+            !warnings
+                .iter()
+                .any(|w| matches!(w, ConsistencyWarning::MissingFileState { file_id: 11 })),
+            "file 11 has WAL so should not be reported missing"
+        );
     }
 
     #[test]
