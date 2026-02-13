@@ -403,6 +403,47 @@ impl StateLock {
     }
 }
 
+pub struct AtomicWriteOptions {
+    pub sync_file: bool,
+    pub sync_dir: bool,
+}
+
+pub fn atomic_write_with_options(
+    path: &Path,
+    data: &[u8],
+    opt: AtomicWriteOptions,
+) -> anyhow::Result<()> {
+    let tmp_path = path.with_extension("tmp");
+
+    let mut file = fs::File::create(&tmp_path)?;
+    file.write_all(data)?;
+    if opt.sync_file {
+        file.sync_all()?;
+    }
+
+    fs::rename(&tmp_path, path)?;
+
+    if opt.sync_dir
+        && let Some(parent) = path.parent()
+    {
+        let dir = fs::File::open(parent)?;
+        dir.sync_all()?;
+    }
+
+    Ok(())
+}
+
+pub fn atomic_write_relaxed(path: &Path, data: &[u8]) -> anyhow::Result<()> {
+    atomic_write_with_options(
+        path,
+        data,
+        AtomicWriteOptions {
+            sync_file: false,
+            sync_dir: false,
+        },
+    )
+}
+
 pub fn atomic_write(path: &Path, data: &[u8]) -> anyhow::Result<()> {
     let tmp_path = path.with_extension("tmp");
 
@@ -527,6 +568,34 @@ mod tests {
             loaded.feeds.get(&1).unwrap()[0].url,
             "https://example.com/1.nzb"
         );
+    }
+
+    #[test]
+    fn atomic_write_with_options_relaxed_writes_correct_contents() {
+        let temp = TempDir::new().expect("temp dir");
+        let path = temp.path().join("relaxed.dat");
+        let data = b"relaxed write test data";
+        atomic_write_with_options(
+            &path,
+            data,
+            AtomicWriteOptions {
+                sync_file: false,
+                sync_dir: false,
+            },
+        )
+        .expect("write");
+        let read_back = fs::read(&path).expect("read");
+        assert_eq!(read_back, data);
+    }
+
+    #[test]
+    fn atomic_write_relaxed_writes_correct_contents() {
+        let temp = TempDir::new().expect("temp dir");
+        let path = temp.path().join("relaxed2.dat");
+        let data = b"relaxed shorthand";
+        atomic_write_relaxed(&path, data).expect("write");
+        let read_back = fs::read(&path).expect("read");
+        assert_eq!(read_back, data);
     }
 
     #[test]
