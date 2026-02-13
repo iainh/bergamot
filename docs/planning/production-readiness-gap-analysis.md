@@ -94,15 +94,15 @@ Remaining work:
 
 ### Deobfuscation & smart rename
 
-bergamot relies mainly on NZB metadata/subject parsing for filenames. NZBGet
-provides:
+✅ PAR2-based deobfuscation is now implemented. Files with obfuscated names
+(hex-like stems ≥16 chars) are matched against PAR2 file entries by
+extension, size, and 16K MD5 hash, then renamed to the original filename.
+This runs at the ParRenaming stage, before PAR2 verification.
 
-- Intelligent detection of obfuscated releases (regex-based hash pattern
-  detection)
-- PAR2-metadata-based file renaming (using PAR2 file lists to recover
-  original names)
-- Par renaming and RAR renaming for renamed segments
-- Pre-unpack rename pipeline
+Remaining work:
+
+- RAR-based renaming for renamed segments
+- More aggressive obfuscation detection patterns
 
 ### Direct rename / direct unpack
 
@@ -110,16 +110,13 @@ NZBGet can rename and unpack files as they are downloaded, without waiting for
 the entire NZB to complete. This is a significant usability feature for large
 downloads. Not implemented in bergamot.
 
-### Download quotas
+### ✅ Download quotas
 
-✅ `MonthlyQuota` and `DailyQuota` config keys are now parsed (in GB).
+`MonthlyQuota` and `DailyQuota` config keys are parsed (in GB).
 `QuotaReached` in the status response reflects whether quotas are exceeded.
 Day/month download counters are populated from `SharedStatsTracker`.
-
-Remaining work:
-
-- Automatic pause of downloads when quota is reached
-- Resume when quota resets (daily/monthly rollover)
+Downloads are automatically paused when quota is reached and resumed when
+quota resets (daily/monthly rollover via `StatsTracker`).
 
 ### Extension manager lifecycle
 
@@ -289,9 +286,9 @@ Build a production readiness test matrix covering:
 | Config file compatibility | ✅ | ✅ | Implemented |
 | Web UI | ✅ | ❌ | No bundled assets |
 | Duplicate detection | ✅ | ⚠️ | Basic rejection enforced, scoring/history TBD |
-| Deobfuscation | ✅ | ❌ | Not implemented |
+| Deobfuscation | ✅ | ⚠️ | PAR2-based rename implemented, RAR rename TBD |
 | Direct rename/unpack | ✅ | ❌ | Not implemented |
-| Download quotas | ✅ | ⚠️ | Config, counters, QuotaReached; auto-pause TBD |
+| Download quotas | ✅ | ✅ | Config, counters, QuotaReached, auto-pause/resume |
 | Extension manager | ✅ | ❌ | No install/remove lifecycle |
 | Multiple auth roles | ✅ | ✅ | Three roles: Control, Restricted, Add |
 | PAR-first strategy | ✅ | ❌ | No smart ordering |
