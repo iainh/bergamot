@@ -85,11 +85,11 @@ pub fn pow(a: u16, n: u32) -> u16 {
 pub struct MulTable {
     lo: [u16; 256],
     hi: [u16; 256],
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
     nibble: NibbleTable,
 }
 
-#[cfg(target_arch = "aarch64")]
+#[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
 struct NibbleTable {
     lo: [[u8; 16]; 4],
     hi: [[u8; 16]; 4],
@@ -106,7 +106,7 @@ impl MulTable {
             }
         }
 
-        #[cfg(target_arch = "aarch64")]
+        #[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
         let nibble = {
             let mut tbl = NibbleTable {
                 lo: [[0u8; 16]; 4],
@@ -128,7 +128,7 @@ impl MulTable {
         MulTable {
             lo,
             hi,
-            #[cfg(target_arch = "aarch64")]
+            #[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
             nibble,
         }
     }
@@ -155,7 +155,16 @@ pub fn muladd_with_table(dst: &mut [u8], src: &[u8], table: &MulTable) {
         muladd_neon(dst, src, len, table);
     }
 
-    #[cfg(not(target_arch = "aarch64"))]
+    #[cfg(target_arch = "x86_64")]
+    {
+        if is_x86_feature_detected!("ssse3") {
+            unsafe { muladd_ssse3(dst, src, len, table) };
+        } else {
+            muladd_scalar(dst, src, len, table);
+        }
+    }
+
+    #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
     muladd_scalar(dst, src, len, table);
 }
 
@@ -244,6 +253,134 @@ fn muladd_neon(dst: &mut [u8], src: &[u8], len: usize, table: &MulTable) {
     }
 }
 
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "ssse3")]
+unsafe fn muladd_ssse3(dst: &mut [u8], src: &[u8], len: usize, table: &MulTable) {
+    use core::arch::x86_64::*;
+
+    if len < 16 {
+        muladd_scalar(dst, src, len, table);
+        return;
+    }
+
+    let mask_0f = _mm_set1_epi8(0x0F);
+
+    let t0_lo = _mm_loadu_si128(table.nibble.lo[0].as_ptr() as *const __m128i);
+    let t0_hi = _mm_loadu_si128(table.nibble.hi[0].as_ptr() as *const __m128i);
+    let t1_lo = _mm_loadu_si128(table.nibble.lo[1].as_ptr() as *const __m128i);
+    let t1_hi = _mm_loadu_si128(table.nibble.hi[1].as_ptr() as *const __m128i);
+    let t2_lo = _mm_loadu_si128(table.nibble.lo[2].as_ptr() as *const __m128i);
+    let t2_hi = _mm_loadu_si128(table.nibble.hi[2].as_ptr() as *const __m128i);
+    let t3_lo = _mm_loadu_si128(table.nibble.lo[3].as_ptr() as *const __m128i);
+    let t3_hi = _mm_loadu_si128(table.nibble.hi[3].as_ptr() as *const __m128i);
+
+    let deinterleave_even =
+        _mm_setr_epi8(0, 2, 4, 6, 8, 10, 12, 14, -1, -1, -1, -1, -1, -1, -1, -1);
+    let deinterleave_odd = _mm_setr_epi8(1, 3, 5, 7, 9, 11, 13, 15, -1, -1, -1, -1, -1, -1, -1, -1);
+
+    let chunks = len / 16;
+    let mut offset = 0;
+
+    for _ in 0..chunks {
+        let s = _mm_loadu_si128(src.as_ptr().add(offset) as *const __m128i);
+        let d = _mm_loadu_si128(dst.as_ptr().add(offset) as *const __m128i);
+
+        let even_bytes = _mm_shuffle_epi8(s, deinterleave_even);
+        let odd_bytes = _mm_shuffle_epi8(s, deinterleave_odd);
+
+        let n0 = _mm_and_si128(even_bytes, mask_0f);
+        let n1 = _mm_and_si128(_mm_srli_epi16(even_bytes, 4), mask_0f);
+        let n2 = _mm_and_si128(odd_bytes, mask_0f);
+        let n3 = _mm_and_si128(_mm_srli_epi16(odd_bytes, 4), mask_0f);
+
+        let r_lo = _mm_xor_si128(
+            _mm_xor_si128(_mm_shuffle_epi8(t0_lo, n0), _mm_shuffle_epi8(t1_lo, n1)),
+            _mm_xor_si128(_mm_shuffle_epi8(t2_lo, n2), _mm_shuffle_epi8(t3_lo, n3)),
+        );
+        let r_hi = _mm_xor_si128(
+            _mm_xor_si128(_mm_shuffle_epi8(t0_hi, n0), _mm_shuffle_epi8(t1_hi, n1)),
+            _mm_xor_si128(_mm_shuffle_epi8(t2_hi, n2), _mm_shuffle_epi8(t3_hi, n3)),
+        );
+
+        let product = _mm_unpacklo_epi8(r_lo, r_hi);
+        _mm_storeu_si128(
+            dst.as_mut_ptr().add(offset) as *mut __m128i,
+            _mm_xor_si128(d, product),
+        );
+        offset += 16;
+    }
+
+    let tail_start = chunks * 16;
+    if tail_start < len {
+        muladd_scalar(
+            &mut dst[tail_start..],
+            &src[tail_start..],
+            len - tail_start,
+            table,
+        );
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "ssse3")]
+unsafe fn mul_slice_inplace_ssse3(dst: &mut [u8], table: &MulTable) {
+    use core::arch::x86_64::*;
+
+    let len = dst.len();
+    if len < 16 {
+        mul_slice_inplace_scalar(dst, table);
+        return;
+    }
+
+    let mask_0f = _mm_set1_epi8(0x0F);
+
+    let t0_lo = _mm_loadu_si128(table.nibble.lo[0].as_ptr() as *const __m128i);
+    let t0_hi = _mm_loadu_si128(table.nibble.hi[0].as_ptr() as *const __m128i);
+    let t1_lo = _mm_loadu_si128(table.nibble.lo[1].as_ptr() as *const __m128i);
+    let t1_hi = _mm_loadu_si128(table.nibble.hi[1].as_ptr() as *const __m128i);
+    let t2_lo = _mm_loadu_si128(table.nibble.lo[2].as_ptr() as *const __m128i);
+    let t2_hi = _mm_loadu_si128(table.nibble.hi[2].as_ptr() as *const __m128i);
+    let t3_lo = _mm_loadu_si128(table.nibble.lo[3].as_ptr() as *const __m128i);
+    let t3_hi = _mm_loadu_si128(table.nibble.hi[3].as_ptr() as *const __m128i);
+
+    let deinterleave_even =
+        _mm_setr_epi8(0, 2, 4, 6, 8, 10, 12, 14, -1, -1, -1, -1, -1, -1, -1, -1);
+    let deinterleave_odd = _mm_setr_epi8(1, 3, 5, 7, 9, 11, 13, 15, -1, -1, -1, -1, -1, -1, -1, -1);
+
+    let chunks = len / 16;
+    let mut offset = 0;
+
+    for _ in 0..chunks {
+        let d = _mm_loadu_si128(dst.as_ptr().add(offset) as *const __m128i);
+
+        let even_bytes = _mm_shuffle_epi8(d, deinterleave_even);
+        let odd_bytes = _mm_shuffle_epi8(d, deinterleave_odd);
+
+        let n0 = _mm_and_si128(even_bytes, mask_0f);
+        let n1 = _mm_and_si128(_mm_srli_epi16(even_bytes, 4), mask_0f);
+        let n2 = _mm_and_si128(odd_bytes, mask_0f);
+        let n3 = _mm_and_si128(_mm_srli_epi16(odd_bytes, 4), mask_0f);
+
+        let r_lo = _mm_xor_si128(
+            _mm_xor_si128(_mm_shuffle_epi8(t0_lo, n0), _mm_shuffle_epi8(t1_lo, n1)),
+            _mm_xor_si128(_mm_shuffle_epi8(t2_lo, n2), _mm_shuffle_epi8(t3_lo, n3)),
+        );
+        let r_hi = _mm_xor_si128(
+            _mm_xor_si128(_mm_shuffle_epi8(t0_hi, n0), _mm_shuffle_epi8(t1_hi, n1)),
+            _mm_xor_si128(_mm_shuffle_epi8(t2_hi, n2), _mm_shuffle_epi8(t3_hi, n3)),
+        );
+
+        let product = _mm_unpacklo_epi8(r_lo, r_hi);
+        _mm_storeu_si128(dst.as_mut_ptr().add(offset) as *mut __m128i, product);
+        offset += 16;
+    }
+
+    let tail_start = chunks * 16;
+    if tail_start < len {
+        mul_slice_inplace_scalar(&mut dst[tail_start..], table);
+    }
+}
+
 pub fn mul_slice_inplace(dst: &mut [u8], coeff: u16) {
     if coeff == 0 {
         dst.fill(0);
@@ -259,7 +396,16 @@ pub fn mul_slice_inplace(dst: &mut [u8], coeff: u16) {
         mul_slice_inplace_neon(dst, &table);
     }
 
-    #[cfg(not(target_arch = "aarch64"))]
+    #[cfg(target_arch = "x86_64")]
+    {
+        if is_x86_feature_detected!("ssse3") {
+            unsafe { mul_slice_inplace_ssse3(dst, &table) };
+        } else {
+            mul_slice_inplace_scalar(dst, &table);
+        }
+    }
+
+    #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
     mul_slice_inplace_scalar(dst, &table);
 }
 
