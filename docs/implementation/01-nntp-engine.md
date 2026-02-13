@@ -16,6 +16,44 @@
 > The illustrative code below is simplified for reference; see the source modules
 > for the full implementation.
 
+## RFC references
+
+The NNTP engine implements the following IETF standards:
+
+| RFC | Title | Usage in bergamot |
+|-----|-------|-------------------|
+| [RFC 3977](https://datatracker.ietf.org/doc/html/rfc3977) | Network News Transfer Protocol (NNTP) | Core protocol: connection, greeting, GROUP, BODY, STAT, QUIT, pipelining, dot-unstuffing |
+| [RFC 4643](https://datatracker.ietf.org/doc/html/rfc4643) | Network News Transfer Protocol (NNTP) Extension for Authentication | AUTHINFO USER/PASS authentication |
+| [RFC 4642](https://datatracker.ietf.org/doc/html/rfc4642) | Using Transport Layer Security (TLS) with NNTP | STARTTLS upgrade |
+| [RFC 8054](https://datatracker.ietf.org/doc/html/rfc8054) | Network News Transfer Protocol (NNTP) Extension for Compression | COMPRESS DEFLATE support |
+| [RFC 8446](https://datatracker.ietf.org/doc/html/rfc8446) | The Transport Layer Security (TLS) Protocol Version 1.3 | TLS session resumption (§2.2) |
+| [RFC 5077](https://datatracker.ietf.org/doc/html/rfc5077) | Transport Layer Security (TLS) Session Resumption without Server-Side State | TLS session tickets for connection reuse |
+
+---
+
+## Sans-I/O state machine
+
+The NNTP protocol logic in `machine.rs` follows the
+[sans-I/O](https://sans-io.readthedocs.io/) design pattern: the state machine
+is a pure function of `(State, Input) → (State, Output)` with no direct network
+access. I/O-performing code in `protocol.rs` feeds parsed response lines and
+body chunks into the machine, then acts on the `Output` values it produces
+(sending commands, upgrading to TLS, emitting events).
+
+This separation provides several benefits:
+
+- **Testability** — the state machine can be driven entirely with in-memory
+  inputs, without mocking TCP streams or TLS.
+- **Correctness** — protocol transitions are exhaustively matchable in a single
+  `enum`-driven loop, making it hard to miss states.
+- **Reuse** — the same machine can be wrapped by different I/O backends
+  (tokio, blocking, test harness) without changes.
+
+See `machine.rs` for the `Input`, `Output`, `Event`, and `State` types that
+define the protocol exchange.
+
+---
+
 ## NNTP protocol overview (RFC 3977)
 
 NNTP (Network News Transfer Protocol) is a TCP-based text protocol for accessing
