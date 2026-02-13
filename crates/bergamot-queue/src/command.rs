@@ -45,12 +45,23 @@ pub enum DownloadOutcome {
     },
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct AddNzbOptions {
+    pub add_to_top: bool,
+    pub add_paused: bool,
+    pub dup_key: Option<String>,
+    pub dup_score: Option<i32>,
+    pub dup_mode: Option<DupMode>,
+    pub parameters: Vec<(String, String)>,
+}
+
 #[derive(Debug)]
 pub enum QueueCommand {
     AddNzb {
         path: std::path::PathBuf,
         category: Option<String>,
         priority: Priority,
+        options: AddNzbOptions,
         reply: oneshot::Sender<Result<u32, QueueError>>,
     },
     RemoveNzb {

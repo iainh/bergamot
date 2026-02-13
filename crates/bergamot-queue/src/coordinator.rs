@@ -55,11 +55,28 @@ impl QueueHandle {
         category: Option<String>,
         priority: Priority,
     ) -> Result<u32, QueueError> {
+        self.add_nzb_with_options(
+            path,
+            category,
+            priority,
+            crate::command::AddNzbOptions::default(),
+        )
+        .await
+    }
+
+    pub async fn add_nzb_with_options(
+        &self,
+        path: std::path::PathBuf,
+        category: Option<String>,
+        priority: Priority,
+        options: crate::command::AddNzbOptions,
+    ) -> Result<u32, QueueError> {
         let (reply_tx, reply_rx) = oneshot::channel();
         let cmd = QueueCommand::AddNzb {
             path,
             category,
             priority,
+            options,
             reply: reply_tx,
         };
         self.command_tx
@@ -715,9 +732,10 @@ impl QueueCoordinator {
                 path,
                 category,
                 priority,
+                options,
                 reply,
             } => {
-                let result = self.ingest_nzb(&path, category, priority);
+                let result = self.ingest_nzb(&path, category, priority, &options);
                 let _ = reply.send(result);
             }
             QueueCommand::RemoveNzb { id, reply, .. } => {
@@ -1618,6 +1636,7 @@ impl QueueCoordinator {
         path: &std::path::Path,
         category: Option<String>,
         priority: Priority,
+        options: &crate::command::AddNzbOptions,
     ) -> Result<u32, QueueError> {
         let data = std::fs::read(path)
             .map_err(|e| QueueError::IoError(format!("{}: {e}", path.display())))?;
@@ -1657,11 +1676,16 @@ impl QueueCoordinator {
             .file_name()
             .map(|v| v.to_string_lossy().to_string())
             .unwrap_or_else(|| "nzb".to_string());
-        let dup_key = name.strip_suffix(".nzb").unwrap_or(&name).to_string();
+        let dup_key = options
+            .dup_key
+            .clone()
+            .unwrap_or_else(|| name.strip_suffix(".nzb").unwrap_or(&name).to_string());
+        let dup_mode = options
+            .dup_mode
+            .unwrap_or(bergamot_core::models::DupMode::Score);
+        let dup_score = options.dup_score.unwrap_or(0);
 
-        if let Some(existing_id) =
-            self.check_duplicate(&dup_key, bergamot_core::models::DupMode::Score)
-        {
+        if let Some(existing_id) = self.check_duplicate(&dup_key, dup_mode) {
             tracing::info!(
                 "rejecting duplicate download: {} (matches id {})",
                 name,
@@ -1754,8 +1778,8 @@ impl QueueCoordinator {
             category: category.unwrap_or_default(),
             priority,
             dup_key,
-            dup_mode: bergamot_core::models::DupMode::Score,
-            dup_score: 0,
+            dup_mode,
+            dup_score,
             size: total_size,
             remaining_size: total_size,
             paused_size: 0,
@@ -1783,7 +1807,7 @@ impl QueueCoordinator {
             par_sec: 0,
             repair_sec: 0,
             unpack_sec: 0,
-            paused: false,
+            paused: options.add_paused,
             deleted: false,
             direct_rename: false,
             force_priority: false,
@@ -1802,13 +1826,24 @@ impl QueueCoordinator {
             files,
             completed_files: vec![],
             server_stats: vec![],
-            parameters: vec![],
+            parameters: options
+                .parameters
+                .iter()
+                .map(|(k, v)| bergamot_core::models::NzbParameter {
+                    name: k.clone(),
+                    value: v.clone(),
+                })
+                .collect(),
             post_info: None,
             message_count: 0,
             cached_message_count: 0,
         };
 
-        self.queue.queue.push(nzb);
+        if options.add_to_top {
+            self.queue.queue.insert(0, nzb);
+        } else {
+            self.queue.queue.push(nzb);
+        }
         Ok(id)
     }
 
@@ -3238,7 +3273,12 @@ mod tests {
         );
 
         let id = coordinator
-            .ingest_nzb(nzb_file.path(), Some("tv".to_string()), Priority::High)
+            .ingest_nzb(
+                nzb_file.path(),
+                Some("tv".to_string()),
+                Priority::High,
+                &Default::default(),
+            )
             .expect("ingest");
         assert_eq!(id, 1);
 
@@ -3277,7 +3317,7 @@ mod tests {
         );
 
         coordinator
-            .ingest_nzb(nzb_file.path(), None, Priority::Normal)
+            .ingest_nzb(nzb_file.path(), None, Priority::Normal, &Default::default())
             .expect("ingest");
 
         let nzb = &coordinator.queue.queue[0];
@@ -3302,7 +3342,7 @@ mod tests {
         );
 
         coordinator
-            .ingest_nzb(nzb_file.path(), None, Priority::Normal)
+            .ingest_nzb(nzb_file.path(), None, Priority::Normal, &Default::default())
             .expect("ingest");
 
         let nzb = &coordinator.queue.queue[0];
@@ -3331,6 +3371,7 @@ mod tests {
             std::path::Path::new("/nonexistent/test.nzb"),
             None,
             Priority::Normal,
+            &Default::default(),
         );
         assert!(result.is_err());
     }
@@ -3349,7 +3390,7 @@ mod tests {
         );
         let nzb_file = write_sample_nzb();
         coordinator
-            .ingest_nzb(nzb_file.path(), None, Priority::Normal)
+            .ingest_nzb(nzb_file.path(), None, Priority::Normal, &Default::default())
             .expect("ingest");
         (coordinator, handle, rx, rate_rx)
     }

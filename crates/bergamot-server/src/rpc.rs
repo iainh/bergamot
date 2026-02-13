@@ -94,6 +94,36 @@ pub(crate) async fn rpc_append(
     let priority_val = arr.get(3).and_then(|v| v.as_i64()).unwrap_or(0) as i32;
     let priority = priority_from_i32(priority_val);
 
+    let add_to_top = arr.get(4).and_then(|v| v.as_bool()).unwrap_or(false);
+    let add_paused = arr.get(5).and_then(|v| v.as_bool()).unwrap_or(false);
+    let dup_key = arr.get(6).and_then(|v| v.as_str()).map(|s| s.to_string());
+    let dup_score = arr.get(7).and_then(|v| v.as_i64()).map(|n| n as i32);
+    let dup_mode_str = arr.get(8).and_then(|v| v.as_str()).unwrap_or("");
+    let dup_mode = match dup_mode_str {
+        "ALL" => Some(bergamot_core::models::DupMode::All),
+        "FORCE" => Some(bergamot_core::models::DupMode::Force),
+        "SCORE" => Some(bergamot_core::models::DupMode::Score),
+        _ => None,
+    };
+
+    let mut parameters = Vec::new();
+    for param in arr.iter().skip(9) {
+        if let Some(s) = param.as_str()
+            && let Some((key, value)) = s.split_once('=')
+        {
+            parameters.push((key.to_string(), value.to_string()));
+        }
+    }
+
+    let options = bergamot_queue::AddNzbOptions {
+        add_to_top,
+        add_paused,
+        dup_key: dup_key.filter(|s| !s.is_empty()),
+        dup_score,
+        dup_mode,
+        parameters,
+    };
+
     let temp_dir = std::env::temp_dir().join("bergamot-downloads");
     std::fs::create_dir_all(&temp_dir).map_err(|e| rpc_error(format!("creating temp dir: {e}")))?;
 
@@ -128,7 +158,7 @@ pub(crate) async fn rpc_append(
     };
 
     let id = queue
-        .add_nzb(nzb_path, category, priority)
+        .add_nzb_with_options(nzb_path, category, priority, options)
         .await
         .map_err(rpc_error)?;
 
