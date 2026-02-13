@@ -5,7 +5,8 @@ use crc32fast::Hasher;
 use crate::error::{CrcLevel, YencError};
 use crate::model::{DecodedSegment, DecoderState};
 
-pub fn decode_yenc_line(line: &[u8], output: &mut Vec<u8>) -> usize {
+#[cfg(test)]
+fn decode_yenc_line_scalar(line: &[u8], output: &mut Vec<u8>) -> usize {
     let mut i = 0;
     let start_len = output.len();
 
@@ -25,6 +26,130 @@ pub fn decode_yenc_line(line: &[u8], output: &mut Vec<u8>) -> usize {
             _ => {
                 output.push(b.wrapping_sub(42));
             }
+        }
+        i += 1;
+    }
+
+    output.len() - start_len
+}
+
+pub fn decode_yenc_line(line: &[u8], output: &mut Vec<u8>) -> usize {
+    let start_len = output.len();
+
+    let mut end = line.len();
+    while end > 0 && (line[end - 1] == b'\n' || line[end - 1] == b'\r') {
+        end -= 1;
+    }
+    let line = &line[..end];
+
+    let mut i = 0;
+
+    #[cfg(target_arch = "aarch64")]
+    {
+        use core::arch::aarch64::*;
+
+        let eq_vec = unsafe { vdupq_n_u8(b'=') };
+        let cr_vec = unsafe { vdupq_n_u8(b'\r') };
+        let nl_vec = unsafe { vdupq_n_u8(b'\n') };
+        let sub_vec = unsafe { vdupq_n_u8(42) };
+
+        while i + 16 <= line.len() {
+            let chunk = unsafe { vld1q_u8(line.as_ptr().add(i)) };
+            let cmp_eq = unsafe { vceqq_u8(chunk, eq_vec) };
+            let cmp_cr = unsafe { vceqq_u8(chunk, cr_vec) };
+            let cmp_nl = unsafe { vceqq_u8(chunk, nl_vec) };
+            let any_special = unsafe { vorrq_u8(cmp_eq, vorrq_u8(cmp_cr, cmp_nl)) };
+
+            let has_special = unsafe { vmaxvq_u8(any_special) != 0 };
+
+            if !has_special {
+                let decoded = unsafe { vsubq_u8(chunk, sub_vec) };
+                let mut tmp = [0u8; 16];
+                unsafe { vst1q_u8(tmp.as_mut_ptr(), decoded) };
+                output.extend_from_slice(&tmp);
+                i += 16;
+            } else {
+                let chunk_end = (i + 16).min(line.len());
+                while i < chunk_end {
+                    let b = line[i];
+                    if b == b'\r' || b == b'\n' {
+                        i += 1;
+                        continue;
+                    }
+                    if b == b'=' {
+                        i += 1;
+                        if i < line.len() {
+                            output.push(line[i].wrapping_sub(106));
+                        }
+                    } else {
+                        output.push(b.wrapping_sub(42));
+                    }
+                    i += 1;
+                }
+            }
+        }
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    {
+        if is_x86_feature_detected!("sse2") {
+            use core::arch::x86_64::*;
+
+            let eq_vec = unsafe { _mm_set1_epi8(b'=' as i8) };
+            let cr_vec = unsafe { _mm_set1_epi8(b'\r' as i8) };
+            let nl_vec = unsafe { _mm_set1_epi8(b'\n' as i8) };
+            let sub_vec = unsafe { _mm_set1_epi8(42) };
+
+            while i + 16 <= line.len() {
+                let chunk = unsafe { _mm_loadu_si128(line.as_ptr().add(i) as *const __m128i) };
+                let cmp_eq = unsafe { _mm_cmpeq_epi8(chunk, eq_vec) };
+                let cmp_cr = unsafe { _mm_cmpeq_epi8(chunk, cr_vec) };
+                let cmp_nl = unsafe { _mm_cmpeq_epi8(chunk, nl_vec) };
+                let any_special = unsafe { _mm_or_si128(cmp_eq, _mm_or_si128(cmp_cr, cmp_nl)) };
+                let mask = unsafe { _mm_movemask_epi8(any_special) };
+
+                if mask == 0 {
+                    let decoded = unsafe { _mm_sub_epi8(chunk, sub_vec) };
+                    let mut tmp = [0u8; 16];
+                    unsafe { _mm_storeu_si128(tmp.as_mut_ptr() as *mut __m128i, decoded) };
+                    output.extend_from_slice(&tmp);
+                    i += 16;
+                } else {
+                    let chunk_end = (i + 16).min(line.len());
+                    while i < chunk_end {
+                        let b = line[i];
+                        if b == b'\r' || b == b'\n' {
+                            i += 1;
+                            continue;
+                        }
+                        if b == b'=' {
+                            i += 1;
+                            if i < line.len() {
+                                output.push(line[i].wrapping_sub(106));
+                            }
+                        } else {
+                            output.push(b.wrapping_sub(42));
+                        }
+                        i += 1;
+                    }
+                }
+            }
+        }
+    }
+
+    while i < line.len() {
+        let b = line[i];
+        if b == b'\r' || b == b'\n' {
+            i += 1;
+            continue;
+        }
+        if b == b'=' {
+            i += 1;
+            if i < line.len() {
+                output.push(line[i].wrapping_sub(106));
+            }
+        } else {
+            output.push(b.wrapping_sub(42));
         }
         i += 1;
     }
@@ -264,6 +389,49 @@ mod tests {
         assert_eq!(segment.data, b"abc");
         assert_eq!(segment.begin, 1);
         assert_eq!(segment.end, 3);
+    }
+
+    #[test]
+    fn decode_simd_matches_scalar_no_escapes() {
+        let line: Vec<u8> = (0..128).map(|i| ((i + 42) % 256) as u8).collect();
+        let mut scalar_out = Vec::new();
+        decode_yenc_line_scalar(&line, &mut scalar_out);
+        let mut simd_out = Vec::new();
+        decode_yenc_line(&line, &mut simd_out);
+        assert_eq!(scalar_out, simd_out);
+    }
+
+    #[test]
+    fn decode_simd_matches_scalar_with_escapes() {
+        let mut line = Vec::new();
+        for i in 0u8..64 {
+            line.push(i.wrapping_add(42));
+        }
+        line.extend_from_slice(b"=J"); // escape sequence
+        for i in 64u8..100 {
+            line.push(i.wrapping_add(42));
+        }
+        line.extend_from_slice(b"\r\n");
+
+        let mut scalar_out = Vec::new();
+        decode_yenc_line_scalar(&line, &mut scalar_out);
+        let mut simd_out = Vec::new();
+        decode_yenc_line(&line, &mut simd_out);
+        assert_eq!(scalar_out, simd_out);
+    }
+
+    #[test]
+    fn decode_simd_matches_scalar_random_bytes() {
+        for seed in 0u8..20 {
+            let line: Vec<u8> = (0..200)
+                .map(|i| seed.wrapping_mul(37).wrapping_add(i))
+                .collect();
+            let mut scalar_out = Vec::new();
+            decode_yenc_line_scalar(&line, &mut scalar_out);
+            let mut simd_out = Vec::new();
+            decode_yenc_line(&line, &mut simd_out);
+            assert_eq!(scalar_out, simd_out, "mismatch at seed {seed}");
+        }
     }
 
     #[test]
