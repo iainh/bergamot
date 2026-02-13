@@ -2122,7 +2122,10 @@ mod tests {
         assert_eq!(find_entry(entries, "Server1.Level"), Some("0"));
         assert_eq!(find_entry(entries, "Server1.Optional"), Some("no"));
         assert_eq!(find_entry(entries, "Server1.Group"), Some("0"));
-        assert_eq!(find_entry(entries, "Server1.Host"), Some("news.example.com"));
+        assert_eq!(
+            find_entry(entries, "Server1.Host"),
+            Some("news.example.com")
+        );
         assert_eq!(find_entry(entries, "Server1.Port"), Some("563"));
         assert_eq!(find_entry(entries, "Server1.Username"), Some("user1"));
         assert_eq!(find_entry(entries, "Server1.Password"), Some("pass1"));
@@ -2143,7 +2146,10 @@ mod tests {
         assert_eq!(find_entry(entries, "Server2.Level"), Some("1"));
         assert_eq!(find_entry(entries, "Server2.Optional"), Some("yes"));
         assert_eq!(find_entry(entries, "Server2.Group"), Some("1"));
-        assert_eq!(find_entry(entries, "Server2.Host"), Some("backup.example.com"));
+        assert_eq!(
+            find_entry(entries, "Server2.Host"),
+            Some("backup.example.com")
+        );
         assert_eq!(find_entry(entries, "Server2.Port"), Some("119"));
         assert_eq!(find_entry(entries, "Server2.Encryption"), Some("no"));
         assert_eq!(find_entry(entries, "Server2.Connections"), Some("4"));
@@ -2162,7 +2168,10 @@ mod tests {
         let entries = result.as_array().expect("array");
 
         assert_eq!(find_entry(entries, "Category1.Name"), Some("Movies"));
-        assert_eq!(find_entry(entries, "Category1.DestDir"), Some("/data/movies"));
+        assert_eq!(
+            find_entry(entries, "Category1.DestDir"),
+            Some("/data/movies")
+        );
         assert_eq!(find_entry(entries, "Category1.Unpack"), Some("yes"));
         assert_eq!(find_entry(entries, "Category1.Extensions"), Some("ext1"));
         assert_eq!(
@@ -2423,10 +2432,7 @@ mod tests {
         assert_eq!(find_entry(entries, "Server1.Connections"), Some("16"));
         assert_eq!(find_entry(entries, "Server1.Retention"), Some("3000"));
         assert_eq!(find_entry(entries, "Server1.IpVersion"), Some("ipv6"));
-        assert_eq!(
-            find_entry(entries, "Server1.Notes"),
-            Some("updated notes")
-        );
+        assert_eq!(find_entry(entries, "Server1.Notes"), Some("updated notes"));
         assert_eq!(
             find_entry(entries, "Server1.CertVerification"),
             Some("none")
@@ -2454,10 +2460,7 @@ mod tests {
         let reload_result = rpc_loadconfig(&state).expect("loadconfig after save");
         let entries = reload_result.as_array().expect("array");
         assert_eq!(find_entry(entries, "Category1.Name"), Some("Films"));
-        assert_eq!(
-            find_entry(entries, "Category1.DestDir"),
-            Some("/new/films")
-        );
+        assert_eq!(find_entry(entries, "Category1.DestDir"), Some("/new/films"));
         assert_eq!(find_entry(entries, "Category1.Unpack"), Some("no"));
         assert_eq!(
             find_entry(entries, "Category1.Extensions"),
@@ -2642,7 +2645,10 @@ mod tests {
         let entries = reload_result.as_array().expect("array");
         assert_eq!(find_entry(entries, "Task1.Time"), Some("22:30"));
         assert_eq!(find_entry(entries, "Task1.WeekDays"), Some("6,7"));
-        assert_eq!(find_entry(entries, "Task1.Command"), Some("UnpauseDownload"));
+        assert_eq!(
+            find_entry(entries, "Task1.Command"),
+            Some("UnpauseDownload")
+        );
         assert_eq!(find_entry(entries, "Task1.Param"), Some("1000"));
     }
 
@@ -2677,17 +2683,11 @@ mod tests {
         );
         assert_eq!(find_entry(entries, "Feed1.Backlog"), Some("yes"));
         assert_eq!(find_entry(entries, "Feed1.PauseNzb"), Some("yes"));
-        assert_eq!(
-            find_entry(entries, "Feed1.Filter"),
-            Some("title:.*Linux.*")
-        );
+        assert_eq!(find_entry(entries, "Feed1.Filter"), Some("title:.*Linux.*"));
         assert_eq!(find_entry(entries, "Feed1.Interval"), Some("30"));
         assert_eq!(find_entry(entries, "Feed1.Category"), Some("Software"));
         assert_eq!(find_entry(entries, "Feed1.Priority"), Some("100"));
-        assert_eq!(
-            find_entry(entries, "Feed1.Extensions"),
-            Some("ext2, ext3")
-        );
+        assert_eq!(find_entry(entries, "Feed1.Extensions"), Some("ext2, ext3"));
     }
 
     #[test]

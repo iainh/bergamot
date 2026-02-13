@@ -1053,10 +1053,7 @@ impl QueueCoordinator {
         let has_completion_tx = self.completion_tx.is_some();
 
         if let Some(nzb) = self.queue.queue.iter_mut().find(|n| n.id == nzb_id) {
-            tracing::info!(
-                "download complete, queuing post-processing: {}",
-                nzb.name
-            );
+            tracing::info!("download complete, queuing post-processing: {}", nzb.name);
 
             if let Some(start) = nzb.download_start_time {
                 nzb.download_sec = start.elapsed().map(|d| d.as_secs()).unwrap_or(0);

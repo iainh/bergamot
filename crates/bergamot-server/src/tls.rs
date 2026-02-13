@@ -1,9 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use rcgen::{
-    BasicConstraints, CertificateParams, DnType, IsCa, Issuer, KeyPair, KeyUsagePurpose,
-};
+use rcgen::{BasicConstraints, CertificateParams, DnType, IsCa, Issuer, KeyPair, KeyUsagePurpose};
 
 const CA_CERT_FILENAME: &str = "bergamot-ca.pem";
 const CA_KEY_FILENAME: &str = "bergamot-ca-key.pem";
@@ -54,8 +52,7 @@ pub fn ensure_certificates(cert_store: &Path) -> Result<CertPaths, Box<dyn std::
     if needs_server_cert {
         tracing::info!("generating new server certificate signed by local CA");
         let ca_issuer = Issuer::from_ca_cert_pem(&ca_cert_pem, ca_key)?;
-        let (server_cert_pem, server_key_pem) =
-            generate_server_cert(&ca_issuer, &ca_cert_pem)?;
+        let (server_cert_pem, server_key_pem) = generate_server_cert(&ca_issuer, &ca_cert_pem)?;
         fs::write(&server_cert_path, &server_cert_pem)?;
         fs::write(&server_key_path, &server_key_pem)?;
         restrict_permissions(&server_key_path);
@@ -123,12 +120,16 @@ fn generate_server_cert(
     params.not_after = not_after;
     params.use_authority_key_identifier_extension = true;
 
-    params.subject_alt_names.push(rcgen::SanType::IpAddress(
-        std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
-    ));
-    params.subject_alt_names.push(rcgen::SanType::IpAddress(
-        std::net::IpAddr::V6(std::net::Ipv6Addr::LOCALHOST),
-    ));
+    params
+        .subject_alt_names
+        .push(rcgen::SanType::IpAddress(std::net::IpAddr::V4(
+            std::net::Ipv4Addr::LOCALHOST,
+        )));
+    params
+        .subject_alt_names
+        .push(rcgen::SanType::IpAddress(std::net::IpAddr::V6(
+            std::net::Ipv6Addr::LOCALHOST,
+        )));
 
     let server_cert = params.signed_by(&server_key, ca_issuer)?;
 

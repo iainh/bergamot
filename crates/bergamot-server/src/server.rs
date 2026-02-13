@@ -380,9 +380,7 @@ impl WebServer {
                     .into(),
             );
         }
-        if config.secure_control
-            && (config.secure_cert.is_some() != config.secure_key.is_some())
-        {
+        if config.secure_control && (config.secure_cert.is_some() != config.secure_key.is_some()) {
             return Err("Both SecureCert and SecureKey must be provided together".into());
         }
         Ok(())
@@ -477,8 +475,7 @@ impl WebServer {
             };
 
             let tls_config =
-                axum_server::tls_rustls::RustlsConfig::from_pem_file(&cert_path, &key_path)
-                    .await?;
+                axum_server::tls_rustls::RustlsConfig::from_pem_file(&cert_path, &key_path).await?;
 
             let https_addr: std::net::SocketAddr =
                 format!("{}:{}", self.config.control_ip, self.config.secure_port).parse()?;
@@ -486,8 +483,7 @@ impl WebServer {
             if self.config.control_port != self.config.secure_port {
                 let redirect_host = self.config.control_ip.clone();
                 let redirect_port = self.config.secure_port;
-                let http_addr =
-                    format!("{}:{}", self.config.control_ip, self.config.control_port);
+                let http_addr = format!("{}:{}", self.config.control_ip, self.config.control_port);
                 tokio::spawn(async move {
                     let redirect_app = Router::new().fallback(
                         move |req: axum::http::Request<axum::body::Body>| {
