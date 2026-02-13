@@ -284,4 +284,46 @@ pub fn build_rpc_module(state: Arc<AppState>) -> RpcModule<Arc<AppState>> {
         .expect("register method");
 
     module
+        .register_async_method("logscript", |_, _, _| async move {
+            Ok::<_, ErrorObjectOwned>(serde_json::json!([]))
+        })
+        .expect("register method");
+
+    module
+        .register_async_method("logupdate", |_, _, _| async move {
+            Ok::<_, ErrorObjectOwned>(serde_json::json!([]))
+        })
+        .expect("register method");
+
+    module
+        .register_async_method("testserverspeed", |_, _, _| async move {
+            Err::<serde_json::Value, _>(ErrorObjectOwned::owned(
+                -32000,
+                "Not implemented",
+                None::<()>,
+            ))
+        })
+        .expect("register method");
+
+    module
+        .register_async_method("testdiskspeed", |_, _, _| async move {
+            Err::<serde_json::Value, _>(ErrorObjectOwned::owned(
+                -32000,
+                "Not implemented",
+                None::<()>,
+            ))
+        })
+        .expect("register method");
+
+    module
+        .register_async_method("testnetworkspeed", |_, _, _| async move {
+            Err::<serde_json::Value, _>(ErrorObjectOwned::owned(
+                -32000,
+                "Not implemented",
+                None::<()>,
+            ))
+        })
+        .expect("register method");
+
+    module
 }
