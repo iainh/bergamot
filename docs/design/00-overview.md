@@ -114,8 +114,6 @@ guarantees.
 
 | File                                          | Topic                                         |
 |-----------------------------------------------|-----------------------------------------------|
-| `operations/connection-scaling-bottlenecks.md`| Connection scaling diagnosis & fixes           |
-| `operations/fully-async-improvements.md`      | Async I/O improvement catalog                  |
 | `operations/systemd/nzbg.service`             | systemd service unit file                      |
 
 ### Planning
