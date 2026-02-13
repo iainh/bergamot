@@ -252,6 +252,7 @@ mod tests {
             secure_control: false,
             secure_cert: None,
             secure_key: None,
+            cert_store: std::path::PathBuf::new(),
             form_auth: false,
             authorized_ips: vec![],
             control_username: "admin".to_string(),

@@ -51,6 +51,7 @@
             };
             Volumes = {
               "/config" = { };
+              "/config/ssl" = { };
               "/downloads" = { };
             };
             Env = [

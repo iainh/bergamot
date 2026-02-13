@@ -50,9 +50,17 @@ ControlPassword=tegbzn6789
 #AddUsername=
 #AddPassword=
 
-# Uncomment to enable HTTPS
+# Uncomment to enable HTTPS.
+# If SecureCert/SecureKey are omitted, bergamot auto-generates a local CA
+# and server certificate in CertStore on first run.  Import the CA cert
+# (bergamot-ca.pem) into your browser/OS trust store once to avoid warnings.
 #SecureControl=yes
 #SecurePort=6791
+
+# Directory for auto-generated TLS certificates (default: /config/ssl)
+#CertStore=/config/ssl
+
+# To use your own certificates instead of auto-generation:
 #SecureCert=/path/to/cert.pem
 #SecureKey=/path/to/key.pem
 

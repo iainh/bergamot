@@ -86,7 +86,7 @@ impl Config {
         let cert_store = raw
             .get("CertStore")
             .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from(""));
+            .unwrap_or_else(|| PathBuf::from("/config/ssl"));
 
         let control_ip = raw
             .get("ControlIP")

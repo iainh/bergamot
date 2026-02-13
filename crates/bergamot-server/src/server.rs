@@ -370,13 +370,20 @@ impl WebServer {
     }
 
     pub fn validate_tls_config(config: &ServerConfig) -> Result<(), Box<dyn std::error::Error>> {
-        if config.secure_control {
-            if config.secure_cert.is_none() {
-                return Err("SecureCert is required when SecureControl is enabled".into());
-            }
-            if config.secure_key.is_none() {
-                return Err("SecureKey is required when SecureControl is enabled".into());
-            }
+        if config.secure_control
+            && config.secure_cert.is_none()
+            && config.secure_key.is_none()
+            && config.cert_store.as_os_str().is_empty()
+        {
+            return Err(
+                "SecureControl is enabled but no SecureCert/SecureKey or CertStore is configured"
+                    .into(),
+            );
+        }
+        if config.secure_control
+            && (config.secure_cert.is_some() != config.secure_key.is_some())
+        {
+            return Err("Both SecureCert and SecureKey must be provided together".into());
         }
         Ok(())
     }
@@ -460,10 +467,18 @@ impl WebServer {
         let app = self.build_router();
 
         if self.config.secure_control {
-            let cert_path = self.config.secure_cert.as_ref().unwrap();
-            let key_path = self.config.secure_key.as_ref().unwrap();
+            let (cert_path, key_path) = if let (Some(cert), Some(key)) =
+                (&self.config.secure_cert, &self.config.secure_key)
+            {
+                (cert.clone(), key.clone())
+            } else {
+                let paths = crate::tls::ensure_certificates(&self.config.cert_store)?;
+                (paths.cert, paths.key)
+            };
+
             let tls_config =
-                axum_server::tls_rustls::RustlsConfig::from_pem_file(cert_path, key_path).await?;
+                axum_server::tls_rustls::RustlsConfig::from_pem_file(&cert_path, &key_path)
+                    .await?;
 
             let bind_addr: std::net::SocketAddr =
                 format!("{}:{}", self.config.control_ip, self.config.control_port).parse()?;
@@ -801,6 +816,7 @@ mod tests {
             secure_control: false,
             secure_cert: None,
             secure_key: None,
+            cert_store: std::path::PathBuf::new(),
             form_auth: false,
             authorized_ips: vec![],
             control_username: "admin".to_string(),

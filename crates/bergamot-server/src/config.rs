@@ -7,6 +7,7 @@ pub struct ServerConfig {
     pub secure_control: bool,
     pub secure_cert: Option<PathBuf>,
     pub secure_key: Option<PathBuf>,
+    pub cert_store: PathBuf,
     pub form_auth: bool,
     pub authorized_ips: Vec<String>,
     pub control_username: String,

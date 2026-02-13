@@ -8,6 +8,7 @@ mod rpc_module;
 mod server;
 mod shutdown;
 mod status;
+pub mod tls;
 mod xmlrpc;
 
 pub use crate::auth::{AccessLevel, AuthState};

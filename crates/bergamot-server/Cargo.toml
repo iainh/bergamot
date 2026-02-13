@@ -31,7 +31,13 @@ tracing = "0.1"
 axum-server = { version = "0.8.0", features = ["tls-rustls-no-provider"] }
 quick-xml = "0.37"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+pem = "3"
+rcgen = { version = "0.14", default-features = false, features = ["ring", "pem", "x509-parser"] }
 ring = "0.17.14"
+rustls-pki-types = "1"
+hostname = "0.4"
+time = "0.3"
+x509-parser = "0.18"
 fs2 = "0.4"
 tokio-util = { version = "0.7.18", features = ["rt"] }
 

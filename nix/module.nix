@@ -117,6 +117,7 @@ in
         ProtectKernelTunables = true;
         ReadWritePaths = [
           cfg.dataDir
+          (cfg.settings.CertStore or "${cfg.dataDir}/ssl")
           cfg.settings.DestDir or ""
           cfg.settings.InterDir or ""
         ];
