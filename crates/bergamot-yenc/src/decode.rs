@@ -33,6 +33,15 @@ fn decode_yenc_line_scalar(line: &[u8], output: &mut Vec<u8>) -> usize {
     output.len() - start_len
 }
 
+pub fn decode_yenc_line_into(line: &[u8], output: &mut Vec<u8>, crc: Option<&mut Hasher>) -> usize {
+    let before = output.len();
+    let count = decode_yenc_line(line, output);
+    if let Some(hasher) = crc {
+        hasher.update(&output[before..]);
+    }
+    count
+}
+
 pub fn decode_yenc_line(line: &[u8], output: &mut Vec<u8>) -> usize {
     let start_len = output.len();
 
@@ -209,10 +218,7 @@ impl YencDecoder {
                     self.state = DecoderState::Finished;
                     return self.finalize_segment(expected_crc);
                 }
-                let before = self.decoded.len();
-                decode_yenc_line(line, &mut self.decoded);
-                self.part_crc
-                    .update(&self.decoded[before..self.decoded.len()]);
+                decode_yenc_line_into(line, &mut self.decoded, Some(&mut self.part_crc));
                 if let Some(end) = self.part_end
                     && self.decoded.len() as u64 > end - self.part_begin.unwrap_or(1) + 1
                 {
@@ -432,6 +438,44 @@ mod tests {
             decode_yenc_line(&line, &mut simd_out);
             assert_eq!(scalar_out, simd_out, "mismatch at seed {seed}");
         }
+    }
+
+    #[test]
+    fn decode_yenc_line_into_updates_crc_correctly() {
+        let line = vec![b'a' + 42, b'b' + 42, b'c' + 42, b'\r', b'\n'];
+        let mut output = Vec::new();
+        let mut hasher = Hasher::new();
+        decode_yenc_line_into(&line, &mut output, Some(&mut hasher));
+        assert_eq!(output, b"abc");
+        assert_eq!(hasher.finalize(), crc32fast::hash(b"abc"));
+    }
+
+    #[test]
+    fn decode_yenc_line_into_none_crc_still_decodes() {
+        let line = vec![b'x' + 42, b'y' + 42, b'\r', b'\n'];
+        let mut output = Vec::new();
+        decode_yenc_line_into(&line, &mut output, None);
+        assert_eq!(output, b"xy");
+    }
+
+    #[test]
+    fn segment_crc_matches_hash_of_data() {
+        let lines = vec![
+            b"=ybegin line=128 size=3 name=test.bin\r\n".to_vec(),
+            vec![b'a' + 42, b'b' + 42, b'c' + 42, b'\r', b'\n'],
+            b"=yend size=3 pcrc32=352441c2\r\n".to_vec(),
+        ];
+
+        let mut decoder = YencDecoder::new();
+        let mut segment = None;
+        for line in &lines {
+            if let Some(result) = decoder.decode_line(line).unwrap() {
+                segment = Some(result);
+            }
+        }
+
+        let segment = segment.expect("segment decoded");
+        assert_eq!(segment.crc32, crc32fast::hash(&segment.data));
     }
 
     #[test]
