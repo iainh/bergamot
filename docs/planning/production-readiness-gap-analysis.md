@@ -40,14 +40,13 @@ Methods exist, but response shapes (field names, types, enum values) haven't
 been validated against real client traffic. Sonarr/Radarr compatibility
 requires **exact** NZBGet RPC behaviour, not just "a method with that name."
 
-- **`append` payload format** — Many clients send NZB data as base64 content,
-  not a local file path or URL. The exact NZBGet signature
-  (`append(name, nzbcontent, category, priority, addToTop, addPaused, dupekey,
-  dupescore, dupemode, params...)`) must be supported.
-- **`status` response** — NZBGet exposes many fields (day/month counters,
-  quotas, cache sizes, postproc states). ✅ bergamot now populates day/month
-  download counters from `SharedStatsTracker`. Quota and cache fields still
-  need work.
+- **`append` payload format** — ✅ Full NZBGet signature now supported:
+  `append(name, nzbcontent, category, priority, addToTop, addPaused, dupekey,
+  dupescore, dupemode, params...)`. All parameters are parsed and forwarded
+  to the queue via `AddNzbOptions`.
+- **`status` response** — ✅ bergamot now populates day/month download
+  counters from `SharedStatsTracker` and `QuotaReached` from configured
+  `MonthlyQuota`/`DailyQuota`. Cache size fields still need work.
 - **`editqueue` actions** — ✅ `SetName`, `SetDupeKey`, `SetDupeScore`,
   `SetDupeMode`, `SetParameter`, `SetPriority`, `SetCategory`, `GroupMoveOffset`
   are now wired up and functional. `Split` and `Merge` remain as no-ops.
@@ -109,14 +108,14 @@ downloads. Not implemented in bergamot.
 
 ### Download quotas
 
-NZBGet supports daily and monthly download quotas with:
+✅ `MonthlyQuota` and `DailyQuota` config keys are now parsed (in GB).
+`QuotaReached` in the status response reflects whether quotas are exceeded.
+Day/month download counters are populated from `SharedStatsTracker`.
 
-- Configurable quota sizes and reset schedules
-- Automatic pause when quota is reached
-- Day/month download counters in `status` response
+Remaining work:
 
-bergamot's `status()` returns day/month counters as zero. No quota enforcement
-exists.
+- Automatic pause of downloads when quota is reached
+- Resume when quota resets (daily/monthly rollover)
 
 ### Extension manager lifecycle
 
@@ -168,13 +167,11 @@ NZBGet can check for new versions and notify users. Not implemented in bergamot.
 
 NZBGet provides built-in testing RPC methods:
 
-- `testserver` — validate NNTP server connectivity
+- ✅ `testserver` — validate NNTP server connectivity (implemented)
 - `testserverspeed` — measure NNTP server throughput
 - `testdiskspeed` — measure disk I/O performance
 - `testnetworkspeed` — measure network throughput
-- `testextension` — validate extension script execution
-
-None of these are implemented in bergamot.
+- `testextension` — validate extension script execution (stub registered)
 
 ---
 
@@ -272,7 +269,7 @@ Build a production readiness test matrix covering:
 | PAR2 verify/repair | ✅ | ✅ | Implemented |
 | Unpack (rar/7z/zip) | ✅ | ✅ | Implemented |
 | Post-processing pipeline | ✅ | ✅ | Implemented |
-| JSON-RPC API | ✅ | ✅ | Partial (schema gaps) |
+| JSON-RPC API | ✅ | ✅ | Full append signature, editqueue, status fields |
 | XML-RPC API | ✅ | ✅ | Implemented |
 | Extension script runner | ✅ | ✅ | Implemented |
 | RSS/Atom feeds | ✅ | ✅ | Implemented |
@@ -290,11 +287,11 @@ Build a production readiness test matrix covering:
 | Duplicate detection | ✅ | ⚠️ | Basic rejection enforced, scoring/history TBD |
 | Deobfuscation | ✅ | ❌ | Not implemented |
 | Direct rename/unpack | ✅ | ❌ | Not implemented |
-| Download quotas | ✅ | ⚠️ | Day/month counters populated, enforcement TBD |
+| Download quotas | ✅ | ⚠️ | Config, counters, QuotaReached; auto-pause TBD |
 | Extension manager | ✅ | ❌ | No install/remove lifecycle |
 | Multiple auth roles | ✅ | ✅ | Three roles: Control, Restricted, Add |
 | PAR-first strategy | ✅ | ❌ | No smart ordering |
-| Built-in test tools | ✅ | ❌ | Not implemented |
+| Built-in test tools | ✅ | ⚠️ | testserver implemented, others TBD |
 | Windows service | ✅ | ❌ | Not supported |
 | Update checking | ✅ | ❌ | Not implemented |
 | Integration tests | ✅ | ✅ | E2E tests with stub NNTP server |
