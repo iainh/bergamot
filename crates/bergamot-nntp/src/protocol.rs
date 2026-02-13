@@ -34,6 +34,8 @@ struct DeflateStream<T> {
     read_len: usize,
     write_buf: Vec<u8>,
     write_pos: usize,
+    tmp_read_out: Vec<u8>,
+    tmp_write_out: Vec<u8>,
 }
 
 impl<T> DeflateStream<T> {
@@ -50,6 +52,8 @@ impl<T> DeflateStream<T> {
             read_len,
             write_buf: Vec::new(),
             write_pos: 0,
+            tmp_read_out: vec![0u8; DEFLATE_BUF_SIZE],
+            tmp_write_out: vec![0u8; 64],
         }
     }
 }
@@ -68,11 +72,12 @@ impl<T: AsyncRead + Unpin> AsyncRead for DeflateStream<T> {
                 let before_out = me.decompress.total_out();
 
                 let avail = &me.read_buf[me.read_pos..me.read_len];
-                let mut out = vec![0u8; buf.remaining().max(DEFLATE_BUF_SIZE)];
+                me.tmp_read_out
+                    .resize(buf.remaining().max(DEFLATE_BUF_SIZE), 0);
 
                 let status = me
                     .decompress
-                    .decompress(avail, &mut out, FlushDecompress::Sync)
+                    .decompress(avail, &mut me.tmp_read_out, FlushDecompress::Sync)
                     .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
                 let consumed = (me.decompress.total_in() - before_in) as usize;
@@ -81,7 +86,7 @@ impl<T: AsyncRead + Unpin> AsyncRead for DeflateStream<T> {
                 me.read_pos += consumed;
 
                 if produced > 0 {
-                    buf.put_slice(&out[..produced]);
+                    buf.put_slice(&me.tmp_read_out[..produced]);
                     return Poll::Ready(Ok(()));
                 }
 
@@ -119,16 +124,17 @@ impl<T: AsyncWrite + Unpin> AsyncWrite for DeflateStream<T> {
         let before_in = me.compress.total_in();
         let before_out = me.compress.total_out();
 
-        let mut out = vec![0u8; buf.len() + 64];
+        me.tmp_write_out.resize(buf.len() + 64, 0);
         me.compress
-            .compress(buf, &mut out, FlushCompress::Sync)
+            .compress(buf, &mut me.tmp_write_out, FlushCompress::Sync)
             .map_err(io::Error::other)?;
 
         let consumed = (me.compress.total_in() - before_in) as usize;
         let produced = (me.compress.total_out() - before_out) as usize;
 
         if produced > 0 {
-            me.write_buf.extend_from_slice(&out[..produced]);
+            me.write_buf
+                .extend_from_slice(&me.tmp_write_out[..produced]);
         }
 
         while me.write_pos < me.write_buf.len() {
@@ -150,13 +156,14 @@ impl<T: AsyncWrite + Unpin> AsyncWrite for DeflateStream<T> {
         let me = self.get_mut();
 
         let before_out = me.compress.total_out();
-        let mut out = vec![0u8; 64];
+        me.tmp_write_out.resize(64, 0);
         me.compress
-            .compress(&[], &mut out, FlushCompress::Sync)
+            .compress(&[], &mut me.tmp_write_out, FlushCompress::Sync)
             .map_err(io::Error::other)?;
         let produced = (me.compress.total_out() - before_out) as usize;
         if produced > 0 {
-            me.write_buf.extend_from_slice(&out[..produced]);
+            me.write_buf
+                .extend_from_slice(&me.tmp_write_out[..produced]);
         }
 
         while me.write_pos < me.write_buf.len() {
