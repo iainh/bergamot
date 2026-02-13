@@ -60,19 +60,11 @@ requires **exact** NZBGet RPC behaviour, not just "a method with that name."
 **Validation needed:** Run Sonarr/Radarr against bergamot, log every RPC request
 and response, and diff against NZBGet for the same scenarios.
 
-### 3. No bundled web UI
+### ✅ Bundled web UI
 
-The server serves static files from an external `WebDir` directory, but there
-are no HTML/JS/CSS assets in the repository. The only embedded UI is a minimal
-hardcoded login page. Production requires either:
-
-- Bundling NZBGet's webui (licensing permitting) into the release artifact
-- Building a custom web UI
-- Formally adopting and maintaining a fork of the NZBGet webui
-
-The `handle_combined_file` handler exists for NZBGet webui compatibility
-(concatenating JS/CSS files), which suggests the intent is to reuse NZBGet's
-UI — but this needs to be formalized and tested.
+A web UI is bundled in `crates/bergamot-server/webui/` and embedded into the
+binary via `rust_embed`. The UI (~27K lines of JS/HTML/CSS) is served
+automatically at the root path.
 
 ---
 
@@ -228,19 +220,17 @@ Point Sonarr at the RPC endpoint, trigger a download, and log/diff every RPC
 request and response against NZBGet. Fix schema mismatches, especially in
 `append`, `status`, `listgroups`, `history`, and `editqueue`.
 
-### Step 3: Decide web UI strategy
+### ✅ Step 3: Web UI
 
-Either bundle NZBGet's webui (check licensing), build a custom UI, or
-explicitly document that users must supply their own webui directory.
+Web UI is bundled via `rust_embed`.
 
 ### Step 4: Close highest-value feature gaps
 
 Priority order based on user impact:
 
-1. Duplicate detection policy enforcement
-2. Deobfuscation / smart rename (PAR2-based)
-3. Download quotas
-4. Extension manager lifecycle
+1. Duplicate detection refinements (score-based, history with DupHidden)
+2. Extension manager lifecycle
+3. PAR-first download strategy
 
 ### Step 5: Add integration & failure tests
 
@@ -284,7 +274,7 @@ Build a production readiness test matrix covering:
 | Disk space monitoring | ✅ | ✅ | Implemented |
 | History cleanup | ✅ | ✅ | Implemented |
 | Config file compatibility | ✅ | ✅ | Implemented |
-| Web UI | ✅ | ❌ | No bundled assets |
+| Web UI | ✅ | ✅ | Bundled via rust_embed |
 | Duplicate detection | ✅ | ⚠️ | Basic rejection enforced, scoring/history TBD |
 | Deobfuscation | ✅ | ⚠️ | PAR2-based rename implemented, RAR rename TBD |
 | Direct rename/unpack | ✅ | ❌ | Not implemented |
