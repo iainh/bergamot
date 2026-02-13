@@ -178,10 +178,11 @@ pub(crate) async fn rpc_listgroups(state: &AppState) -> Result<serde_json::Value
         .into_iter()
         .map(|entry| {
             let remaining_size = entry.total_size.saturating_sub(entry.downloaded_size);
-            let file_size_mb = entry.total_size / (1024 * 1024);
-            let file_size_lo = (entry.total_size & 0xFFFF_FFFF) as u32;
-            let remaining_size_mb = remaining_size / (1024 * 1024);
-            let remaining_size_lo = (remaining_size & 0xFFFF_FFFF) as u32;
+            let dupe_mode_str = match entry.dupe_mode {
+                bergamot_core::models::DupMode::Score => "SCORE",
+                bergamot_core::models::DupMode::All => "ALL",
+                bergamot_core::models::DupMode::Force => "FORCE",
+            };
 
             let status = if let Some(stage) = entry.post_stage {
                 match stage {
@@ -217,21 +218,36 @@ pub(crate) async fn rpc_listgroups(state: &AppState) -> Result<serde_json::Value
 
             serde_json::json!({
                 "NZBID": entry.id,
+                "FirstID": entry.id,
+                "LastID": entry.id,
                 "NZBName": entry.name,
+                "NZBNicename": entry.name,
+                "NZBFilename": "",
+                "URL": "",
+                "DestDir": "",
+                "FinalDir": "",
                 "Status": status,
                 "Category": entry.category,
-                "FileSizeMB": file_size_mb,
-                "FileSizeLo": file_size_lo,
-                "RemainingSizeMB": remaining_size_mb,
-                "RemainingSizeLo": remaining_size_lo,
-                "PausedSizeMB": 0,
+                "FileSizeLo": (entry.total_size & 0xFFFF_FFFF) as u32,
+                "FileSizeHi": (entry.total_size >> 32) as u32,
+                "FileSizeMB": entry.total_size / (1024 * 1024),
+                "RemainingSizeLo": (remaining_size & 0xFFFF_FFFF) as u32,
+                "RemainingSizeHi": (remaining_size >> 32) as u32,
+                "RemainingSizeMB": remaining_size / (1024 * 1024),
                 "PausedSizeLo": 0,
+                "PausedSizeHi": 0,
+                "PausedSizeMB": 0,
+                "DownloadedSizeLo": (entry.downloaded_size & 0xFFFF_FFFF) as u32,
+                "DownloadedSizeHi": (entry.downloaded_size >> 32) as u32,
+                "DownloadedSizeMB": entry.downloaded_size / (1024 * 1024),
+                "DownloadTimeSec": 0,
                 "MaxPriority": entry.priority as i32,
                 "MinPriority": entry.priority as i32,
                 "DupeKey": entry.dupe_key,
                 "DupeScore": entry.dupe_score,
-                "DupeMode": entry.dupe_mode as u32,
+                "DupeMode": dupe_mode_str,
                 "MinPostTime": 0,
+                "MaxPostTime": 0,
                 "ActiveDownloads": entry.active_downloads,
                 "Health": entry.health,
                 "CriticalHealth": entry.critical_health,
@@ -242,12 +258,28 @@ pub(crate) async fn rpc_listgroups(state: &AppState) -> Result<serde_json::Value
                 "TotalArticles": entry.total_article_count,
                 "SuccessArticles": entry.success_article_count,
                 "FailedArticles": entry.failed_article_count,
+                "Deleted": false,
+                "DeleteStatus": "NONE",
+                "MarkStatus": "NONE",
+                "UrlStatus": "NONE",
+                "ParStatus": "NONE",
+                "UnpackStatus": "NONE",
+                "MoveStatus": "NONE",
+                "ScriptStatus": "NONE",
+                "ExParStatus": "NONE",
+                "ExtraParBlocks": 0,
+                "MessageCount": 0,
                 "PostStageProgress": entry.post_stage_progress,
                 "PostStageTimeSec": entry.post_stage_time_sec,
                 "PostTotalTimeSec": entry.post_total_time_sec,
+                "ParTimeSec": 0,
+                "RepairTimeSec": 0,
+                "UnpackTimeSec": 0,
                 "PostInfoText": entry.post_info_text,
                 "ServerStats": server_stats,
+                "ScriptStatuses": [],
                 "Parameters": parameters,
+                "Log": [],
             })
         })
         .collect();
