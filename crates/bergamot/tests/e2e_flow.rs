@@ -2272,3 +2272,577 @@ async fn extension_script_runs_during_post_processing() {
     stub_task.abort();
     let _ = stub_task.await;
 }
+
+fn sample_config_with_overrides(
+    root: &Path,
+    rpc_port: u16,
+    servers: &[(u16, u32)],
+    overrides: &[(&str, &str)],
+) -> Config {
+    let main_dir = root.join("main");
+    let dest_dir = root.join("dest");
+    let inter_dir = root.join("intermediate");
+    let nzb_dir = root.join("nzb");
+    let queue_dir = root.join("queue");
+    let temp_dir = root.join("tmp");
+    let script_dir = root.join("scripts");
+    let log_file = root.join("bergamot.log");
+
+    let mut raw = std::collections::HashMap::new();
+    raw.insert("MainDir".to_string(), main_dir.display().to_string());
+    raw.insert("DestDir".to_string(), dest_dir.display().to_string());
+    raw.insert("InterDir".to_string(), inter_dir.display().to_string());
+    raw.insert("NzbDir".to_string(), nzb_dir.display().to_string());
+    raw.insert("QueueDir".to_string(), queue_dir.display().to_string());
+    raw.insert("TempDir".to_string(), temp_dir.display().to_string());
+    raw.insert("ScriptDir".to_string(), script_dir.display().to_string());
+    raw.insert("LogFile".to_string(), log_file.display().to_string());
+    raw.insert("ControlIP".to_string(), "127.0.0.1".to_string());
+    raw.insert("ControlPort".to_string(), rpc_port.to_string());
+    raw.insert("ControlUsername".to_string(), "nzbget".to_string());
+    raw.insert("ControlPassword".to_string(), "secret".to_string());
+    for (idx, (port, level)) in servers.iter().enumerate() {
+        let id = idx + 1;
+        raw.insert(format!("Server{id}.Active"), "yes".to_string());
+        raw.insert(format!("Server{id}.Name"), format!("stub-{id}"));
+        raw.insert(format!("Server{id}.Host"), "127.0.0.1".to_string());
+        raw.insert(format!("Server{id}.Port"), port.to_string());
+        raw.insert(format!("Server{id}.Encryption"), "no".to_string());
+        raw.insert(format!("Server{id}.Connections"), "1".to_string());
+        raw.insert(format!("Server{id}.Retention"), "0".to_string());
+        raw.insert(format!("Server{id}.Level"), level.to_string());
+        raw.insert(format!("Server{id}.Optional"), "no".to_string());
+    }
+    raw.insert("ArticleCache".to_string(), "0".to_string());
+    raw.insert("AppendCategoryDir".to_string(), "no".to_string());
+    raw.insert("UnpackCleanupDisk".to_string(), "no".to_string());
+
+    for (key, value) in overrides {
+        raw.insert(key.to_string(), value.to_string());
+    }
+
+    Config::from_raw(raw)
+}
+
+#[tokio::test]
+async fn rpc_servervolumes_reports_bytes_after_download() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let stub_port = available_port();
+    let rpc_port = available_port();
+    let rpc_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), rpc_port);
+
+    init_logging();
+
+    let stub_task = start_stub(stub_port, fixtures_complete_path(), 1).await;
+    tokio::time::sleep(Duration::from_millis(20)).await;
+
+    let config = sample_config(temp.path(), rpc_port, &[(stub_port, 0)]);
+    create_dirs(&config).await;
+
+    let config_path = temp.path().join("bergamot.conf");
+    tokio::fs::write(&config_path, "")
+        .await
+        .expect("write config file");
+
+    let stats = bergamot_scheduler::StatsTracker::from_config(&config);
+    let shared_stats = Arc::new(bergamot_scheduler::SharedStatsTracker::new(stats));
+    let fetcher = build_server_pool(&config, &shared_stats);
+
+    let app_task = tokio::spawn(run_with_config_path(
+        config,
+        fetcher,
+        Some(config_path),
+        None,
+        Some(shared_stats),
+    ));
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    let nzb_id = append_nzb(rpc_addr, &sample_nzb_path()).await;
+    let completed = wait_for_completion(rpc_addr, nzb_id, 50).await;
+    assert!(completed, "NZB should complete downloading");
+
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let volumes = jsonrpc_call(
+        rpc_addr,
+        "nzbget:secret",
+        "servervolumes",
+        serde_json::json!([]),
+    )
+    .await;
+    let volumes_arr = volumes
+        .as_array()
+        .expect("servervolumes should return an array");
+    assert!(
+        volumes_arr.len() >= 2,
+        "servervolumes should have at least 2 entries (aggregate + 1 server), got {}",
+        volumes_arr.len()
+    );
+    assert_eq!(
+        volumes_arr[0]["ServerID"].as_u64().unwrap(),
+        0,
+        "first entry should be the aggregate (ServerID 0)"
+    );
+    assert_eq!(
+        volumes_arr[1]["ServerID"].as_u64().unwrap(),
+        1,
+        "second entry should be server 1"
+    );
+    let total_lo = volumes_arr[1]["TotalSizeLo"].as_u64().unwrap_or(0);
+    let total_hi = volumes_arr[1]["TotalSizeHi"].as_u64().unwrap_or(0);
+    let total_bytes = total_lo + (total_hi << 32);
+    assert!(
+        total_bytes > 0,
+        "server 1 should have transferred bytes, got {total_bytes}"
+    );
+
+    shutdown_app(rpc_addr).await;
+    let _ = tokio::time::timeout(Duration::from_secs(5), app_task)
+        .await
+        .expect("app shutdown timeout");
+
+    stub_task.abort();
+    let _ = stub_task.await;
+}
+
+#[tokio::test]
+async fn rpc_postqueue_schema_and_pause_toggle() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let stub_port = available_port();
+    let rpc_port = available_port();
+    let rpc_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), rpc_port);
+
+    init_logging();
+
+    let stub_task = start_stub(stub_port, fixtures_complete_path(), 0).await;
+    tokio::time::sleep(Duration::from_millis(20)).await;
+
+    let config = sample_config(temp.path(), rpc_port, &[(stub_port, 0)]);
+    create_dirs(&config).await;
+
+    let stats = bergamot_scheduler::StatsTracker::from_config(&config);
+    let shared_stats = Arc::new(bergamot_scheduler::SharedStatsTracker::new(stats));
+    let fetcher = build_server_pool(&config, &shared_stats);
+
+    let app_task = tokio::spawn(run_with_config_path(
+        config,
+        fetcher,
+        None,
+        None,
+        Some(shared_stats),
+    ));
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    let pq = jsonrpc_call(
+        rpc_addr,
+        "nzbget:secret",
+        "postqueue",
+        serde_json::json!([]),
+    )
+    .await;
+    assert!(
+        pq.get("Paused").is_some(),
+        "postqueue should have Paused field"
+    );
+    assert!(pq.get("Jobs").is_some(), "postqueue should have Jobs field");
+    assert!(pq["Jobs"].is_array(), "Jobs should be an array");
+
+    let pause_result = jsonrpc_call(
+        rpc_addr,
+        "nzbget:secret",
+        "pausepost",
+        serde_json::json!([]),
+    )
+    .await;
+    assert!(
+        pause_result.as_bool().unwrap_or(false),
+        "pausepost should return true"
+    );
+
+    let pq_paused = jsonrpc_call(
+        rpc_addr,
+        "nzbget:secret",
+        "postqueue",
+        serde_json::json!([]),
+    )
+    .await;
+    assert_eq!(
+        pq_paused["Paused"].as_bool(),
+        Some(true),
+        "postqueue Paused should be true after pausepost"
+    );
+
+    let resume_result = jsonrpc_call(
+        rpc_addr,
+        "nzbget:secret",
+        "resumepost",
+        serde_json::json!([]),
+    )
+    .await;
+    assert!(
+        resume_result.as_bool().unwrap_or(false),
+        "resumepost should return true"
+    );
+
+    let pq_resumed = jsonrpc_call(
+        rpc_addr,
+        "nzbget:secret",
+        "postqueue",
+        serde_json::json!([]),
+    )
+    .await;
+    assert_eq!(
+        pq_resumed["Paused"].as_bool(),
+        Some(false),
+        "postqueue Paused should be false after resumepost"
+    );
+
+    shutdown_app(rpc_addr).await;
+    let _ = tokio::time::timeout(Duration::from_secs(5), app_task)
+        .await
+        .expect("app shutdown timeout");
+
+    stub_task.abort();
+    let _ = stub_task.await;
+}
+
+#[tokio::test]
+async fn scan_nzb_dropped_into_nzbdir_gets_queued() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let stub_port = available_port();
+    let rpc_port = available_port();
+    let rpc_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), rpc_port);
+
+    init_logging();
+
+    let stub_task = start_stub(stub_port, fixtures_complete_path(), 1).await;
+    tokio::time::sleep(Duration::from_millis(20)).await;
+
+    let config = sample_config_with_overrides(
+        temp.path(),
+        rpc_port,
+        &[(stub_port, 0)],
+        &[("NzbDirFileAge", "0"), ("NzbDirInterval", "1")],
+    );
+    let nzb_dir = config.nzb_dir.clone();
+    create_dirs(&config).await;
+
+    let stats = bergamot_scheduler::StatsTracker::from_config(&config);
+    let shared_stats = Arc::new(bergamot_scheduler::SharedStatsTracker::new(stats));
+    let fetcher = build_server_pool(&config, &shared_stats);
+
+    let app_task = tokio::spawn(run_with_config_path(
+        config,
+        fetcher,
+        None,
+        None,
+        Some(shared_stats),
+    ));
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    let src_nzb = tokio::fs::read(sample_nzb_path())
+        .await
+        .expect("read sample nzb");
+    let dropped_path = nzb_dir.join("scan-test.nzb");
+    tokio::fs::write(&dropped_path, &src_nzb)
+        .await
+        .expect("write scan-test.nzb");
+
+    let mut found = false;
+    for _ in 0..30 {
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        let groups = jsonrpc_call(
+            rpc_addr,
+            "nzbget:secret",
+            "listgroups",
+            serde_json::json!([]),
+        )
+        .await;
+        if groups.as_array().is_some_and(|arr| !arr.is_empty()) {
+            found = true;
+            break;
+        }
+        let queued_path = nzb_dir.join("scan-test.nzb.queued");
+        if queued_path.exists() {
+            found = true;
+            break;
+        }
+    }
+    assert!(found, "scanner should pick up the NZB dropped into nzb_dir");
+
+    let queued_path = nzb_dir.join("scan-test.nzb.queued");
+    let original_gone = !dropped_path.exists() || queued_path.exists();
+    assert!(
+        original_gone,
+        "scan-test.nzb should have been renamed to .nzb.queued"
+    );
+
+    shutdown_app(rpc_addr).await;
+    let _ = tokio::time::timeout(Duration::from_secs(5), app_task)
+        .await
+        .expect("app shutdown timeout");
+
+    stub_task.abort();
+    let _ = stub_task.await;
+}
+
+#[tokio::test]
+async fn xmlrpc_version_returns_valid_response() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let stub_port = available_port();
+    let rpc_port = available_port();
+    let rpc_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), rpc_port);
+
+    init_logging();
+
+    let stub_task = start_stub(stub_port, fixtures_complete_path(), 0).await;
+    tokio::time::sleep(Duration::from_millis(20)).await;
+
+    let config = sample_config(temp.path(), rpc_port, &[(stub_port, 0)]);
+    create_dirs(&config).await;
+
+    let stats = bergamot_scheduler::StatsTracker::from_config(&config);
+    let shared_stats = Arc::new(bergamot_scheduler::SharedStatsTracker::new(stats));
+    let fetcher = build_server_pool(&config, &shared_stats);
+
+    let app_task = tokio::spawn(run_with_config_path(
+        config,
+        fetcher,
+        None,
+        None,
+        Some(shared_stats),
+    ));
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    let auth = base64::engine::general_purpose::STANDARD.encode("nzbget:secret");
+    let client = reqwest::Client::new();
+
+    let version_xml = r#"<?xml version="1.0"?><methodCall><methodName>version</methodName><params></params></methodCall>"#;
+    let resp = timeout(
+        Duration::from_secs(3),
+        client
+            .post(format!("http://{rpc_addr}/xmlrpc"))
+            .header("Authorization", format!("Basic {auth}"))
+            .header("Content-Type", "text/xml")
+            .body(version_xml)
+            .send(),
+    )
+    .await
+    .expect("xmlrpc timeout")
+    .expect("xmlrpc send");
+
+    assert_eq!(
+        resp.status().as_u16(),
+        200,
+        "xmlrpc version should return 200"
+    );
+    let content_type = resp
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    assert!(
+        content_type.contains("text/xml"),
+        "content-type should be text/xml, got {content_type}"
+    );
+    let body = resp.text().await.expect("xmlrpc body");
+    assert!(
+        body.contains("<methodResponse>"),
+        "response should contain <methodResponse>"
+    );
+    assert!(
+        body.contains("<params>"),
+        "response should contain <params>"
+    );
+    assert!(
+        body.contains("<string>"),
+        "response should contain <string>"
+    );
+
+    let status_xml = r#"<?xml version="1.0"?><methodCall><methodName>status</methodName><params></params></methodCall>"#;
+    let resp2 = timeout(
+        Duration::from_secs(3),
+        client
+            .post(format!("http://{rpc_addr}/xmlrpc"))
+            .header("Authorization", format!("Basic {auth}"))
+            .header("Content-Type", "text/xml")
+            .body(status_xml)
+            .send(),
+    )
+    .await
+    .expect("xmlrpc status timeout")
+    .expect("xmlrpc status send");
+
+    assert_eq!(
+        resp2.status().as_u16(),
+        200,
+        "xmlrpc status should return 200"
+    );
+    let body2 = resp2.text().await.expect("xmlrpc status body");
+    assert!(
+        body2.contains("<struct>"),
+        "status response should contain <struct>"
+    );
+    assert!(
+        body2.contains("<name>DownloadRate</name>"),
+        "status response should contain DownloadRate member"
+    );
+
+    shutdown_app(rpc_addr).await;
+    let _ = tokio::time::timeout(Duration::from_secs(5), app_task)
+        .await
+        .expect("app shutdown timeout");
+
+    stub_task.abort();
+    let _ = stub_task.await;
+}
+
+const TEST_RSS_FEED: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <item>
+      <title>Good.Show.S01E01.720p</title>
+      <link>https://example.com/1.nzb</link>
+    </item>
+    <item>
+      <title>Bad.Show.S01E01.720p</title>
+      <link>https://example.com/2.nzb</link>
+    </item>
+    <item>
+      <title>Good.Show.S01E02.720p</title>
+      <link>https://example.com/3.nzb</link>
+    </item>
+  </channel>
+</rss>"#;
+
+async fn start_http_stub(port: u16, body: &'static str) -> JoinHandle<()> {
+    let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port);
+    let listener = tokio::net::TcpListener::bind(addr)
+        .await
+        .expect("bind http stub");
+    tokio::spawn(async move {
+        loop {
+            let Ok((mut stream, _)) = listener.accept().await else {
+                break;
+            };
+            let body = body;
+            tokio::spawn(async move {
+                use tokio::io::{AsyncReadExt, AsyncWriteExt};
+                let mut buf = vec![0u8; 4096];
+                let _ = stream.read(&mut buf).await;
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/rss+xml\r\nContent-Length: {}\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                let _ = stream.write_all(response.as_bytes()).await;
+            });
+        }
+    })
+}
+
+#[tokio::test]
+async fn feed_polling_via_rss_stub() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let stub_port = available_port();
+    let http_port = available_port();
+    let rpc_port = available_port();
+    let rpc_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), rpc_port);
+
+    init_logging();
+
+    let stub_task = start_stub(stub_port, fixtures_complete_path(), 0).await;
+    tokio::time::sleep(Duration::from_millis(20)).await;
+
+    let http_task = start_http_stub(http_port, TEST_RSS_FEED).await;
+    tokio::time::sleep(Duration::from_millis(20)).await;
+
+    let feed_url = format!("http://127.0.0.1:{http_port}/rss");
+    let now = chrono::Local::now();
+    let task_time = now.format("%H:%M").to_string();
+    let next_min = (now + chrono::Duration::minutes(1))
+        .format("%H:%M")
+        .to_string();
+    let config = sample_config_with_overrides(
+        temp.path(),
+        rpc_port,
+        &[(stub_port, 0)],
+        &[
+            ("Feed1.Name", "Test Feed"),
+            ("Feed1.URL", &feed_url),
+            ("Feed1.Filter", "A: title(Good.*)"),
+            ("Feed1.Interval", "1"),
+            ("Feed1.Category", "TV"),
+            ("Task1.Time", &task_time),
+            ("Task1.WeekDays", "1-7"),
+            ("Task1.Command", "FetchFeed"),
+            ("Task1.Param", "1"),
+            ("Task2.Time", &next_min),
+            ("Task2.WeekDays", "1-7"),
+            ("Task2.Command", "FetchFeed"),
+            ("Task2.Param", "1"),
+        ],
+    );
+    create_dirs(&config).await;
+
+    let stats = bergamot_scheduler::StatsTracker::from_config(&config);
+    let shared_stats = Arc::new(bergamot_scheduler::SharedStatsTracker::new(stats));
+    let fetcher = build_server_pool(&config, &shared_stats);
+
+    let app_task = tokio::spawn(run_with_config_path(
+        config,
+        fetcher,
+        None,
+        None,
+        Some(shared_stats),
+    ));
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    let feeds = jsonrpc_call(rpc_addr, "nzbget:secret", "feeds", serde_json::json!([])).await;
+    let feeds_arr = feeds.as_array().expect("feeds should return an array");
+    assert!(
+        !feeds_arr.is_empty(),
+        "should have at least one feed configured"
+    );
+    assert_eq!(
+        feeds_arr[0]["Name"].as_str(),
+        Some("Test Feed"),
+        "feed name should match"
+    );
+
+    let mut item_count = 0u64;
+    for _ in 0..120 {
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        let feeds = jsonrpc_call(rpc_addr, "nzbget:secret", "feeds", serde_json::json!([])).await;
+        if let Some(arr) = feeds.as_array() {
+            if let Some(feed) = arr.first() {
+                item_count = feed["ItemCount"].as_u64().unwrap_or(0);
+                if item_count >= 2 {
+                    break;
+                }
+            }
+        }
+    }
+    assert_eq!(
+        item_count, 2,
+        "feed should have matched 2 items (Good.Show.*), got {item_count}"
+    );
+
+    let feeds_final = jsonrpc_call(rpc_addr, "nzbget:secret", "feeds", serde_json::json!([])).await;
+    let feed_entry = &feeds_final.as_array().expect("feeds array")[0];
+    assert!(
+        feed_entry["Error"].is_null(),
+        "feed should have no error, got {:?}",
+        feed_entry["Error"]
+    );
+
+    shutdown_app(rpc_addr).await;
+    let _ = tokio::time::timeout(Duration::from_secs(5), app_task)
+        .await
+        .expect("app shutdown timeout");
+
+    stub_task.abort();
+    let _ = stub_task.await;
+    http_task.abort();
+    let _ = http_task.await;
+}
