@@ -45,12 +45,16 @@ requires **exact** NZBGet RPC behaviour, not just "a method with that name."
   dupescore, dupemode, params...)`. All parameters are parsed and forwarded
   to the queue via `AddNzbOptions`.
 - **`status` response** — ✅ bergamot now populates day/month download
-  counters from `SharedStatsTracker` and `QuotaReached` from configured
-  `MonthlyQuota`/`DailyQuota`. Cache size fields still need work.
+  counters from `SharedStatsTracker`, `QuotaReached` from configured
+  `MonthlyQuota`/`DailyQuota`, `AverageDownloadRate` from downloaded
+  bytes / uptime, and `ArticleCache` fields from live `BoundedCache`
+  byte tracking.
 - **`editqueue` actions** — ✅ `SetName`, `SetDupeKey`, `SetDupeScore`,
   `SetDupeMode`, `SetParameter`, `SetPriority`, `SetCategory`, `GroupMoveOffset`
   are now wired up and functional. `Split` and `Merge` remain as no-ops.
-- **`listgroups` / `history` / `listfiles` / `postqueue`** — Field names,
+- **`postqueue`** — ✅ Now returns an empty array (NZBGet format) instead
+  of a non-standard object.
+- **`listgroups` / `history` / `listfiles`** — Field names,
   enum values, and defaults must match NZBGet exactly.
 
 **Validation needed:** Run Sonarr/Radarr against bergamot, log every RPC request
