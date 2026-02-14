@@ -1,6 +1,6 @@
 # bergamot sample configuration file
 # Copy this file to bergamot.conf and edit to suit your setup.
-# See docs/08-configuration.md for full option reference.
+# See docs/implementation/06-configuration.md for full option reference.
 
 ##############################################################################
 # PATHS

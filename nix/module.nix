@@ -66,7 +66,7 @@ in
       description = ''
         bergamot configuration options passed as `-o key=value` on the command line.
         Boolean values are converted to "yes"/"no". See
-        [docs/08-configuration.md](https://github.com/iainh/bergamot/blob/main/docs/08-configuration.md)
+        [docs/implementation/06-configuration.md](https://github.com/iainh/bergamot/blob/main/docs/implementation/06-configuration.md)
         for the full list of options.
       '';
     };

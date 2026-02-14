@@ -146,7 +146,7 @@ Options:
 
 3. Open the web UI at `http://127.0.0.1:6789` or point your favourite Usenet tool (Sonarr, Radarr, etc.) at the JSON-RPC API.
 
-See [docs/08-configuration.md](docs/08-configuration.md) for the full list of configuration options.
+See [docs/implementation/06-configuration.md](docs/implementation/06-configuration.md) for the full list of configuration options.
 
 ## Project structure
 
