@@ -251,15 +251,21 @@ impl<E: Par2Engine, U: Unpacker> PostProcessor<E, U> {
         let unpack_status = match self.unpack(&ctx).await {
             Ok(()) => bergamot_core::models::UnpackStatus::Success,
             Err(PostProcessError::Unpack { ref message }) if message.contains("password") => {
+                tracing::warn!(nzb = %ctx.request.nzb_name, "archive is password-protected");
                 bergamot_core::models::UnpackStatus::Password
             }
-            Err(_) => bergamot_core::models::UnpackStatus::Failure,
+            Err(err) => {
+                tracing::error!(nzb = %ctx.request.nzb_name, error = %err, "unpacking failed");
+                bergamot_core::models::UnpackStatus::Failure
+            }
         };
         let unpack_elapsed = unpack_start.elapsed();
 
         if self.config.unpack_cleanup_disk {
             ctx.set_stage(PostStage::Cleanup);
-            let _ = cleanup_archives(&ctx.request.working_dir).await;
+            if let Err(err) = cleanup_archives(&ctx.request.working_dir).await {
+                tracing::warn!(nzb = %ctx.request.nzb_name, error = %err, "archive cleanup failed");
+            }
         }
 
         ctx.set_stage(PostStage::Moving);
@@ -274,8 +280,20 @@ impl<E: Par2Engine, U: Unpacker> PostProcessor<E, U> {
             self.config.append_category_dir,
         );
         let move_status = match move_to_destination(&ctx.request.working_dir, &dest).await {
-            Ok(()) => bergamot_core::models::MoveStatus::Success,
-            Err(_) => bergamot_core::models::MoveStatus::Failure,
+            Ok(()) => {
+                tracing::info!(nzb = %ctx.request.nzb_name, dest = %dest.display(), "moved files to destination");
+                bergamot_core::models::MoveStatus::Success
+            }
+            Err(err) => {
+                tracing::error!(
+                    nzb = %ctx.request.nzb_name,
+                    src = %ctx.request.working_dir.display(),
+                    dest = %dest.display(),
+                    error = %err,
+                    "moving files to destination failed"
+                );
+                bergamot_core::models::MoveStatus::Failure
+            }
         };
 
         if let Some(executor) = &self.extensions {
