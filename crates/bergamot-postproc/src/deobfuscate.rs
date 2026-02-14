@@ -2,17 +2,25 @@ use std::path::Path;
 
 use bergamot_par2::RecoverySet;
 
-const OBFUSCATED_PATTERN: &[u8] = b"0123456789abcdef";
-
 fn looks_obfuscated(name: &str) -> bool {
     let stem = Path::new(name)
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or(name);
-    stem.len() >= 16
-        && stem
-            .bytes()
-            .all(|b| OBFUSCATED_PATTERN.contains(&b.to_ascii_lowercase()))
+    if stem.len() < 16 {
+        return false;
+    }
+    // Pure hex string (common obfuscation)
+    let is_hex = stem
+        .bytes()
+        .all(|b| b.is_ascii_hexdigit());
+    // Pure alphanumeric with no separators (e.g., base62/base64-style obfuscation)
+    let is_alnum_no_sep = stem.bytes().all(|b| b.is_ascii_alphanumeric())
+        && !stem.contains('.')
+        && !stem.contains('-')
+        && !stem.contains('_')
+        && !stem.contains(' ');
+    is_hex || is_alnum_no_sep
 }
 
 pub async fn deobfuscate_files(
@@ -112,11 +120,20 @@ mod tests {
 
     #[test]
     fn test_looks_obfuscated() {
+        // Hex-style obfuscation
         assert!(looks_obfuscated("a1b2c3d4e5f67890.rar"));
         assert!(looks_obfuscated("deadbeefcafebabe12345678.nfo"));
+        // Base62/alphanumeric obfuscation
+        assert!(looks_obfuscated("cpbsfRk7RFtu5ghi4nmTFDem19hjfPL6.mkv"));
+        assert!(looks_obfuscated("AbCdEfGhIjKlMnOpQrSt.rar"));
+        // Normal filenames
         assert!(!looks_obfuscated("My.Movie.S01E01.mkv"));
         assert!(!looks_obfuscated("readme.txt"));
         assert!(!looks_obfuscated("abc.rar"));
+        // Filenames with separators should not be flagged
+        assert!(!looks_obfuscated("Cool.Show.S02E03.mkv"));
+        assert!(!looks_obfuscated("some-long-file-name-here.mkv"));
+        assert!(!looks_obfuscated("some_long_file_name_here.mkv"));
     }
 
     #[tokio::test]
