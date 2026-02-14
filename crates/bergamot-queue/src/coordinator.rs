@@ -1546,6 +1546,9 @@ impl QueueCoordinator {
                 par_sec: h.nzb_info.par_sec,
                 repair_sec: h.nzb_info.repair_sec,
                 unpack_sec: h.nzb_info.unpack_sec,
+                dupe_key: h.nzb_info.dup_key.clone(),
+                dupe_score: h.nzb_info.dup_score,
+                dupe_mode: h.nzb_info.dup_mode,
             })
             .collect()
     }

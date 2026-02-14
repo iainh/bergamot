@@ -8,7 +8,8 @@ use tracing_subscriber::util::SubscriberInitExt;
 
 use bergamot_config::{Config, parse_config};
 use bergamot_core::models::{
-    ArticleInfo, ArticleStatus, DownloadQueue, FileInfo, NzbInfo, Priority,
+    ArticleInfo, ArticleStatus, DownloadQueue, FileInfo, HistoryInfo, HistoryKind, NzbInfo,
+    Priority,
 };
 use bergamot_diskstate::{DiskState, JsonFormat, StateLock};
 use bergamot_extension::{
@@ -279,14 +280,117 @@ pub fn restore_queue(disk: &DiskState<JsonFormat>) -> Result<Option<(DownloadQue
         queue_nzbs.push(nzb);
     }
 
+    let history = restore_history(disk);
+
     let queue = DownloadQueue {
         queue: queue_nzbs,
-        history: vec![],
+        history,
         next_nzb_id: state.next_nzb_id,
         next_file_id: max_file_id,
     };
 
     Ok(Some((queue, state.download_paused, state.speed_limit)))
+}
+
+fn restore_history(disk: &DiskState<JsonFormat>) -> Vec<HistoryInfo> {
+    let history_state = match disk.load_history() {
+        Ok(s) => s,
+        Err(err) => {
+            if err
+                .downcast_ref::<std::io::Error>()
+                .is_none_or(|e| e.kind() != std::io::ErrorKind::NotFound)
+            {
+                tracing::warn!("failed to load history: {err}");
+            }
+            return Vec::new();
+        }
+    };
+
+    let mut entries = Vec::with_capacity(history_state.entries.len());
+    for h in &history_state.entries {
+        let kind = match h.kind {
+            0 => HistoryKind::Nzb,
+            1 => HistoryKind::Url,
+            2 => HistoryKind::DupHidden,
+            _ => HistoryKind::Nzb,
+        };
+        let time = std::time::SystemTime::from(h.completed_at);
+        let nzb_info = NzbInfo {
+            id: h.id,
+            kind: bergamot_core::models::NzbKind::Nzb,
+            name: h.name.clone(),
+            filename: String::new(),
+            url: String::new(),
+            dest_dir: std::path::PathBuf::new(),
+            final_dir: std::path::PathBuf::new(),
+            temp_dir: std::path::PathBuf::new(),
+            queue_dir: std::path::PathBuf::new(),
+            category: String::new(),
+            priority: Priority::Normal,
+            dup_key: h.dupe_key.clone(),
+            dup_mode: h.dupe_mode,
+            dup_score: h.dupe_score,
+            size: h.size,
+            remaining_size: 0,
+            paused_size: 0,
+            failed_size: 0,
+            success_size: h.size,
+            current_downloaded_size: 0,
+            par_size: 0,
+            par_remaining_size: 0,
+            par_current_success_size: 0,
+            par_failed_size: 0,
+            par_total_article_count: 0,
+            par_failed_article_count: 0,
+            file_count: 0,
+            remaining_file_count: 0,
+            remaining_par_count: 0,
+            total_article_count: 0,
+            success_article_count: 0,
+            failed_article_count: 0,
+            added_time: time,
+            min_time: None,
+            max_time: None,
+            download_start_time: None,
+            download_sec: 0,
+            post_total_sec: 0,
+            par_sec: 0,
+            repair_sec: 0,
+            unpack_sec: 0,
+            paused: false,
+            deleted: false,
+            direct_rename: false,
+            force_priority: false,
+            reprocess: false,
+            par_manual: false,
+            clean_up_disk: false,
+            par_status: bergamot_core::models::ParStatus::None,
+            unpack_status: bergamot_core::models::UnpackStatus::None,
+            move_status: bergamot_core::models::MoveStatus::None,
+            delete_status: bergamot_core::models::DeleteStatus::None,
+            mark_status: bergamot_core::models::MarkStatus::None,
+            url_status: bergamot_core::models::UrlStatus::None,
+            script_status: bergamot_core::models::ScriptStatus::None,
+            health: 1000,
+            critical_health: 1000,
+            files: vec![],
+            completed_files: vec![],
+            server_stats: vec![],
+            parameters: vec![],
+            post_info: None,
+            message_count: 0,
+            cached_message_count: 0,
+        };
+        entries.push(HistoryInfo {
+            id: h.id,
+            kind,
+            time,
+            nzb_info,
+        });
+    }
+
+    tracing::info!("restored {} history entries", entries.len());
+    entries
 }
 
 fn postproc_config(config: &Config) -> bergamot_postproc::Config {
@@ -702,10 +806,13 @@ pub async fn run_with_config_path(
 
     if let Ok(snapshot) = queue_handle.get_queue_snapshot().await {
         let state = bergamot_scheduler::DiskStateFlush::snapshot_to_queue_state(&snapshot);
+        let history_state =
+            bergamot_scheduler::DiskStateFlush::snapshot_to_history_state(&snapshot);
         let article_states = queue_handle.get_all_file_article_states().await.ok();
         let disk_clone = disk.clone();
         let _ = tokio::task::spawn_blocking(move || {
             disk_clone.save_queue(&state)?;
+            disk_clone.save_history(&history_state)?;
             if let Some(states) = article_states {
                 for snap in &states {
                     let mut file_state = bergamot_diskstate::FileArticleState::new(

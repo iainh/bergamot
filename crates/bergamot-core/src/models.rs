@@ -159,8 +159,9 @@ pub enum UrlStatus {
 }
 
 #[repr(u32)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize_repr, Deserialize_repr)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize_repr, Deserialize_repr)]
 pub enum DupMode {
+    #[default]
     Score = 0,
     All = 1,
     Force = 2,

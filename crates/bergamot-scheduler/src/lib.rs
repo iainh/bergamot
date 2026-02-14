@@ -1133,6 +1133,32 @@ impl DiskStateFlush {
         Self { queue, disk }
     }
 
+    pub fn snapshot_to_history_state(
+        snapshot: &bergamot_queue::QueueSnapshot,
+    ) -> bergamot_diskstate::HistoryState {
+        bergamot_diskstate::HistoryState {
+            version: 1,
+            entries: snapshot
+                .history
+                .iter()
+                .map(|h| {
+                    let completed_at = chrono::DateTime::<chrono::Utc>::from(h.time);
+                    bergamot_diskstate::HistoryEntry {
+                        id: h.id,
+                        name: h.name.clone(),
+                        status: format!("{:?}", h.delete_status),
+                        completed_at,
+                        dupe_key: h.dupe_key.clone(),
+                        dupe_score: h.dupe_score,
+                        dupe_mode: h.dupe_mode,
+                        kind: h.kind as u32,
+                        size: h.size,
+                    }
+                })
+                .collect(),
+        }
+    }
+
     pub fn snapshot_to_queue_state(
         snapshot: &bergamot_queue::QueueSnapshot,
     ) -> bergamot_diskstate::QueueState {
@@ -1213,9 +1239,11 @@ impl Service for DiskStateFlush {
             .collect();
 
         let state = Self::snapshot_to_queue_state(&snapshot);
+        let history_state = Self::snapshot_to_history_state(&snapshot);
         let disk = self.disk.clone();
         tokio::task::spawn_blocking(move || {
             disk.save_queue(&state)?;
+            disk.save_history(&history_state)?;
 
             for snap in &article_states {
                 let mut file_state =

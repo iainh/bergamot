@@ -99,6 +99,9 @@ pub struct HistoryListEntry {
     pub par_sec: u64,
     pub repair_sec: u64,
     pub unpack_sec: u64,
+    pub dupe_key: String,
+    pub dupe_score: i32,
+    pub dupe_mode: bergamot_core::models::DupMode,
 }
 
 #[derive(Debug, Clone)]

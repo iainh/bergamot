@@ -344,6 +344,16 @@ pub struct HistoryEntry {
     pub name: String,
     pub status: String,
     pub completed_at: DateTime<Utc>,
+    #[serde(default)]
+    pub dupe_key: String,
+    #[serde(default)]
+    pub dupe_score: i32,
+    #[serde(default)]
+    pub dupe_mode: DupMode,
+    #[serde(default)]
+    pub kind: u32,
+    #[serde(default)]
+    pub size: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
