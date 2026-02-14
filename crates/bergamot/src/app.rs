@@ -657,7 +657,10 @@ pub async fn run_with_config_path(
         },
         stats_recorder: shared_stats,
     };
-    let config_snapshot = config_arc.read().unwrap().clone();
+    let config_snapshot = config_arc
+        .read()
+        .expect("config lock poisoned")
+        .clone();
     let (scheduler_tx, scheduler_handles) =
         bergamot_scheduler::start_services(&config_snapshot, deps).await?;
 

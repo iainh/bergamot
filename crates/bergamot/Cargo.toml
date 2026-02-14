@@ -3,6 +3,12 @@ name = "bergamot"
 version = "0.1.0"
 edition = "2024"
 license.workspace = true
+description = "An efficient Usenet binary downloader — a ground-up Rust reimplementation of NZBGet"
+homepage = "https://github.com/iainh/bergamot"
+repository = "https://github.com/iainh/bergamot"
+readme = "../../README.md"
+keywords = ["usenet", "nntp", "nzb", "downloader", "nzbget"]
+categories = ["command-line-utilities", "network-programming"]
 
 [dependencies]
 anyhow = "1.0"

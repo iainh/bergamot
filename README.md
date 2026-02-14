@@ -167,6 +167,18 @@ See [docs/08-configuration.md](docs/08-configuration.md) for the full list of co
 | `bergamot-extension` | Extension/script runner interface |
 | `bergamot-logging` | Logging, message buffer, and history tracking |
 
+## Current status
+
+bergamot is in **early alpha** (`v0.1.0`). All core subsystems are implemented and pass their unit and integration tests (using a stub NNTP server), but the full pipeline has **not yet been validated against real NNTP servers** or real Sonarr/Radarr traffic. Known limitations:
+
+- End-to-end downloads against live servers are untested — file assembly, failure handling, and crash recovery may have edge-case bugs.
+- RPC response schemas have not been diffed against NZBGet with real Sonarr/Radarr traffic; field-level incompatibilities may exist.
+- Some NZBGet features are not yet implemented: direct rename/unpack, extension manager lifecycle, PAR-first download strategy, and Windows service support.
+
+See [docs/planning/production-readiness-gap-analysis.md](docs/planning/production-readiness-gap-analysis.md) for the full gap analysis.
+
+Bug reports and contributions are welcome!
+
 ## Acknowledgements
 
 bergamot is inspired by and aims for compatibility with [NZBGet](https://nzbget.com), the battle-tested Usenet downloader created by the NZBGet team. Without their years of work building an excellent downloader and documenting its architecture, configuration format, and API, this project would not exist.
