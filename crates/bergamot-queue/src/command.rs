@@ -153,6 +153,7 @@ pub enum QueueCommand {
         par_status: bergamot_core::models::ParStatus,
         unpack_status: bergamot_core::models::UnpackStatus,
         move_status: bergamot_core::models::MoveStatus,
+        final_dir: Option<std::path::PathBuf>,
         timings: PostProcessTimings,
     },
     GetAllFileArticleStates {

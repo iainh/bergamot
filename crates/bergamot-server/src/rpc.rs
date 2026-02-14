@@ -224,8 +224,8 @@ pub(crate) async fn rpc_listgroups(state: &AppState) -> Result<serde_json::Value
                 "NZBNicename": entry.name,
                 "NZBFilename": "",
                 "URL": "",
-                "DestDir": "",
-                "FinalDir": "",
+                "DestDir": entry.dest_dir.display().to_string(),
+                "FinalDir": entry.final_dir.as_ref().map(|p| p.display().to_string()).unwrap_or_default(),
                 "Status": status,
                 "Category": entry.category,
                 "FileSizeLo": (entry.total_size & 0xFFFF_FFFF) as u32,
@@ -1141,8 +1141,8 @@ pub(crate) async fn rpc_history(
             );
             m.insert("FileCount".into(), serde_json::json!(e.file_count));
             m.insert("RetryData".into(), serde_json::json!(false));
-            m.insert("FinalDir".into(), serde_json::json!(""));
-            m.insert("DestDir".into(), serde_json::json!(""));
+            m.insert("FinalDir".into(), serde_json::json!(e.final_dir.display().to_string()));
+            m.insert("DestDir".into(), serde_json::json!(e.dest_dir.display().to_string()));
             m.insert("URL".into(), serde_json::json!(""));
             m.insert("DownloadedSizeMB".into(), serde_json::json!(file_size_mb));
             m.insert("DownloadedSizeLo".into(), serde_json::json!(file_size_lo));

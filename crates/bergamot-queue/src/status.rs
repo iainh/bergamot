@@ -77,6 +77,8 @@ pub struct HistoryListEntry {
     pub id: u32,
     pub name: String,
     pub category: String,
+    pub dest_dir: PathBuf,
+    pub final_dir: PathBuf,
     pub kind: bergamot_core::models::HistoryKind,
     pub time: std::time::SystemTime,
     pub size: u64,

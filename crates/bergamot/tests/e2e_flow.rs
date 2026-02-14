@@ -403,7 +403,7 @@ async fn end_to_end_append_download_flow() {
     let working_dir = inter_dir.join(format!("nzb-{nzb_id}"));
     let completed_content = tokio::time::timeout(Duration::from_secs(5), async {
         loop {
-            for dir in [&dest_dir, &working_dir] {
+            for dir in [&dest_dir.join("sample"), &working_dir] {
                 if let Ok(mut entries) = tokio::fs::read_dir(dir).await {
                     while let Ok(Some(entry)) = entries.next_entry().await {
                         if let Ok(content) = tokio::fs::read_to_string(entry.path()).await
@@ -548,7 +548,7 @@ async fn missing_article_falls_back_to_second_server() {
     let working_dir = inter_dir.join(format!("nzb-{nzb_id}"));
     let completed_content = tokio::time::timeout(Duration::from_secs(5), async {
         loop {
-            for dir in [&dest_dir, &working_dir] {
+            for dir in [&dest_dir.join("sample"), &working_dir] {
                 if let Ok(mut entries) = tokio::fs::read_dir(dir).await {
                     while let Ok(Some(entry)) = entries.next_entry().await {
                         if let Ok(content) = tokio::fs::read_to_string(entry.path()).await
@@ -1260,7 +1260,9 @@ async fn multifile_nzb_produces_all_output_files() {
         async move {
             tokio::time::timeout(Duration::from_secs(3), async {
                 loop {
-                    if let Ok(content) = tokio::fs::read_to_string(dest.join(&name)).await {
+                    if let Ok(content) =
+                        tokio::fs::read_to_string(dest.join("multifile").join(&name)).await
+                    {
                         return content;
                     }
                     if let Ok(mut entries) = tokio::fs::read_dir(&inter).await {
@@ -1349,45 +1351,54 @@ async fn concurrent_downloads_complete_without_corruption() {
     assert!(completed_1, "first NZB should complete");
     assert!(completed_2, "second NZB should complete");
 
-    let collect_files = |inter: PathBuf, dest: PathBuf, nzb_id: u64| async move {
-        let working = inter.join(format!("nzb-{nzb_id}"));
-        tokio::time::timeout(Duration::from_secs(5), async move {
-            loop {
-                let mut contents = Vec::new();
-                for dir in [&working, &dest] {
-                    if let Ok(mut entries) = tokio::fs::read_dir(dir).await {
-                        while let Ok(Some(entry)) = entries.next_entry().await {
-                            if let Ok(content) = tokio::fs::read_to_string(entry.path()).await
-                                && !contents.contains(&content)
-                            {
-                                contents.push(content);
+    let collect_files =
+        |inter: PathBuf, dest: PathBuf, nzb_id: u64, subdir: &'static str| async move {
+            let working = inter.join(format!("nzb-{nzb_id}"));
+            let dest_sub = dest.join(subdir);
+            tokio::time::timeout(Duration::from_secs(5), async move {
+                loop {
+                    let mut contents = Vec::new();
+                    for dir in [&working, &dest_sub] {
+                        if let Ok(mut entries) = tokio::fs::read_dir(dir).await {
+                            while let Ok(Some(entry)) = entries.next_entry().await {
+                                if let Ok(content) =
+                                    tokio::fs::read_to_string(entry.path()).await
+                                    && !contents.contains(&content)
+                                {
+                                    contents.push(content);
+                                }
                             }
                         }
                     }
+                    if !contents.is_empty() {
+                        contents.sort();
+                        return contents;
+                    }
+                    tokio::time::sleep(Duration::from_millis(50)).await;
                 }
-                if !contents.is_empty() {
-                    contents.sort();
-                    return contents;
-                }
-                tokio::time::sleep(Duration::from_millis(50)).await;
-            }
-        })
-        .await
-    };
+            })
+            .await
+        };
 
-    let all_files = collect_files(inter_dir.clone(), dest_dir.clone(), nzb_id_1)
-        .await
-        .expect("files should be produced");
+    let sample_files =
+        collect_files(inter_dir.clone(), dest_dir.clone(), nzb_id_1, "sample")
+            .await
+            .expect("files should be produced");
     assert!(
-        all_files.contains(&"ABCDEFGH".to_string()),
+        sample_files.contains(&"ABCDEFGH".to_string()),
         "sample.nzb content ABCDEFGH should be present"
     );
+
+    let multifile_files =
+        collect_files(inter_dir.clone(), dest_dir.clone(), nzb_id_2, "multifile")
+            .await
+            .expect("multifile files should be produced");
     assert!(
-        all_files.contains(&"ABCD".to_string()),
+        multifile_files.contains(&"ABCD".to_string()),
         "multifile.nzb should contain alpha content ABCD"
     );
     assert!(
-        all_files.contains(&"MNOP".to_string()),
+        multifile_files.contains(&"MNOP".to_string()),
         "multifile.nzb should contain beta content MNOP"
     );
 
@@ -1596,9 +1607,10 @@ async fn post_processing_par2_verify_and_move() {
     let completed = wait_for_completion(rpc_addr, nzb_id, 50).await;
     assert!(completed, "par2 nzb should complete downloading");
 
+    let par2_dest = dest_dir.join("par2");
     let content = tokio::time::timeout(Duration::from_secs(5), async {
         loop {
-            if let Ok(data) = tokio::fs::read(dest_dir.join("payload.dat")).await {
+            if let Ok(data) = tokio::fs::read(par2_dest.join("payload.dat")).await {
                 return data;
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
@@ -1609,7 +1621,7 @@ async fn post_processing_par2_verify_and_move() {
     assert_eq!(content, b"TESTDATA", "payload.dat content should match");
 
     assert!(
-        dest_dir.join("payload.par2").is_file(),
+        par2_dest.join("payload.par2").is_file(),
         "payload.par2 should be moved to dest dir"
     );
 

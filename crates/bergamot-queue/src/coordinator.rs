@@ -284,6 +284,7 @@ impl QueueHandle {
         par_status: bergamot_core::models::ParStatus,
         unpack_status: bergamot_core::models::UnpackStatus,
         move_status: bergamot_core::models::MoveStatus,
+        final_dir: Option<std::path::PathBuf>,
         timings: crate::command::PostProcessTimings,
     ) -> Result<(), QueueError> {
         self.command_tx
@@ -292,6 +293,7 @@ impl QueueHandle {
                 par_status,
                 unpack_status,
                 move_status,
+                final_dir,
                 timings,
             })
             .await
@@ -874,6 +876,7 @@ impl QueueCoordinator {
                 par_status,
                 unpack_status,
                 move_status,
+                final_dir,
                 timings,
             } => {
                 self.finish_post_processing(
@@ -881,6 +884,7 @@ impl QueueCoordinator {
                     par_status,
                     unpack_status,
                     move_status,
+                    final_dir,
                     timings,
                 );
             }
@@ -1520,6 +1524,8 @@ impl QueueCoordinator {
                 id: h.id,
                 name: h.nzb_info.name.clone(),
                 category: h.nzb_info.category.clone(),
+                dest_dir: h.nzb_info.dest_dir.clone(),
+                final_dir: h.nzb_info.final_dir.clone(),
                 kind: h.kind,
                 time: h.time,
                 size: h.nzb_info.size,
@@ -1938,6 +1944,7 @@ impl QueueCoordinator {
         par_status: bergamot_core::models::ParStatus,
         unpack_status: bergamot_core::models::UnpackStatus,
         move_status: bergamot_core::models::MoveStatus,
+        final_dir: Option<std::path::PathBuf>,
         timings: crate::command::PostProcessTimings,
     ) {
         if let Some(idx) = self.queue.queue.iter().position(|n| n.id == nzb_id) {
@@ -1945,6 +1952,9 @@ impl QueueCoordinator {
             nzb.par_status = par_status;
             nzb.unpack_status = unpack_status;
             nzb.move_status = move_status;
+            if let Some(dir) = final_dir {
+                nzb.final_dir = dir;
+            }
             nzb.post_total_sec = timings.post_total_sec;
             nzb.par_sec = timings.par_sec;
             nzb.repair_sec = timings.repair_sec;

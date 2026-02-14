@@ -373,6 +373,7 @@ impl PostStatusReporter for QueuePostReporter {
         par: bergamot_core::models::ParStatus,
         unpack: bergamot_core::models::UnpackStatus,
         mv: bergamot_core::models::MoveStatus,
+        final_dir: Option<std::path::PathBuf>,
         timings: bergamot_postproc::PostTimings,
     ) {
         let qt = bergamot_queue::PostProcessTimings {
@@ -383,7 +384,7 @@ impl PostStatusReporter for QueuePostReporter {
         };
         let _ = self
             .queue
-            .finish_post_processing(nzb_id, par, unpack, mv, qt)
+            .finish_post_processing(nzb_id, par, unpack, mv, final_dir, qt)
             .await;
     }
 }

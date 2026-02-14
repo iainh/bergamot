@@ -44,6 +44,7 @@ pub trait PostStatusReporter: Send + Sync {
         par: bergamot_core::models::ParStatus,
         unpack: bergamot_core::models::UnpackStatus,
         mv: bergamot_core::models::MoveStatus,
+        final_dir: Option<std::path::PathBuf>,
         timings: PostTimings,
     );
 }
@@ -279,10 +280,10 @@ impl<E: Par2Engine, U: Unpacker> PostProcessor<E, U> {
             ctx.request.category.as_deref(),
             self.config.append_category_dir,
         );
-        let move_status = match move_to_destination(&ctx.request.working_dir, &dest).await {
-            Ok(()) => {
-                tracing::info!(nzb = %ctx.request.nzb_name, dest = %dest.display(), "moved files to destination");
-                bergamot_core::models::MoveStatus::Success
+        let (move_status, final_dir) = match move_to_destination(&ctx.request.working_dir, &dest, &ctx.request.nzb_name).await {
+            Ok(final_dir) => {
+                tracing::info!(nzb = %ctx.request.nzb_name, dest = %final_dir.display(), "moved files to destination");
+                (bergamot_core::models::MoveStatus::Success, Some(final_dir))
             }
             Err(err) => {
                 tracing::error!(
@@ -292,7 +293,7 @@ impl<E: Par2Engine, U: Unpacker> PostProcessor<E, U> {
                     error = %err,
                     "moving files to destination failed"
                 );
-                bergamot_core::models::MoveStatus::Failure
+                (bergamot_core::models::MoveStatus::Failure, None)
             }
         };
 
@@ -351,7 +352,7 @@ impl<E: Par2Engine, U: Unpacker> PostProcessor<E, U> {
         };
         if let Some(reporter) = &self.reporter {
             reporter
-                .report_done(nzb_id, par_status, unpack_status, move_status, timings)
+                .report_done(nzb_id, par_status, unpack_status, move_status, final_dir, timings)
                 .await;
         }
 
@@ -645,7 +646,7 @@ mod tests {
         let history = history.lock().expect("lock");
         assert_eq!(history.as_slice(), ["test_nzb"]);
 
-        assert!(dest.path().join("movies").join("archive.unpacked").exists());
+        assert!(dest.path().join("movies").join("test_nzb").join("archive.unpacked").exists());
     }
 
     struct FakeExtensionExecutor {

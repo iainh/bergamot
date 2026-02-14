@@ -12,8 +12,11 @@ pub fn resolve_dest_dir(dest_dir: &Path, category: Option<&str>, append_category
 pub async fn move_to_destination(
     working_dir: &Path,
     dest_dir: &Path,
-) -> Result<(), PostProcessError> {
-    tokio::fs::create_dir_all(dest_dir).await?;
+    nzb_name: &str,
+) -> Result<PathBuf, PostProcessError> {
+    let subdir_name = nzb_name.strip_suffix(".nzb").unwrap_or(nzb_name);
+    let dest_dir = dest_dir.join(subdir_name);
+    tokio::fs::create_dir_all(&dest_dir).await?;
 
     let mut entries = tokio::fs::read_dir(working_dir).await?;
     while let Some(entry) = entries.next_entry().await? {
@@ -26,7 +29,7 @@ pub async fn move_to_destination(
         move_path(&src, &dst).await?;
     }
 
-    Ok(())
+    Ok(dest_dir)
 }
 
 async fn move_path(src: &Path, dst: &Path) -> Result<(), PostProcessError> {
@@ -141,13 +144,14 @@ mod tests {
         std::fs::write(src_dir.path().join("movie.mkv"), b"video").unwrap();
         std::fs::write(src_dir.path().join("subs.srt"), b"subs").unwrap();
 
-        move_to_destination(src_dir.path(), &dst_path)
+        move_to_destination(src_dir.path(), &dst_path, "My.Movie.2024.nzb")
             .await
             .unwrap();
 
-        assert!(dst_path.join("movie.mkv").exists());
-        assert!(dst_path.join("subs.srt").exists());
-        let content = std::fs::read_to_string(dst_path.join("movie.mkv")).unwrap();
+        let nzb_dir = dst_path.join("My.Movie.2024");
+        assert!(nzb_dir.join("movie.mkv").exists());
+        assert!(nzb_dir.join("subs.srt").exists());
+        let content = std::fs::read_to_string(nzb_dir.join("movie.mkv")).unwrap();
         assert_eq!(content, "video");
     }
 
@@ -159,8 +163,10 @@ mod tests {
         std::fs::write(src_dir.path().join("file.txt"), b"data").unwrap();
 
         let dest = resolve_dest_dir(dst_dir.path(), Some("tv"), true);
-        move_to_destination(src_dir.path(), &dest).await.unwrap();
+        move_to_destination(src_dir.path(), &dest, "My.Show.S01E01.nzb")
+            .await
+            .unwrap();
 
-        assert!(dst_dir.path().join("tv").join("file.txt").exists());
+        assert!(dst_dir.path().join("tv").join("My.Show.S01E01").join("file.txt").exists());
     }
 }
