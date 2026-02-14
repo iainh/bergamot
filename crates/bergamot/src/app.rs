@@ -464,9 +464,17 @@ fn build_extension_executor(config: &Config) -> Option<Arc<dyn ExtensionExecutor
 pub fn forward_completions(
     mut completion_rx: tokio::sync::mpsc::Receiver<NzbCompletionNotice>,
     postproc_tx: tokio::sync::mpsc::Sender<PostProcessRequest>,
+    writer_pool: Arc<crate::writer::FileWriterPool>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         while let Some(notice) = completion_rx.recv().await {
+            if let Err(err) = writer_pool.flush_prefix(&notice.working_dir).await {
+                tracing::warn!(
+                    nzb = %notice.nzb_name,
+                    error = %err,
+                    "flushing writer pool for completed NZB"
+                );
+            }
             let req = PostProcessRequest {
                 nzb_id: notice.nzb_id as i64,
                 nzb_name: notice.nzb_name,
@@ -583,7 +591,7 @@ pub async fn run_with_config_path(
     let postproc_handle = tokio::spawn(async move {
         postprocessor.run().await;
     });
-    let forward_handle = forward_completions(completion_rx, postproc_tx.clone());
+    let forward_handle = forward_completions(completion_rx, postproc_tx.clone(), writer_pool.clone());
 
     let worker_writer_pool = writer_pool.clone();
     let worker_handle = tokio::spawn(crate::download::download_worker(
@@ -1027,7 +1035,8 @@ mod tests {
         let (notice_tx, notice_rx) = tokio::sync::mpsc::channel(4);
         let (postproc_tx, mut postproc_rx) = tokio::sync::mpsc::channel(4);
 
-        let handle = forward_completions(notice_rx, postproc_tx);
+        let pool = Arc::new(crate::writer::FileWriterPool::new());
+        let handle = forward_completions(notice_rx, postproc_tx, pool);
 
         notice_tx
             .send(NzbCompletionNotice {

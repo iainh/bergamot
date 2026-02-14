@@ -107,6 +107,27 @@ impl FileWriterPool {
         Ok(tx)
     }
 
+    pub async fn flush_prefix(&self, prefix: &Path) -> Result<()> {
+        let keys: Vec<PathBuf> = self
+            .writers
+            .iter()
+            .filter(|e| e.key().starts_with(prefix))
+            .map(|e| e.key().clone())
+            .collect();
+
+        for key in keys {
+            if let Some((path, entry)) = self.writers.remove(&key) {
+                drop(entry.tx);
+                if let Err(err) = entry.handle.await
+                    && err.is_panic()
+                {
+                    tracing::error!(path = %path.display(), "writer task panicked: {err}");
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub async fn flush_all(&self) -> Result<()> {
         let entries: Vec<(PathBuf, WriterEntry)> = self
             .writers
