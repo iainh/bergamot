@@ -32,7 +32,7 @@ pub async fn move_to_destination(
 async fn move_path(src: &Path, dst: &Path) -> Result<(), PostProcessError> {
     match tokio::fs::rename(src, dst).await {
         Ok(()) => Ok(()),
-        Err(e) if is_cross_device(&e) => {
+        Err(e) if is_cross_device(&e) || is_device_busy(&e) => {
             copy_recursive(src, dst).await?;
             remove_recursive(src).await?;
             Ok(())
@@ -43,6 +43,20 @@ async fn move_path(src: &Path, dst: &Path) -> Result<(), PostProcessError> {
 
 fn is_cross_device(e: &std::io::Error) -> bool {
     e.raw_os_error() == Some(libc_exdev())
+}
+
+fn is_device_busy(e: &std::io::Error) -> bool {
+    e.raw_os_error() == Some(libc_ebusy())
+}
+
+#[cfg(target_os = "windows")]
+fn libc_ebusy() -> i32 {
+    142
+}
+
+#[cfg(not(target_os = "windows"))]
+fn libc_ebusy() -> i32 {
+    16
 }
 
 #[cfg(target_os = "linux")]
