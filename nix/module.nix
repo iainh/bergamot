@@ -22,8 +22,10 @@ in
   options.services.bergamot = {
     enable = lib.mkEnableOption "bergamot, an efficient Usenet binary downloader";
 
-    package = lib.mkPackageOption pkgs "bergamot" {
+    package = lib.mkOption {
+      type = lib.types.package;
       default = self.packages.${pkgs.stdenv.hostPlatform.system}.default;
+      description = "The bergamot package to use.";
     };
 
     user = lib.mkOption {
