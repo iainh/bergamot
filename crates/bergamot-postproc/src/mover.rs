@@ -34,7 +34,13 @@ async fn move_path(src: &Path, dst: &Path) -> Result<(), PostProcessError> {
         Ok(()) => Ok(()),
         Err(e) if is_cross_device(&e) || is_device_busy(&e) => {
             copy_recursive(src, dst).await?;
-            remove_recursive(src).await?;
+            if let Err(e) = remove_recursive(src).await {
+                tracing::warn!(
+                    src = %src.display(),
+                    error = %e,
+                    "failed to remove source after copy (file already at destination)"
+                );
+            }
             Ok(())
         }
         Err(e) => Err(e.into()),
