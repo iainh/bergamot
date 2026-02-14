@@ -99,7 +99,7 @@ fn main() -> Result<()> {
             .context("no config file found; use --config to specify one")?,
     };
 
-    let config = app::load_config(&config_path)?;
+    let config = app::load_config(&config_path, &cli.options)?;
     let log_buffer = app::init_tracing(&cli.log_level);
 
     tracing::info!("starting bergamot");

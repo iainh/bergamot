@@ -21,6 +21,14 @@ pub struct Cli {
         help = "Log level (debug, info, warning, error)"
     )]
     pub log_level: String,
+
+    #[arg(
+        short = 'o',
+        long = "option",
+        value_name = "KEY=VALUE",
+        help = "Override a config option (e.g. -o MainDir=/data)"
+    )]
+    pub options: Vec<String>,
 }
 
 #[cfg(test)]
@@ -63,5 +71,24 @@ mod tests {
     fn cli_pidfile_defaults_to_none() {
         let cli = Cli::try_parse_from(["bergamot"]).expect("parse");
         assert!(cli.pidfile.is_none());
+    }
+
+    #[test]
+    fn cli_parses_option_overrides() {
+        let cli = Cli::try_parse_from([
+            "bergamot",
+            "-o",
+            "MainDir=/data",
+            "-o",
+            "ControlPort=8080",
+        ])
+        .expect("parse");
+        assert_eq!(cli.options, vec!["MainDir=/data", "ControlPort=8080"]);
+    }
+
+    #[test]
+    fn cli_option_defaults_to_empty() {
+        let cli = Cli::try_parse_from(["bergamot"]).expect("parse");
+        assert!(cli.options.is_empty());
     }
 }

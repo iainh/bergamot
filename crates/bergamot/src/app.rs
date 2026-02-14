@@ -24,10 +24,16 @@ use bergamot_server::{
     AppState, ServerConfig as WebServerConfig, ShutdownHandle, WebServer, spawn_stats_updater,
 };
 
-pub fn load_config(path: &Path) -> Result<Config> {
+pub fn load_config(path: &Path, overrides: &[String]) -> Result<Config> {
     let content = std::fs::read_to_string(path)
         .with_context(|| format!("reading config: {}", path.display()))?;
-    let raw = parse_config(&content).context("parsing config")?;
+    let mut raw = parse_config(&content).context("parsing config")?;
+    for opt in overrides {
+        let (key, value) = opt
+            .split_once('=')
+            .with_context(|| format!("invalid option '{opt}': expected KEY=VALUE"))?;
+        raw.insert(key.trim().to_string(), value.trim().to_string());
+    }
     Ok(Config::from_raw(raw))
 }
 
@@ -765,7 +771,7 @@ mod tests {
         writeln!(tmp, "MainDir=/tmp/bergamot-test").expect("write");
         writeln!(tmp, "ControlPort=6790").expect("write");
 
-        let config = load_config(tmp.path()).expect("load");
+        let config = load_config(tmp.path(), &[]).expect("load");
         assert_eq!(config.control_port, 6790);
         assert_eq!(
             config.main_dir,
@@ -775,7 +781,7 @@ mod tests {
 
     #[test]
     fn load_config_returns_error_for_missing_file() {
-        let result = load_config(Path::new("/nonexistent/bergamot.conf"));
+        let result = load_config(Path::new("/nonexistent/bergamot.conf"), &[]);
         assert!(result.is_err());
     }
 
