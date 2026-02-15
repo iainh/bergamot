@@ -295,20 +295,27 @@ impl<E: Par2Engine, U: Unpacker> PostProcessor<E, U> {
             ctx.request.category.as_deref(),
             self.config.append_category_dir,
         );
-        let (move_status, final_dir) = match move_to_destination(&ctx.request.working_dir, &dest, &ctx.request.nzb_name).await {
-            Ok(final_dir) => {
-                tracing::info!(nzb = %ctx.request.nzb_name, dest = %final_dir.display(), "moved files to destination");
-                (bergamot_core::models::MoveStatus::Success, Some(final_dir))
-            }
-            Err(err) => {
-                tracing::error!(
-                    nzb = %ctx.request.nzb_name,
-                    src = %ctx.request.working_dir.display(),
-                    dest = %dest.display(),
-                    error = %err,
-                    "moving files to destination failed"
-                );
-                (bergamot_core::models::MoveStatus::Failure, None)
+        let subdir_name = ctx.request.nzb_name.strip_suffix(".nzb").unwrap_or(&ctx.request.nzb_name);
+        let expected_final = dest.join(subdir_name);
+        let (move_status, final_dir) = if ctx.request.working_dir == expected_final {
+            tracing::info!(nzb = %ctx.request.nzb_name, dest = %expected_final.display(), "files already at destination, skipping move");
+            (bergamot_core::models::MoveStatus::Success, Some(expected_final))
+        } else {
+            match move_to_destination(&ctx.request.working_dir, &dest, &ctx.request.nzb_name).await {
+                Ok(final_dir) => {
+                    tracing::info!(nzb = %ctx.request.nzb_name, dest = %final_dir.display(), "moved files to destination");
+                    (bergamot_core::models::MoveStatus::Success, Some(final_dir))
+                }
+                Err(err) => {
+                    tracing::error!(
+                        nzb = %ctx.request.nzb_name,
+                        src = %ctx.request.working_dir.display(),
+                        dest = %dest.display(),
+                        error = %err,
+                        "moving files to destination failed"
+                    );
+                    (bergamot_core::models::MoveStatus::Failure, None)
+                }
             }
         };
 

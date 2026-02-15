@@ -1604,6 +1604,13 @@ impl QueueCoordinator {
         nzb.deleted = false;
         nzb.paused = false;
         nzb.reprocess = true;
+        if nzb.temp_dir.as_os_str().is_empty() {
+            if !nzb.final_dir.as_os_str().is_empty() {
+                nzb.temp_dir = nzb.final_dir.clone();
+            } else if !nzb.dest_dir.as_os_str().is_empty() {
+                nzb.temp_dir = nzb.dest_dir.clone();
+            }
+        }
         nzb.par_status = bergamot_core::models::ParStatus::None;
         nzb.unpack_status = bergamot_core::models::UnpackStatus::None;
         nzb.move_status = bergamot_core::models::MoveStatus::None;
