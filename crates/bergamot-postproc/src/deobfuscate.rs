@@ -123,10 +123,15 @@ pub fn deobfuscate_by_nzb_name(working_dir: &Path, nzb_name: &str) -> Option<(St
         .and_then(|e| e.to_str())
         .unwrap_or("");
 
+    let base_name = nzb_name
+        .strip_suffix(".nzb")
+        .or_else(|| nzb_name.strip_suffix(".NZB"))
+        .unwrap_or(nzb_name);
+
     let new_name = if ext.is_empty() {
-        nzb_name.to_string()
+        base_name.to_string()
     } else {
-        format!("{nzb_name}.{ext}")
+        format!("{base_name}.{ext}")
     };
 
     if new_name == *old_name {
@@ -245,6 +250,26 @@ mod tests {
         assert_eq!(to, "My.Show.S02E05.Episode.Title.1080p.WEB-DL.DDP5.1.H.264-GRP.mkv");
         assert!(dir.path().join(&to).exists());
         assert!(!dir.path().join(&from).exists());
+    }
+
+    #[test]
+    fn test_deobfuscate_by_nzb_name_strips_nzb_extension() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("cpbsfRk7RFtu5ghi4nmTFDem19hjfPL6.mkv"),
+            b"video data",
+        )
+        .unwrap();
+
+        let result = deobfuscate_by_nzb_name(
+            dir.path(),
+            "My.Show.S02E05.Episode.Title.1080p.WEB-DL.DDP5.1.H.264-GRP.nzb",
+        );
+        assert!(result.is_some());
+        let (from, to) = result.unwrap();
+        assert_eq!(from, "cpbsfRk7RFtu5ghi4nmTFDem19hjfPL6.mkv");
+        assert_eq!(to, "My.Show.S02E05.Episode.Title.1080p.WEB-DL.DDP5.1.H.264-GRP.mkv");
+        assert!(dir.path().join(&to).exists());
     }
 
     #[test]
