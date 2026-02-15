@@ -102,7 +102,11 @@ fn main() -> Result<()> {
     let config = app::load_config(&config_path, &cli.options)?;
     let log_buffer = app::init_tracing(&cli.log_level);
 
-    tracing::info!("starting bergamot");
+    tracing::info!(
+        version = env!("CARGO_PKG_VERSION"),
+        commit = env!("BERGAMOT_GIT_HASH"),
+        "starting bergamot"
+    );
     let stats_tracker = bergamot_scheduler::StatsTracker::from_config(&config);
     let shared_stats =
         std::sync::Arc::new(bergamot_scheduler::SharedStatsTracker::new(stats_tracker));
