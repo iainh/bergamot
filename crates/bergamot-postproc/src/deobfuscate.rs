@@ -100,6 +100,59 @@ pub async fn deobfuscate_files(
     renames
 }
 
+/// Fallback deobfuscation when no PAR2 data is available.
+/// If there is exactly one obfuscated file, rename it using the NZB name.
+pub fn deobfuscate_by_nzb_name(working_dir: &Path, nzb_name: &str) -> Option<(String, String)> {
+    let entries: Vec<String> = match std::fs::read_dir(working_dir) {
+        Ok(entries) => entries
+            .filter_map(|e| e.ok())
+            .filter_map(|e| e.file_name().to_str().map(|s| s.to_string()))
+            .collect(),
+        Err(_) => return None,
+    };
+
+    let obfuscated: Vec<&String> = entries.iter().filter(|n| looks_obfuscated(n)).collect();
+
+    if obfuscated.len() != 1 {
+        return None;
+    }
+
+    let old_name = obfuscated[0];
+    let ext = Path::new(old_name)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("");
+
+    let new_name = if ext.is_empty() {
+        nzb_name.to_string()
+    } else {
+        format!("{nzb_name}.{ext}")
+    };
+
+    if new_name == *old_name {
+        return None;
+    }
+
+    let old_path = working_dir.join(old_name);
+    let new_path = working_dir.join(&new_name);
+
+    if new_path.exists() {
+        return None;
+    }
+
+    tracing::info!(
+        from = %old_name,
+        to = %new_name,
+        "deobfuscating file (NZB name fallback)"
+    );
+
+    if std::fs::rename(&old_path, &new_path).is_ok() {
+        Some((old_name.clone(), new_name))
+    } else {
+        None
+    }
+}
+
 fn compute_file_hash_16k(path: &Path) -> std::io::Result<[u8; 16]> {
     use md5::Digest;
     use std::io::Read;
@@ -171,6 +224,54 @@ mod tests {
         assert_eq!(renames[0].1, "My.Movie.S01E01.rar");
         assert!(dir.path().join("My.Movie.S01E01.rar").exists());
         assert!(!dir.path().join("deadbeefcafebabe.rar").exists());
+    }
+
+    #[test]
+    fn test_deobfuscate_by_nzb_name_renames_single_obfuscated_file() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("cpbsfRk7RFtu5ghi4nmTFDem19hjfPL6.mkv"),
+            b"video data",
+        )
+        .unwrap();
+
+        let result = deobfuscate_by_nzb_name(
+            dir.path(),
+            "My.Show.S02E05.Episode.Title.1080p.WEB-DL.DDP5.1.H.264-GRP",
+        );
+        assert!(result.is_some());
+        let (from, to) = result.unwrap();
+        assert_eq!(from, "cpbsfRk7RFtu5ghi4nmTFDem19hjfPL6.mkv");
+        assert_eq!(to, "My.Show.S02E05.Episode.Title.1080p.WEB-DL.DDP5.1.H.264-GRP.mkv");
+        assert!(dir.path().join(&to).exists());
+        assert!(!dir.path().join(&from).exists());
+    }
+
+    #[test]
+    fn test_deobfuscate_by_nzb_name_skips_when_multiple_obfuscated() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("cpbsfRk7RFtu5ghi4nmTFDem19hjfPL6.mkv"),
+            b"video",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("xYzAbCdEfGhIjKlMnOpQrStUv.srt"),
+            b"subs",
+        )
+        .unwrap();
+
+        let result = deobfuscate_by_nzb_name(dir.path(), "My.Show.S01E01");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_deobfuscate_by_nzb_name_skips_non_obfuscated() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("My.Movie.S01E01.mkv"), b"video").unwrap();
+
+        let result = deobfuscate_by_nzb_name(dir.path(), "My.Movie.S01E01");
+        assert!(result.is_none());
     }
 
     #[tokio::test]

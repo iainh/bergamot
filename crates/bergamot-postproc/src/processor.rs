@@ -157,6 +157,7 @@ impl<E: Par2Engine, U: Unpacker> PostProcessor<E, U> {
                 .report_stage(nzb_id, bergamot_core::models::PostStage::ParRenaming)
                 .await;
         }
+        let mut par2_renamed = false;
         if let Some(par2_file) = find_par2_file(&ctx.request.working_dir, &ctx.request.nzb_name) {
             match bergamot_par2::parse_recovery_set_from_file(&par2_file) {
                 Ok(recovery_set) => {
@@ -166,6 +167,7 @@ impl<E: Par2Engine, U: Unpacker> PostProcessor<E, U> {
                     )
                     .await;
                     if !renames.is_empty() {
+                        par2_renamed = true;
                         tracing::info!(
                             nzb = %ctx.request.nzb_name,
                             count = renames.len(),
@@ -181,6 +183,19 @@ impl<E: Par2Engine, U: Unpacker> PostProcessor<E, U> {
                     );
                 }
             }
+        }
+        if !par2_renamed
+            && let Some((from, to)) = crate::deobfuscate::deobfuscate_by_nzb_name(
+                &ctx.request.working_dir,
+                &ctx.request.nzb_name,
+            )
+        {
+            tracing::info!(
+                nzb = %ctx.request.nzb_name,
+                from = %from,
+                to = %to,
+                "deobfuscated file using NZB name"
+            );
         }
 
         ctx.set_stage(PostStage::ParVerifying);
