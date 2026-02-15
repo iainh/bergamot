@@ -102,6 +102,8 @@ pub struct HistoryListEntry {
     pub dupe_key: String,
     pub dupe_score: i32,
     pub dupe_mode: bergamot_core::models::DupMode,
+    pub parameters: Vec<(String, String)>,
+    pub nzb_filename: String,
 }
 
 #[derive(Debug, Clone)]

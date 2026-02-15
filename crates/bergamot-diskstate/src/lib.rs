@@ -354,6 +354,10 @@ pub struct HistoryEntry {
     pub kind: u32,
     #[serde(default)]
     pub size: u64,
+    #[serde(default)]
+    pub parameters: HashMap<String, String>,
+    #[serde(default)]
+    pub nzb_filename: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

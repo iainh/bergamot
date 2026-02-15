@@ -222,7 +222,7 @@ pub(crate) async fn rpc_listgroups(state: &AppState) -> Result<serde_json::Value
                 "LastID": entry.id,
                 "NZBName": entry.name,
                 "NZBNicename": entry.name,
-                "NZBFilename": "",
+                "NZBFilename": entry.filename,
                 "URL": "",
                 "DestDir": entry.dest_dir.display().to_string(),
                 "FinalDir": entry.final_dir.as_ref().map(|p| p.display().to_string()).unwrap_or_default(),
@@ -1100,9 +1100,14 @@ pub(crate) async fn rpc_history(
                 "Deleted".into(),
                 serde_json::json!(e.delete_status != bergamot_core::models::DeleteStatus::None),
             );
-            m.insert("DupeKey".into(), serde_json::json!(""));
-            m.insert("DupeScore".into(), serde_json::json!(0));
-            m.insert("DupeMode".into(), serde_json::json!("SCORE"));
+            let dupe_mode_str = match e.dupe_mode {
+                bergamot_core::models::DupMode::Score => "SCORE",
+                bergamot_core::models::DupMode::All => "ALL",
+                bergamot_core::models::DupMode::Force => "FORCE",
+            };
+            m.insert("DupeKey".into(), serde_json::json!(e.dupe_key));
+            m.insert("DupeScore".into(), serde_json::json!(e.dupe_score));
+            m.insert("DupeMode".into(), serde_json::json!(dupe_mode_str));
             m.insert("ParStatus".into(), serde_json::json!(par_status_str));
             m.insert("UnpackStatus".into(), serde_json::json!(unpack_status_str));
             m.insert("MoveStatus".into(), serde_json::json!(move_status_str));
@@ -1120,7 +1125,17 @@ pub(crate) async fn rpc_history(
             m.insert("ExtraParBlocks".into(), serde_json::json!(0));
             m.insert("Health".into(), serde_json::json!(e.health));
             m.insert("CriticalHealth".into(), serde_json::json!(0));
-            m.insert("Parameters".into(), serde_json::json!([]));
+            let parameters: Vec<serde_json::Value> = e
+                .parameters
+                .iter()
+                .map(|(name, value)| {
+                    serde_json::json!({
+                        "Name": name,
+                        "Value": value,
+                    })
+                })
+                .collect();
+            m.insert("Parameters".into(), serde_json::json!(parameters));
             m.insert("ServerStats".into(), serde_json::json!([]));
             m.insert(
                 "SuccessArticles".into(),
@@ -1160,7 +1175,7 @@ pub(crate) async fn rpc_history(
             m.insert("UnpackTimeSec".into(), serde_json::json!(e.unpack_sec));
             m.insert("MessageCount".into(), serde_json::json!(0));
             m.insert("ScriptStatuses".into(), serde_json::json!([]));
-            m.insert("NZBFilename".into(), serde_json::json!(""));
+            m.insert("NZBFilename".into(), serde_json::json!(e.nzb_filename));
             serde_json::Value::Object(m)
         })
         .collect();
