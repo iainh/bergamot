@@ -428,6 +428,9 @@ async fn rpc_editqueue_history(
             "HistoryReturn" => {
                 queue.history_return(id).await.map_err(rpc_error)?;
             }
+            "HistoryProcess" => {
+                queue.history_process(id).await.map_err(rpc_error)?;
+            }
             "HistoryRedownload" => {
                 queue.history_redownload(id).await.map_err(rpc_error)?;
             }

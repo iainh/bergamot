@@ -201,6 +201,18 @@ impl QueueHandle {
         reply_rx.await.map_err(|_| QueueError::Shutdown)?
     }
 
+    pub async fn history_process(&self, history_id: u32) -> Result<u32, QueueError> {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        self.command_tx
+            .send(QueueCommand::HistoryProcess {
+                history_id,
+                reply: reply_tx,
+            })
+            .await
+            .map_err(|_| QueueError::Shutdown)?;
+        reply_rx.await.map_err(|_| QueueError::Shutdown)?
+    }
+
     pub async fn history_redownload(&self, history_id: u32) -> Result<u32, QueueError> {
         let (reply_tx, reply_rx) = oneshot::channel();
         self.command_tx
@@ -839,6 +851,10 @@ impl QueueCoordinator {
             }
             QueueCommand::HistoryReturn { history_id, reply } => {
                 let result = self.history_return_to_queue(history_id);
+                let _ = reply.send(result);
+            }
+            QueueCommand::HistoryProcess { history_id, reply } => {
+                let result = self.history_process(history_id);
                 let _ = reply.send(result);
             }
             QueueCommand::HistoryRedownload { history_id, reply } => {
@@ -1570,6 +1586,40 @@ impl QueueCoordinator {
         nzb.deleted = false;
         nzb.paused = false;
         self.queue.queue.push(nzb);
+        Ok(new_id)
+    }
+
+    fn history_process(&mut self, history_id: u32) -> Result<u32, QueueError> {
+        let idx = self
+            .queue
+            .history
+            .iter()
+            .position(|h| h.id == history_id)
+            .ok_or(QueueError::NzbNotFound(history_id))?;
+        let entry = self.queue.history.remove(idx);
+        let new_id = self.queue.next_nzb_id;
+        self.queue.next_nzb_id += 1;
+        let mut nzb = entry.nzb_info;
+        nzb.id = new_id;
+        nzb.deleted = false;
+        nzb.paused = false;
+        nzb.reprocess = true;
+        nzb.par_status = bergamot_core::models::ParStatus::None;
+        nzb.unpack_status = bergamot_core::models::UnpackStatus::None;
+        nzb.move_status = bergamot_core::models::MoveStatus::None;
+        nzb.delete_status = bergamot_core::models::DeleteStatus::None;
+        nzb.mark_status = bergamot_core::models::MarkStatus::None;
+        nzb.script_status = bergamot_core::models::ScriptStatus::None;
+        nzb.post_total_sec = 0;
+        nzb.par_sec = 0;
+        nzb.repair_sec = 0;
+        nzb.unpack_sec = 0;
+        for file in &mut nzb.files {
+            file.completed = true;
+        }
+        nzb.remaining_file_count = 0;
+        self.queue.queue.push(nzb);
+        self.check_nzb_completion(new_id);
         Ok(new_id)
     }
 

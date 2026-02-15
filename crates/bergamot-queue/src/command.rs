@@ -121,6 +121,10 @@ pub enum QueueCommand {
         history_id: u32,
         reply: oneshot::Sender<Result<u32, QueueError>>,
     },
+    HistoryProcess {
+        history_id: u32,
+        reply: oneshot::Sender<Result<u32, QueueError>>,
+    },
     HistoryRedownload {
         history_id: u32,
         reply: oneshot::Sender<Result<u32, QueueError>>,
