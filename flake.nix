@@ -22,6 +22,8 @@
         pkgs = nixpkgs.legacyPackages.${system};
         isLinux = pkgs.stdenv.hostPlatform.isLinux;
 
+        gitRev = self.shortRev or "unknown";
+
         bergamot = pkgs.rustPlatform.buildRustPackage {
           pname = "bergamot";
           version = "0.1.0";
@@ -29,6 +31,7 @@
           cargoLock.lockFile = ./Cargo.lock;
           nativeBuildInputs = [ pkgs.pkg-config ];
           buildInputs = [ pkgs.openssl ];
+          env.BERGAMOT_GIT_HASH = gitRev;
           doCheck = false;
         };
 
