@@ -124,18 +124,10 @@ fn verify_file(
     progress: Option<&ProgressCtx>,
 ) -> Result<FileVerifyStatus, std::io::Error> {
     let metadata = std::fs::metadata(path)?;
-    if metadata.len() != entry.length {
-        if let Some(ctx) = progress {
-            ctx.advance(entry.slice_checksums.len() * 2);
-        }
-        let slice_count = if slice_size > 0 {
-            entry.length.div_ceil(slice_size) as u32
-        } else {
-            0
-        };
-        return Ok(FileVerifyStatus::Damaged {
-            bad_slices: (0..slice_count).collect(),
-        });
+    let actual_len = metadata.len();
+
+    if actual_len != entry.length {
+        return verify_file_size_mismatch(path, entry, slice_size, actual_len, progress);
     }
 
     if entry.length >= MMAP_THRESHOLD {
@@ -143,6 +135,104 @@ fn verify_file(
     } else {
         verify_file_sequential(path, entry, slice_size, progress)
     }
+}
+
+fn verify_file_size_mismatch(
+    path: &Path,
+    entry: &crate::model::Par2FileEntry,
+    slice_size: u64,
+    actual_len: u64,
+    progress: Option<&ProgressCtx>,
+) -> Result<FileVerifyStatus, std::io::Error> {
+    use digest::Digest;
+    use std::io::Read;
+
+    let slice_count = if slice_size > 0 {
+        entry.length.div_ceil(slice_size) as u32
+    } else {
+        0
+    };
+
+    if actual_len > entry.length || slice_size == 0 {
+        if let Some(ctx) = progress {
+            ctx.advance(entry.slice_checksums.len() * 2);
+        }
+        return Ok(FileVerifyStatus::Damaged {
+            bad_slices: (0..slice_count).collect(),
+        });
+    }
+
+    // File is truncated: verify present slices, mark missing tail as bad
+    let present_full_slices = (actual_len / slice_size) as usize;
+    let has_partial = !actual_len.is_multiple_of(slice_size);
+    let present_slices = if has_partial {
+        present_full_slices + 1
+    } else {
+        present_full_slices
+    };
+
+    let mut bad_slices: Vec<u32> = Vec::new();
+    let ss = slice_size as usize;
+
+    if present_slices > 0 {
+        let mut file = std::fs::File::open(path)?;
+        let mut slice_buf = vec![0u8; ss];
+        let mut remaining = actual_len;
+
+        for (idx, expected) in entry
+            .slice_checksums
+            .iter()
+            .enumerate()
+            .take(present_slices)
+        {
+            let this_slice = std::cmp::min(remaining, slice_size);
+            let buf = &mut slice_buf[..this_slice as usize];
+            file.read_exact(buf)?;
+
+            let mut slice_hasher = md5::Md5::new();
+            slice_hasher.update(&*buf);
+            if (this_slice as usize) < ss {
+                let padding = vec![0u8; ss - this_slice as usize];
+                slice_hasher.update(&padding);
+            }
+            let slice_md5: [u8; 16] = slice_hasher.finalize().into();
+
+            let crc = crc32fast::hash(&*buf);
+            let padded_crc = if (this_slice as usize) < ss {
+                let padding = vec![0u8; ss - this_slice as usize];
+                let mut h = crc32fast::Hasher::new_with_initial(crc);
+                h.update(&padding);
+                h.finalize()
+            } else {
+                crc
+            };
+
+            if slice_md5 != expected.md5 || padded_crc != expected.crc32 {
+                bad_slices.push(idx as u32);
+            }
+
+            remaining -= this_slice;
+
+            if let Some(ctx) = progress {
+                ctx.advance(2);
+            }
+        }
+    }
+
+    // Mark all slices beyond what's present as bad
+    for idx in present_slices..slice_count as usize {
+        bad_slices.push(idx as u32);
+    }
+
+    if let Some(ctx) = progress {
+        let accounted = present_slices * 2;
+        let total = entry.slice_checksums.len() * 2;
+        if total > accounted {
+            ctx.advance(total - accounted);
+        }
+    }
+
+    Ok(FileVerifyStatus::Damaged { bad_slices })
 }
 
 fn verify_file_sequential(
@@ -203,7 +293,10 @@ fn verify_file_sequential(
 
     let full_md5: [u8; 16] = full_hasher.finalize().into();
     if full_md5 != entry.hash_full.0 {
-        return Ok(FileVerifyStatus::Damaged { bad_slices: vec![] });
+        tracing::warn!(
+            file = %path.display(),
+            "full-file MD5 mismatch but all slice checksums passed; treating as Ok"
+        );
     }
 
     Ok(FileVerifyStatus::Ok)
@@ -293,7 +386,10 @@ fn verify_file_mmap(
 
     let full_md5: [u8; 16] = full_hasher.finalize().into();
     if full_md5 != entry.hash_full.0 {
-        return Ok(FileVerifyStatus::Damaged { bad_slices: vec![] });
+        tracing::warn!(
+            file = %path.display(),
+            "full-file MD5 mismatch but all slice checksums passed; treating as Ok"
+        );
     }
 
     Ok(FileVerifyStatus::Ok)
@@ -411,6 +507,30 @@ mod tests {
     }
 
     #[test]
+    fn verify_ok_when_all_slices_pass_but_full_md5_mismatches() {
+        let dir = tempfile::tempdir().unwrap();
+        let data = vec![0x42u8; 128];
+        std::fs::write(dir.path().join("test.dat"), &data).unwrap();
+
+        // Build entry with correct slice checksums but wrong full-file MD5
+        let mut entry = make_entry("test.dat", &data, 64);
+        entry.hash_full = Md5Digest([0xFF; 16]);
+
+        let rs = RecoverySet {
+            set_id: [0; 16],
+            slice_size: 64,
+            files: vec![entry],
+            recovery_slice_count: 0,
+            recovery_slices: vec![],
+        };
+
+        let result = verify_recovery_set(&rs, dir.path());
+        // All slice checksums pass, so the data is correct — should be Ok
+        assert!(result.all_ok(), "file should be Ok when all slices verify");
+        assert_eq!(result.blocks_needed(), 0);
+    }
+
+    #[test]
     fn verify_wrong_size_file_is_damaged() {
         let dir = tempfile::tempdir().unwrap();
         let data = vec![0u8; 128];
@@ -432,6 +552,115 @@ mod tests {
             result.files[0].status,
             FileVerifyStatus::Damaged { .. }
         ));
+    }
+
+    #[test]
+    fn verify_truncated_file_only_marks_missing_tail_slices() {
+        let dir = tempfile::tempdir().unwrap();
+        // 4 slices of 64 bytes = 256 bytes original
+        let data = vec![0x42u8; 256];
+        let entry = make_entry("test.dat", &data, 64);
+
+        // Truncate to 128 bytes — first 2 slices intact, last 2 missing
+        std::fs::write(dir.path().join("test.dat"), &data[..128]).unwrap();
+
+        let rs = RecoverySet {
+            set_id: [0; 16],
+            slice_size: 64,
+            files: vec![entry],
+            recovery_slice_count: 0,
+            recovery_slices: vec![],
+        };
+
+        let result = verify_recovery_set(&rs, dir.path());
+        assert!(!result.all_ok());
+        match &result.files[0].status {
+            FileVerifyStatus::Damaged { bad_slices } => {
+                // Only slices 2 and 3 should be bad — not 0 and 1
+                assert!(
+                    !bad_slices.contains(&0),
+                    "slice 0 is intact, should not be marked bad"
+                );
+                assert!(
+                    !bad_slices.contains(&1),
+                    "slice 1 is intact, should not be marked bad"
+                );
+                assert!(
+                    bad_slices.contains(&2),
+                    "slice 2 is missing, should be marked bad"
+                );
+                assert!(
+                    bad_slices.contains(&3),
+                    "slice 3 is missing, should be marked bad"
+                );
+                assert_eq!(bad_slices.len(), 2, "exactly 2 slices should be bad");
+            }
+            other => panic!("expected Damaged, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn verify_truncated_file_with_corrupted_prefix_slice() {
+        let dir = tempfile::tempdir().unwrap();
+        // 4 slices of 64 bytes = 256 bytes original
+        let data = vec![0x42u8; 256];
+        let entry = make_entry("test.dat", &data, 64);
+
+        // Truncate to 128 bytes AND corrupt the first slice
+        let mut truncated = data[..128].to_vec();
+        truncated[0] = 0xFF;
+        std::fs::write(dir.path().join("test.dat"), &truncated).unwrap();
+
+        let rs = RecoverySet {
+            set_id: [0; 16],
+            slice_size: 64,
+            files: vec![entry],
+            recovery_slice_count: 0,
+            recovery_slices: vec![],
+        };
+
+        let result = verify_recovery_set(&rs, dir.path());
+        assert!(!result.all_ok());
+        match &result.files[0].status {
+            FileVerifyStatus::Damaged { bad_slices } => {
+                // Slice 0 is corrupted, slice 1 is intact, slices 2-3 are missing
+                assert!(bad_slices.contains(&0), "slice 0 is corrupted");
+                assert!(!bad_slices.contains(&1), "slice 1 is intact");
+                assert!(bad_slices.contains(&2), "slice 2 is missing");
+                assert!(bad_slices.contains(&3), "slice 3 is missing");
+                assert_eq!(bad_slices.len(), 3);
+            }
+            other => panic!("expected Damaged, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn verify_truncated_to_empty_marks_all_slices_bad() {
+        let dir = tempfile::tempdir().unwrap();
+        let data = vec![0x42u8; 128];
+        let entry = make_entry("test.dat", &data, 64);
+
+        // Write an empty file
+        std::fs::write(dir.path().join("test.dat"), []).unwrap();
+
+        let rs = RecoverySet {
+            set_id: [0; 16],
+            slice_size: 64,
+            files: vec![entry],
+            recovery_slice_count: 0,
+            recovery_slices: vec![],
+        };
+
+        let result = verify_recovery_set(&rs, dir.path());
+        assert!(!result.all_ok());
+        match &result.files[0].status {
+            FileVerifyStatus::Damaged { bad_slices } => {
+                assert_eq!(bad_slices.len(), 2);
+                assert!(bad_slices.contains(&0));
+                assert!(bad_slices.contains(&1));
+            }
+            other => panic!("expected Damaged, got {other:?}"),
+        }
     }
 
     #[test]
@@ -555,6 +784,32 @@ mod tests {
 
         let result = verify_recovery_set(&rs, dir.path());
         assert!(result.all_ok(), "large file should verify OK: {result:?}");
+    }
+
+    #[test]
+    fn verify_mmap_ok_when_all_slices_pass_but_full_md5_mismatches() {
+        let dir = tempfile::tempdir().unwrap();
+        let slice_size = 65536u64;
+        let data: Vec<u8> = (0..2_000_000u64).map(|i| (i % 251) as u8).collect();
+        std::fs::write(dir.path().join("large.dat"), &data).unwrap();
+
+        let mut entry = make_entry("large.dat", &data, slice_size);
+        assert!(data.len() as u64 > MMAP_THRESHOLD);
+        entry.hash_full = Md5Digest([0xFF; 16]);
+
+        let rs = RecoverySet {
+            set_id: [0; 16],
+            slice_size,
+            files: vec![entry],
+            recovery_slice_count: 0,
+            recovery_slices: vec![],
+        };
+
+        let result = verify_recovery_set(&rs, dir.path());
+        assert!(
+            result.all_ok(),
+            "large file should be Ok when all slices verify despite full-md5 mismatch"
+        );
     }
 
     #[test]
