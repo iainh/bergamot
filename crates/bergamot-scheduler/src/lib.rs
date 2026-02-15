@@ -1155,6 +1155,9 @@ impl DiskStateFlush {
                         size: h.size,
                         parameters: h.parameters.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
                         nzb_filename: h.nzb_filename.clone(),
+                        category: h.category.clone(),
+                        dest_dir: h.dest_dir.display().to_string(),
+                        final_dir: h.final_dir.display().to_string(),
                     }
                 })
                 .collect(),

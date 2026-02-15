@@ -358,6 +358,12 @@ pub struct HistoryEntry {
     pub parameters: HashMap<String, String>,
     #[serde(default)]
     pub nzb_filename: String,
+    #[serde(default)]
+    pub category: String,
+    #[serde(default)]
+    pub dest_dir: String,
+    #[serde(default)]
+    pub final_dir: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
