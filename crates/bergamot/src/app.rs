@@ -376,7 +376,14 @@ fn restore_history(disk: &DiskState<JsonFormat>) -> Vec<HistoryInfo> {
             files: vec![],
             completed_files: vec![],
             server_stats: vec![],
-            parameters: h.parameters.iter().map(|(k, v)| bergamot_core::models::NzbParameter { name: k.clone(), value: v.clone() }).collect(),
+            parameters: h
+                .parameters
+                .iter()
+                .map(|(k, v)| bergamot_core::models::NzbParameter {
+                    name: k.clone(),
+                    value: v.clone(),
+                })
+                .collect(),
             post_info: None,
             message_count: 0,
             cached_message_count: 0,
@@ -696,7 +703,8 @@ pub async fn run_with_config_path(
     let postproc_handle = tokio::spawn(async move {
         postprocessor.run().await;
     });
-    let forward_handle = forward_completions(completion_rx, postproc_tx.clone(), writer_pool.clone());
+    let forward_handle =
+        forward_completions(completion_rx, postproc_tx.clone(), writer_pool.clone());
 
     let worker_writer_pool = writer_pool.clone();
     let worker_handle = tokio::spawn(crate::download::download_worker(
@@ -776,10 +784,7 @@ pub async fn run_with_config_path(
         },
         stats_recorder: shared_stats,
     };
-    let config_snapshot = config_arc
-        .read()
-        .expect("config lock poisoned")
-        .clone();
+    let config_snapshot = config_arc.read().expect("config lock poisoned").clone();
     let (scheduler_tx, scheduler_handles) =
         bergamot_scheduler::start_services(&config_snapshot, deps).await?;
 

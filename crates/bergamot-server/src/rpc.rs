@@ -1159,8 +1159,14 @@ pub(crate) async fn rpc_history(
             );
             m.insert("FileCount".into(), serde_json::json!(e.file_count));
             m.insert("RetryData".into(), serde_json::json!(false));
-            m.insert("FinalDir".into(), serde_json::json!(e.final_dir.display().to_string()));
-            m.insert("DestDir".into(), serde_json::json!(e.dest_dir.display().to_string()));
+            m.insert(
+                "FinalDir".into(),
+                serde_json::json!(e.final_dir.display().to_string()),
+            );
+            m.insert(
+                "DestDir".into(),
+                serde_json::json!(e.dest_dir.display().to_string()),
+            );
             m.insert("URL".into(), serde_json::json!(""));
             m.insert("DownloadedSizeMB".into(), serde_json::json!(file_size_mb));
             m.insert("DownloadedSizeLo".into(), serde_json::json!(file_size_lo));
@@ -1186,27 +1192,76 @@ pub(crate) async fn rpc_history(
 }
 
 fn format_history_status(e: &bergamot_queue::HistoryListEntry) -> String {
-    if e.mark_status == bergamot_core::models::MarkStatus::Good {
-        return "SUCCESS/GOOD".to_string();
-    }
-    if e.mark_status == bergamot_core::models::MarkStatus::Bad {
+    use bergamot_core::models::*;
+
+    // Priority order matches NZBGet's NzbInfo::MakeTextStatus(false)
+    if e.mark_status == MarkStatus::Bad {
         return "FAILURE/BAD".to_string();
     }
+    if e.mark_status == MarkStatus::Good {
+        return "SUCCESS/GOOD".to_string();
+    }
+    if e.mark_status == MarkStatus::Success {
+        return "SUCCESS/MARK".to_string();
+    }
+
     match e.delete_status {
-        bergamot_core::models::DeleteStatus::Manual => return "DELETED/MANUAL".to_string(),
-        bergamot_core::models::DeleteStatus::Health => return "DELETED/HEALTH".to_string(),
-        bergamot_core::models::DeleteStatus::Dupe => return "DELETED/DUPE".to_string(),
-        bergamot_core::models::DeleteStatus::Bad => return "DELETED/BAD".to_string(),
-        bergamot_core::models::DeleteStatus::Scan => return "DELETED/SCAN".to_string(),
-        bergamot_core::models::DeleteStatus::Copy => return "DELETED/COPY".to_string(),
-        _ => {}
+        DeleteStatus::Health => return "FAILURE/HEALTH".to_string(),
+        DeleteStatus::Manual => return "DELETED/MANUAL".to_string(),
+        DeleteStatus::Dupe => return "DELETED/DUPE".to_string(),
+        DeleteStatus::Bad => return "FAILURE/BAD".to_string(),
+        DeleteStatus::Good => return "DELETED/GOOD".to_string(),
+        DeleteStatus::Copy => return "DELETED/COPY".to_string(),
+        DeleteStatus::Scan => return "FAILURE/SCAN".to_string(),
+        DeleteStatus::None => {}
     }
-    if e.par_status == bergamot_core::models::ParStatus::Failure
-        || e.unpack_status == bergamot_core::models::UnpackStatus::Failure
-    {
-        return "FAILURE".to_string();
+
+    if e.par_status == ParStatus::Failure {
+        return "FAILURE/PAR".to_string();
     }
-    "SUCCESS".to_string()
+    if e.unpack_status == UnpackStatus::Failure {
+        return "FAILURE/UNPACK".to_string();
+    }
+    if e.move_status == MoveStatus::Failure {
+        return "FAILURE/MOVE".to_string();
+    }
+
+    if e.par_status == ParStatus::Manual {
+        return "WARNING/DAMAGED".to_string();
+    }
+    if e.par_status == ParStatus::RepairPossible {
+        return "WARNING/REPAIRABLE".to_string();
+    }
+
+    if e.unpack_status == UnpackStatus::Space {
+        return "WARNING/SPACE".to_string();
+    }
+    if e.unpack_status == UnpackStatus::Password {
+        return "WARNING/PASSWORD".to_string();
+    }
+
+    if e.script_status == ScriptStatus::Failure {
+        return "WARNING/SCRIPT".to_string();
+    }
+
+    let par_ok = e.par_status == ParStatus::None || e.par_status == ParStatus::Success;
+    let unpack_ok =
+        e.unpack_status == UnpackStatus::None || e.unpack_status == UnpackStatus::Success;
+
+    if e.unpack_status == UnpackStatus::Success && e.script_status == ScriptStatus::Success {
+        return "SUCCESS/ALL".to_string();
+    }
+    if e.unpack_status == UnpackStatus::Success {
+        return "SUCCESS/UNPACK".to_string();
+    }
+    if e.par_status == ParStatus::Success && unpack_ok {
+        return "SUCCESS/PAR".to_string();
+    }
+    if par_ok && unpack_ok {
+        return "SUCCESS/HEALTH".to_string();
+    }
+
+    "FAILURE/INTERNAL_ERROR".to_string()
 }
 
 fn format_par_status(s: bergamot_core::models::ParStatus) -> &'static str {
@@ -1244,8 +1299,9 @@ fn format_delete_status(s: bergamot_core::models::DeleteStatus) -> &'static str 
         bergamot_core::models::DeleteStatus::Health => "HEALTH",
         bergamot_core::models::DeleteStatus::Dupe => "DUPE",
         bergamot_core::models::DeleteStatus::Bad => "BAD",
-        bergamot_core::models::DeleteStatus::Scan => "SCAN",
+        bergamot_core::models::DeleteStatus::Good => "GOOD",
         bergamot_core::models::DeleteStatus::Copy => "COPY",
+        bergamot_core::models::DeleteStatus::Scan => "SCAN",
     }
 }
 
@@ -2010,7 +2066,7 @@ mod tests {
         assert_eq!(entries[0]["Name"], "completed.nzb");
         assert_eq!(entries[0]["Category"], "tv");
         assert_eq!(entries[0]["Kind"], "NZB");
-        assert_eq!(entries[0]["Status"], "SUCCESS");
+        assert_eq!(entries[0]["Status"], "SUCCESS/UNPACK");
         handle.shutdown().await.expect("shutdown");
     }
 
@@ -3086,5 +3142,672 @@ mod tests {
         let state = AppState::default();
         let result = rpc_loadconfig(&state);
         assert!(result.is_err());
+    }
+
+    // --- format_history_status and individual format_*_status tests ---
+
+    use bergamot_queue::HistoryListEntry;
+
+    fn make_history_entry() -> HistoryListEntry {
+        HistoryListEntry {
+            id: 1,
+            name: "test".to_string(),
+            category: String::new(),
+            dest_dir: PathBuf::new(),
+            final_dir: PathBuf::new(),
+            kind: bergamot_core::models::HistoryKind::Nzb,
+            time: std::time::SystemTime::now(),
+            size: 0,
+            par_status: bergamot_core::models::ParStatus::None,
+            unpack_status: bergamot_core::models::UnpackStatus::None,
+            move_status: bergamot_core::models::MoveStatus::None,
+            delete_status: bergamot_core::models::DeleteStatus::None,
+            mark_status: bergamot_core::models::MarkStatus::None,
+            script_status: bergamot_core::models::ScriptStatus::None,
+            health: 1000,
+            file_count: 0,
+            remaining_par_count: 0,
+            total_article_count: 0,
+            success_article_count: 0,
+            failed_article_count: 0,
+            download_time_sec: 0,
+            post_total_sec: 0,
+            par_sec: 0,
+            repair_sec: 0,
+            unpack_sec: 0,
+            dupe_key: String::new(),
+            dupe_score: 0,
+            dupe_mode: bergamot_core::models::DupMode::Score,
+            parameters: vec![],
+            nzb_filename: String::new(),
+        }
+    }
+
+    // --- Compound status: mark_status priority ---
+
+    #[test]
+    fn format_history_status_mark_bad() {
+        let mut e = make_history_entry();
+        e.mark_status = bergamot_core::models::MarkStatus::Bad;
+        assert_eq!(format_history_status(&e), "FAILURE/BAD");
+    }
+
+    #[test]
+    fn format_history_status_mark_good() {
+        let mut e = make_history_entry();
+        e.mark_status = bergamot_core::models::MarkStatus::Good;
+        assert_eq!(format_history_status(&e), "SUCCESS/GOOD");
+    }
+
+    #[test]
+    fn format_history_status_mark_success() {
+        // NZBGet: markStatus == Success → "SUCCESS/MARK"
+        let mut e = make_history_entry();
+        e.mark_status = bergamot_core::models::MarkStatus::Success;
+        assert_eq!(format_history_status(&e), "SUCCESS/MARK");
+    }
+
+    // mark_status == Bad has highest priority, even over delete_status
+    #[test]
+    fn format_history_status_mark_bad_overrides_delete() {
+        let mut e = make_history_entry();
+        e.mark_status = bergamot_core::models::MarkStatus::Bad;
+        e.delete_status = bergamot_core::models::DeleteStatus::Manual;
+        assert_eq!(format_history_status(&e), "FAILURE/BAD");
+    }
+
+    // --- Compound status: delete_status ---
+
+    #[test]
+    fn format_history_status_delete_health() {
+        // NZBGet: deleteStatus == Health → "FAILURE/HEALTH" (NOT "DELETED/HEALTH")
+        let mut e = make_history_entry();
+        e.delete_status = bergamot_core::models::DeleteStatus::Health;
+        assert_eq!(format_history_status(&e), "FAILURE/HEALTH");
+    }
+
+    #[test]
+    fn format_history_status_delete_manual() {
+        let mut e = make_history_entry();
+        e.delete_status = bergamot_core::models::DeleteStatus::Manual;
+        assert_eq!(format_history_status(&e), "DELETED/MANUAL");
+    }
+
+    #[test]
+    fn format_history_status_delete_dupe() {
+        let mut e = make_history_entry();
+        e.delete_status = bergamot_core::models::DeleteStatus::Dupe;
+        assert_eq!(format_history_status(&e), "DELETED/DUPE");
+    }
+
+    #[test]
+    fn format_history_status_delete_bad() {
+        // NZBGet: deleteStatus == Bad → "FAILURE/BAD" (NOT "DELETED/BAD")
+        let mut e = make_history_entry();
+        e.delete_status = bergamot_core::models::DeleteStatus::Bad;
+        assert_eq!(format_history_status(&e), "FAILURE/BAD");
+    }
+
+    #[test]
+    fn format_history_status_delete_copy() {
+        let mut e = make_history_entry();
+        e.delete_status = bergamot_core::models::DeleteStatus::Copy;
+        assert_eq!(format_history_status(&e), "DELETED/COPY");
+    }
+
+    #[test]
+    fn format_history_status_delete_scan() {
+        // NZBGet: deleteStatus == Scan → "FAILURE/SCAN" (NOT "DELETED/SCAN")
+        let mut e = make_history_entry();
+        e.delete_status = bergamot_core::models::DeleteStatus::Scan;
+        assert_eq!(format_history_status(&e), "FAILURE/SCAN");
+    }
+
+    // --- Compound status: failure cases ---
+
+    #[test]
+    fn format_history_status_par_failure() {
+        // NZBGet: parStatus == Failure → "FAILURE/PAR"
+        let mut e = make_history_entry();
+        e.par_status = bergamot_core::models::ParStatus::Failure;
+        assert_eq!(format_history_status(&e), "FAILURE/PAR");
+    }
+
+    #[test]
+    fn format_history_status_unpack_failure() {
+        // NZBGet: unpackStatus == Failure → "FAILURE/UNPACK"
+        let mut e = make_history_entry();
+        e.unpack_status = bergamot_core::models::UnpackStatus::Failure;
+        assert_eq!(format_history_status(&e), "FAILURE/UNPACK");
+    }
+
+    #[test]
+    fn format_history_status_move_failure() {
+        // NZBGet: moveStatus == Failure → "FAILURE/MOVE"
+        let mut e = make_history_entry();
+        e.move_status = bergamot_core::models::MoveStatus::Failure;
+        assert_eq!(format_history_status(&e), "FAILURE/MOVE");
+    }
+
+    // --- Compound status: warning cases ---
+
+    #[test]
+    fn format_history_status_par_manual() {
+        // NZBGet: parStatus == Manual → "WARNING/DAMAGED"
+        let mut e = make_history_entry();
+        e.par_status = bergamot_core::models::ParStatus::Manual;
+        assert_eq!(format_history_status(&e), "WARNING/DAMAGED");
+    }
+
+    #[test]
+    fn format_history_status_par_repair_possible() {
+        // NZBGet: parStatus == RepairPossible → "WARNING/REPAIRABLE"
+        let mut e = make_history_entry();
+        e.par_status = bergamot_core::models::ParStatus::RepairPossible;
+        assert_eq!(format_history_status(&e), "WARNING/REPAIRABLE");
+    }
+
+    #[test]
+    fn format_history_status_unpack_space() {
+        // NZBGet: unpackStatus == Space → "WARNING/SPACE"
+        let mut e = make_history_entry();
+        e.unpack_status = bergamot_core::models::UnpackStatus::Space;
+        assert_eq!(format_history_status(&e), "WARNING/SPACE");
+    }
+
+    #[test]
+    fn format_history_status_unpack_password() {
+        // NZBGet: unpackStatus == Password → "WARNING/PASSWORD"
+        let mut e = make_history_entry();
+        e.unpack_status = bergamot_core::models::UnpackStatus::Password;
+        assert_eq!(format_history_status(&e), "WARNING/PASSWORD");
+    }
+
+    #[test]
+    fn format_history_status_script_failure() {
+        // NZBGet: scriptStatus == Failure → "WARNING/SCRIPT" (NOT "FAILURE/SCRIPT")
+        let mut e = make_history_entry();
+        e.script_status = bergamot_core::models::ScriptStatus::Failure;
+        assert_eq!(format_history_status(&e), "WARNING/SCRIPT");
+    }
+
+    // --- Compound status: success cases ---
+
+    #[test]
+    fn format_history_status_success_all() {
+        // NZBGet: unpack success + script success → "SUCCESS/ALL"
+        let mut e = make_history_entry();
+        e.unpack_status = bergamot_core::models::UnpackStatus::Success;
+        e.script_status = bergamot_core::models::ScriptStatus::Success;
+        assert_eq!(format_history_status(&e), "SUCCESS/ALL");
+    }
+
+    #[test]
+    fn format_history_status_success_unpack() {
+        // NZBGet: unpack success, no script → "SUCCESS/UNPACK"
+        let mut e = make_history_entry();
+        e.unpack_status = bergamot_core::models::UnpackStatus::Success;
+        assert_eq!(format_history_status(&e), "SUCCESS/UNPACK");
+    }
+
+    #[test]
+    fn format_history_status_success_par() {
+        // NZBGet: par success, no unpack, no script → "SUCCESS/PAR"
+        let mut e = make_history_entry();
+        e.par_status = bergamot_core::models::ParStatus::Success;
+        assert_eq!(format_history_status(&e), "SUCCESS/PAR");
+    }
+
+    #[test]
+    fn format_history_status_success_health() {
+        // NZBGet: health ok, no par/unpack/script → "SUCCESS/HEALTH"
+        let e = make_history_entry();
+        assert_eq!(format_history_status(&e), "SUCCESS/HEALTH");
+    }
+
+    // --- Compound status: priority ordering ---
+
+    #[test]
+    fn format_history_status_par_failure_before_unpack_failure() {
+        // parStatus == Failure is checked before unpackStatus == Failure
+        let mut e = make_history_entry();
+        e.par_status = bergamot_core::models::ParStatus::Failure;
+        e.unpack_status = bergamot_core::models::UnpackStatus::Failure;
+        assert_eq!(format_history_status(&e), "FAILURE/PAR");
+    }
+
+    #[test]
+    fn format_history_status_unpack_failure_before_move_failure() {
+        // unpackStatus == Failure is checked before moveStatus == Failure
+        let mut e = make_history_entry();
+        e.unpack_status = bergamot_core::models::UnpackStatus::Failure;
+        e.move_status = bergamot_core::models::MoveStatus::Failure;
+        assert_eq!(format_history_status(&e), "FAILURE/UNPACK");
+    }
+
+    #[test]
+    fn format_history_status_script_failure_is_warning_not_failure() {
+        // scriptStatus == Failure should be WARNING, not FAILURE
+        let mut e = make_history_entry();
+        e.script_status = bergamot_core::models::ScriptStatus::Failure;
+        let status = format_history_status(&e);
+        assert!(
+            status.starts_with("WARNING/"),
+            "script failure should be WARNING, got: {status}"
+        );
+    }
+
+    // --- Individual format functions ---
+
+    #[test]
+    fn format_par_status_values() {
+        use bergamot_core::models::ParStatus;
+        assert_eq!(format_par_status(ParStatus::None), "NONE");
+        assert_eq!(format_par_status(ParStatus::Failure), "FAILURE");
+        assert_eq!(format_par_status(ParStatus::Success), "SUCCESS");
+        assert_eq!(
+            format_par_status(ParStatus::RepairPossible),
+            "REPAIR_POSSIBLE"
+        );
+        assert_eq!(format_par_status(ParStatus::Manual), "MANUAL");
+    }
+
+    #[test]
+    fn format_unpack_status_values() {
+        use bergamot_core::models::UnpackStatus;
+        assert_eq!(format_unpack_status(UnpackStatus::None), "NONE");
+        assert_eq!(format_unpack_status(UnpackStatus::Failure), "FAILURE");
+        assert_eq!(format_unpack_status(UnpackStatus::Success), "SUCCESS");
+        assert_eq!(format_unpack_status(UnpackStatus::Space), "SPACE");
+        assert_eq!(format_unpack_status(UnpackStatus::Password), "PASSWORD");
+    }
+
+    #[test]
+    fn format_move_status_values() {
+        use bergamot_core::models::MoveStatus;
+        assert_eq!(format_move_status(MoveStatus::None), "NONE");
+        assert_eq!(format_move_status(MoveStatus::Failure), "FAILURE");
+        assert_eq!(format_move_status(MoveStatus::Success), "SUCCESS");
+    }
+
+    #[test]
+    fn format_delete_status_values() {
+        use bergamot_core::models::DeleteStatus;
+        assert_eq!(format_delete_status(DeleteStatus::None), "NONE");
+        assert_eq!(format_delete_status(DeleteStatus::Manual), "MANUAL");
+        assert_eq!(format_delete_status(DeleteStatus::Health), "HEALTH");
+        assert_eq!(format_delete_status(DeleteStatus::Dupe), "DUPE");
+        assert_eq!(format_delete_status(DeleteStatus::Bad), "BAD");
+        assert_eq!(format_delete_status(DeleteStatus::Good), "GOOD");
+        assert_eq!(format_delete_status(DeleteStatus::Copy), "COPY");
+        assert_eq!(format_delete_status(DeleteStatus::Scan), "SCAN");
+    }
+
+    #[test]
+    fn format_mark_status_values() {
+        use bergamot_core::models::MarkStatus;
+        assert_eq!(format_mark_status(MarkStatus::None), "NONE");
+        assert_eq!(format_mark_status(MarkStatus::Good), "GOOD");
+        assert_eq!(format_mark_status(MarkStatus::Bad), "BAD");
+        assert_eq!(format_mark_status(MarkStatus::Success), "SUCCESS");
+    }
+
+    // --- Sonarr compatibility tests ---
+
+    /// Build an AppState with a history entry where NzbInfo fields can be customised
+    /// via a closure before adding to history.
+    fn state_with_custom_history(
+        modify: impl FnOnce(&mut bergamot_core::models::NzbInfo),
+    ) -> (
+        AppState,
+        bergamot_queue::QueueHandle,
+        tokio::task::JoinHandle<()>,
+    ) {
+        let (mut coordinator, handle, _rx, _rate_rx) = QueueCoordinator::new(
+            2,
+            1,
+            std::path::PathBuf::from("/tmp/inter"),
+            std::path::PathBuf::from("/tmp/dest"),
+        );
+        let mut nzb = bergamot_core::models::NzbInfo {
+            id: 1,
+            kind: bergamot_core::models::NzbKind::Nzb,
+            name: "completed.nzb".to_string(),
+            filename: "completed.nzb".to_string(),
+            url: String::new(),
+            dest_dir: std::path::PathBuf::from("/tmp/dest/completed"),
+            final_dir: std::path::PathBuf::from("/tmp/final/completed"),
+            temp_dir: std::path::PathBuf::new(),
+            queue_dir: std::path::PathBuf::new(),
+            category: "tv".to_string(),
+            priority: Priority::Normal,
+            dup_key: String::new(),
+            dup_mode: bergamot_core::models::DupMode::Score,
+            dup_score: 0,
+            size: 1000,
+            remaining_size: 0,
+            paused_size: 0,
+            failed_size: 0,
+            success_size: 1000,
+            current_downloaded_size: 1000,
+            par_size: 0,
+            par_remaining_size: 0,
+            par_current_success_size: 0,
+            par_failed_size: 0,
+            par_total_article_count: 0,
+            par_failed_article_count: 0,
+            file_count: 1,
+            remaining_file_count: 0,
+            remaining_par_count: 0,
+            total_article_count: 10,
+            success_article_count: 10,
+            failed_article_count: 0,
+            added_time: std::time::SystemTime::UNIX_EPOCH,
+            min_time: None,
+            max_time: None,
+            download_start_time: None,
+            download_sec: 0,
+            post_total_sec: 0,
+            par_sec: 0,
+            repair_sec: 0,
+            unpack_sec: 0,
+            paused: false,
+            deleted: false,
+            direct_rename: false,
+            force_priority: false,
+            reprocess: false,
+            par_manual: false,
+            clean_up_disk: false,
+            par_status: bergamot_core::models::ParStatus::Success,
+            unpack_status: bergamot_core::models::UnpackStatus::Success,
+            move_status: bergamot_core::models::MoveStatus::Success,
+            delete_status: bergamot_core::models::DeleteStatus::None,
+            mark_status: bergamot_core::models::MarkStatus::None,
+            url_status: bergamot_core::models::UrlStatus::None,
+            script_status: bergamot_core::models::ScriptStatus::None,
+            health: 1000,
+            critical_health: 1000,
+            files: vec![],
+            completed_files: vec![],
+            server_stats: vec![],
+            parameters: vec![],
+            post_info: None,
+            message_count: 0,
+            cached_message_count: 0,
+        };
+        modify(&mut nzb);
+        coordinator.add_to_history(nzb, bergamot_core::models::HistoryKind::Nzb);
+        let coordinator_handle = tokio::spawn(async move { coordinator.run().await });
+        let state = AppState::default().with_queue(handle.clone());
+        (state, handle, coordinator_handle)
+    }
+
+    #[tokio::test]
+    async fn sonarr_compat_history_has_all_required_fields() {
+        let (state, handle, _coord) = state_with_custom_history(|_| {});
+        let params = serde_json::json!([false]);
+        let result = rpc_history(&params, &state).await.expect("history");
+        let entries = result.as_array().expect("array");
+        assert_eq!(entries.len(), 1);
+        let entry = &entries[0];
+
+        // Sonarr's NzbgetHistoryItem fields — must exist with correct types
+        assert!(entry["ID"].is_number(), "Id must be a number");
+        assert!(entry["Name"].is_string(), "Name must be a string");
+        assert!(entry["Category"].is_string(), "Category must be a string");
+        assert!(
+            entry["FileSizeLo"].is_number(),
+            "FileSizeLo must be a number"
+        );
+        assert!(
+            entry["FileSizeHi"].is_number(),
+            "FileSizeHi must be a number"
+        );
+        assert!(entry["ParStatus"].is_string(), "ParStatus must be a string");
+        assert!(
+            entry["UnpackStatus"].is_string(),
+            "UnpackStatus must be a string"
+        );
+        assert!(
+            entry["MoveStatus"].is_string(),
+            "MoveStatus must be a string"
+        );
+        assert!(
+            entry["ScriptStatus"].is_string(),
+            "ScriptStatus must be a string"
+        );
+        assert!(
+            entry["DeleteStatus"].is_string(),
+            "DeleteStatus must be a string"
+        );
+        assert!(
+            entry["MarkStatus"].is_string(),
+            "MarkStatus must be a string"
+        );
+        assert!(entry["DestDir"].is_string(), "DestDir must be a string");
+        assert!(entry["FinalDir"].is_string(), "FinalDir must be a string");
+        assert!(
+            entry["Parameters"].is_array(),
+            "Parameters must be an array"
+        );
+
+        handle.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn sonarr_compat_history_successful_download() {
+        let (state, handle, _coord) = state_with_custom_history(|_| {});
+        let params = serde_json::json!([false]);
+        let result = rpc_history(&params, &state).await.expect("history");
+        let entry = &result.as_array().expect("array")[0];
+
+        assert_eq!(entry["ParStatus"], "SUCCESS");
+        assert_eq!(entry["UnpackStatus"], "SUCCESS");
+        assert_eq!(entry["MoveStatus"], "SUCCESS");
+        assert_eq!(entry["ScriptStatus"], "NONE");
+        assert_eq!(entry["DeleteStatus"], "NONE");
+        assert_eq!(entry["MarkStatus"], "NONE");
+
+        handle.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn sonarr_compat_history_parameters_format() {
+        let (state, handle, _coord) = state_with_custom_history(|nzb| {
+            nzb.parameters.push(bergamot_core::models::NzbParameter {
+                name: "drone".to_string(),
+                value: "abc-123".to_string(),
+            });
+        });
+        let params = serde_json::json!([false]);
+        let result = rpc_history(&params, &state).await.expect("history");
+        let entry = &result.as_array().expect("array")[0];
+
+        let parameters = entry["Parameters"].as_array().expect("Parameters array");
+        assert_eq!(parameters.len(), 1);
+        assert_eq!(parameters[0]["Name"], "drone");
+        assert_eq!(parameters[0]["Value"], "abc-123");
+
+        handle.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn sonarr_compat_history_finaldir_preferred_over_destdir() {
+        let (state, handle, _coord) = state_with_custom_history(|nzb| {
+            nzb.final_dir = std::path::PathBuf::from("/tmp/final/completed");
+        });
+        let params = serde_json::json!([false]);
+        let result = rpc_history(&params, &state).await.expect("history");
+        let entry = &result.as_array().expect("array")[0];
+
+        let final_dir = entry["FinalDir"].as_str().expect("FinalDir string");
+        assert!(
+            !final_dir.is_empty(),
+            "FinalDir should be non-empty when set"
+        );
+
+        handle.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn sonarr_compat_listgroups_has_all_required_fields() {
+        let (state, handle, _coord) = state_with_queue();
+        let nzb_file = nzb_tempfile();
+        handle
+            .add_nzb(nzb_file.path().to_path_buf(), None, Priority::Normal)
+            .await
+            .expect("add");
+
+        let result = rpc_listgroups(&state).await.expect("listgroups");
+        let groups = result.as_array().expect("array");
+        assert_eq!(groups.len(), 1);
+        let entry = &groups[0];
+
+        // Sonarr's NzbgetQueueItem fields
+        assert!(entry["NZBID"].is_number(), "NzbId must be a number");
+        assert!(entry["FirstID"].is_number(), "FirstId must be a number");
+        assert!(entry["LastID"].is_number(), "LastId must be a number");
+        assert!(entry["NZBName"].is_string(), "NzbName must be a string");
+        assert!(entry["Category"].is_string(), "Category must be a string");
+        assert!(
+            entry["FileSizeLo"].is_number(),
+            "FileSizeLo must be a number"
+        );
+        assert!(
+            entry["FileSizeHi"].is_number(),
+            "FileSizeHi must be a number"
+        );
+        assert!(
+            entry["RemainingSizeLo"].is_number(),
+            "RemainingSizeLo must be a number"
+        );
+        assert!(
+            entry["RemainingSizeHi"].is_number(),
+            "RemainingSizeHi must be a number"
+        );
+        assert!(
+            entry["PausedSizeLo"].is_number(),
+            "PausedSizeLo must be a number"
+        );
+        assert!(
+            entry["PausedSizeHi"].is_number(),
+            "PausedSizeHi must be a number"
+        );
+        assert!(
+            entry["MinPriority"].is_number(),
+            "MinPriority must be a number"
+        );
+        assert!(
+            entry["MaxPriority"].is_number(),
+            "MaxPriority must be a number"
+        );
+        assert!(
+            entry["ActiveDownloads"].is_number(),
+            "ActiveDownloads must be a number"
+        );
+        assert!(
+            entry["Parameters"].is_array(),
+            "Parameters must be an array"
+        );
+
+        handle.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn sonarr_compat_status_has_all_required_fields() {
+        let (state, handle, _coord) = state_with_queue();
+        let status = serde_json::to_value(state.status()).expect("status json");
+
+        // Sonarr's NzbgetGlobalStatus fields
+        assert!(
+            status["RemainingSizeLo"].is_number(),
+            "RemainingSizeLo must be a number"
+        );
+        assert!(
+            status["RemainingSizeHi"].is_number(),
+            "RemainingSizeHi must be a number"
+        );
+        assert!(
+            status["DownloadedSizeLo"].is_number(),
+            "DownloadedSizeLo must be a number"
+        );
+        assert!(
+            status["DownloadedSizeHi"].is_number(),
+            "DownloadedSizeHi must be a number"
+        );
+        assert!(
+            status["DownloadRate"].is_number(),
+            "DownloadRate must be a number"
+        );
+        assert!(
+            status["AverageDownloadRate"].is_number(),
+            "AverageDownloadRate must be a number"
+        );
+        assert!(
+            status["DownloadLimit"].is_number(),
+            "DownloadLimit must be a number"
+        );
+        assert!(
+            status["DownloadPaused"].is_boolean(),
+            "DownloadPaused must be a boolean"
+        );
+
+        handle.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn sonarr_compat_status_interprets_par_failure_as_failed() {
+        let (state, handle, _coord) = state_with_custom_history(|nzb| {
+            nzb.par_status = bergamot_core::models::ParStatus::Failure;
+        });
+        let params = serde_json::json!([false]);
+        let result = rpc_history(&params, &state).await.expect("history");
+        let entry = &result.as_array().expect("array")[0];
+
+        assert_eq!(entry["ParStatus"], "FAILURE");
+
+        handle.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn sonarr_compat_status_interprets_unpack_space_as_warning() {
+        let (state, handle, _coord) = state_with_custom_history(|nzb| {
+            nzb.unpack_status = bergamot_core::models::UnpackStatus::Space;
+        });
+        let params = serde_json::json!([false]);
+        let result = rpc_history(&params, &state).await.expect("history");
+        let entry = &result.as_array().expect("array")[0];
+
+        assert_eq!(entry["UnpackStatus"], "SPACE");
+
+        handle.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn sonarr_compat_status_interprets_script_failure() {
+        let (state, handle, _coord) = state_with_custom_history(|nzb| {
+            nzb.script_status = bergamot_core::models::ScriptStatus::Failure;
+        });
+        let params = serde_json::json!([false]);
+        let result = rpc_history(&params, &state).await.expect("history");
+        let entry = &result.as_array().expect("array")[0];
+
+        assert_eq!(entry["ScriptStatus"], "FAILURE");
+
+        handle.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn sonarr_compat_status_interprets_manual_delete() {
+        let (state, handle, _coord) = state_with_custom_history(|nzb| {
+            nzb.delete_status = bergamot_core::models::DeleteStatus::Manual;
+        });
+        let params = serde_json::json!([false]);
+        let result = rpc_history(&params, &state).await.expect("history");
+        let entry = &result.as_array().expect("array")[0];
+
+        assert_eq!(entry["DeleteStatus"], "MANUAL");
+
+        handle.shutdown().await.expect("shutdown");
     }
 }

@@ -75,14 +75,9 @@ mod tests {
 
     #[test]
     fn cli_parses_option_overrides() {
-        let cli = Cli::try_parse_from([
-            "bergamot",
-            "-o",
-            "MainDir=/data",
-            "-o",
-            "ControlPort=8080",
-        ])
-        .expect("parse");
+        let cli =
+            Cli::try_parse_from(["bergamot", "-o", "MainDir=/data", "-o", "ControlPort=8080"])
+                .expect("parse");
         assert_eq!(cli.options, vec!["MainDir=/data", "ControlPort=8080"]);
     }
 

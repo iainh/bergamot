@@ -126,8 +126,9 @@ pub enum DeleteStatus {
     Health = 2,
     Dupe = 3,
     Bad = 4,
-    Scan = 5,
+    Good = 5,
     Copy = 6,
+    Scan = 7,
 }
 
 #[repr(u32)]

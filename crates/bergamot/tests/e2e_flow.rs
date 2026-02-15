@@ -1351,48 +1351,44 @@ async fn concurrent_downloads_complete_without_corruption() {
     assert!(completed_1, "first NZB should complete");
     assert!(completed_2, "second NZB should complete");
 
-    let collect_files =
-        |inter: PathBuf, dest: PathBuf, nzb_id: u64, subdir: &'static str| async move {
-            let working = inter.join(format!("nzb-{nzb_id}"));
-            let dest_sub = dest.join(subdir);
-            tokio::time::timeout(Duration::from_secs(5), async move {
-                loop {
-                    let mut contents = Vec::new();
-                    for dir in [&working, &dest_sub] {
-                        if let Ok(mut entries) = tokio::fs::read_dir(dir).await {
-                            while let Ok(Some(entry)) = entries.next_entry().await {
-                                if let Ok(content) =
-                                    tokio::fs::read_to_string(entry.path()).await
-                                    && !contents.contains(&content)
-                                {
-                                    contents.push(content);
-                                }
+    let collect_files = |inter: PathBuf, dest: PathBuf, nzb_id: u64, subdir: &'static str| async move {
+        let working = inter.join(format!("nzb-{nzb_id}"));
+        let dest_sub = dest.join(subdir);
+        tokio::time::timeout(Duration::from_secs(5), async move {
+            loop {
+                let mut contents = Vec::new();
+                for dir in [&working, &dest_sub] {
+                    if let Ok(mut entries) = tokio::fs::read_dir(dir).await {
+                        while let Ok(Some(entry)) = entries.next_entry().await {
+                            if let Ok(content) = tokio::fs::read_to_string(entry.path()).await
+                                && !contents.contains(&content)
+                            {
+                                contents.push(content);
                             }
                         }
                     }
-                    if !contents.is_empty() {
-                        contents.sort();
-                        return contents;
-                    }
-                    tokio::time::sleep(Duration::from_millis(50)).await;
                 }
-            })
-            .await
-        };
+                if !contents.is_empty() {
+                    contents.sort();
+                    return contents;
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        })
+        .await
+    };
 
-    let sample_files =
-        collect_files(inter_dir.clone(), dest_dir.clone(), nzb_id_1, "sample")
-            .await
-            .expect("files should be produced");
+    let sample_files = collect_files(inter_dir.clone(), dest_dir.clone(), nzb_id_1, "sample")
+        .await
+        .expect("files should be produced");
     assert!(
         sample_files.contains(&"ABCDEFGH".to_string()),
         "sample.nzb content ABCDEFGH should be present"
     );
 
-    let multifile_files =
-        collect_files(inter_dir.clone(), dest_dir.clone(), nzb_id_2, "multifile")
-            .await
-            .expect("multifile files should be produced");
+    let multifile_files = collect_files(inter_dir.clone(), dest_dir.clone(), nzb_id_2, "multifile")
+        .await
+        .expect("multifile files should be produced");
     assert!(
         multifile_files.contains(&"ABCD".to_string()),
         "multifile.nzb should contain alpha content ABCD"

@@ -1153,7 +1153,11 @@ impl DiskStateFlush {
                         dupe_mode: h.dupe_mode,
                         kind: h.kind as u32,
                         size: h.size,
-                        parameters: h.parameters.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+                        parameters: h
+                            .parameters
+                            .iter()
+                            .map(|(k, v)| (k.clone(), v.clone()))
+                            .collect(),
                         nzb_filename: h.nzb_filename.clone(),
                         category: h.category.clone(),
                         dest_dir: h.dest_dir.display().to_string(),

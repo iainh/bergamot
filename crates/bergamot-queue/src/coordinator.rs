@@ -1565,7 +1565,12 @@ impl QueueCoordinator {
                 dupe_key: h.nzb_info.dup_key.clone(),
                 dupe_score: h.nzb_info.dup_score,
                 dupe_mode: h.nzb_info.dup_mode,
-                parameters: h.nzb_info.parameters.iter().map(|p| (p.name.clone(), p.value.clone())).collect(),
+                parameters: h
+                    .nzb_info
+                    .parameters
+                    .iter()
+                    .map(|p| (p.name.clone(), p.value.clone()))
+                    .collect(),
                 nzb_filename: h.nzb_info.filename.clone(),
             })
             .collect()

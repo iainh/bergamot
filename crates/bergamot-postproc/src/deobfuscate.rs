@@ -11,9 +11,7 @@ fn looks_obfuscated(name: &str) -> bool {
         return false;
     }
     // Pure hex string (common obfuscation)
-    let is_hex = stem
-        .bytes()
-        .all(|b| b.is_ascii_hexdigit());
+    let is_hex = stem.bytes().all(|b| b.is_ascii_hexdigit());
     // Pure alphanumeric with no separators (e.g., base62/base64-style obfuscation)
     let is_alnum_no_sep = stem.bytes().all(|b| b.is_ascii_alphanumeric())
         && !stem.contains('.')
@@ -247,7 +245,10 @@ mod tests {
         assert!(result.is_some());
         let (from, to) = result.unwrap();
         assert_eq!(from, "cpbsfRk7RFtu5ghi4nmTFDem19hjfPL6.mkv");
-        assert_eq!(to, "My.Show.S02E05.Episode.Title.1080p.WEB-DL.DDP5.1.H.264-GRP.mkv");
+        assert_eq!(
+            to,
+            "My.Show.S02E05.Episode.Title.1080p.WEB-DL.DDP5.1.H.264-GRP.mkv"
+        );
         assert!(dir.path().join(&to).exists());
         assert!(!dir.path().join(&from).exists());
     }
@@ -268,7 +269,10 @@ mod tests {
         assert!(result.is_some());
         let (from, to) = result.unwrap();
         assert_eq!(from, "cpbsfRk7RFtu5ghi4nmTFDem19hjfPL6.mkv");
-        assert_eq!(to, "My.Show.S02E05.Episode.Title.1080p.WEB-DL.DDP5.1.H.264-GRP.mkv");
+        assert_eq!(
+            to,
+            "My.Show.S02E05.Episode.Title.1080p.WEB-DL.DDP5.1.H.264-GRP.mkv"
+        );
         assert!(dir.path().join(&to).exists());
     }
 
@@ -280,11 +284,7 @@ mod tests {
             b"video",
         )
         .unwrap();
-        std::fs::write(
-            dir.path().join("xYzAbCdEfGhIjKlMnOpQrStUv.srt"),
-            b"subs",
-        )
-        .unwrap();
+        std::fs::write(dir.path().join("xYzAbCdEfGhIjKlMnOpQrStUv.srt"), b"subs").unwrap();
 
         let result = deobfuscate_by_nzb_name(dir.path(), "My.Show.S01E01");
         assert!(result.is_none());

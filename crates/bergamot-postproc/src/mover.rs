@@ -167,6 +167,13 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(dst_dir.path().join("tv").join("My.Show.S01E01").join("file.txt").exists());
+        assert!(
+            dst_dir
+                .path()
+                .join("tv")
+                .join("My.Show.S01E01")
+                .join("file.txt")
+                .exists()
+        );
     }
 }
